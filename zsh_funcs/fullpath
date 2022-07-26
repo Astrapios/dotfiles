@@ -1,0 +1,9 @@
+# find file names with given extension
+fullpath () {
+    readonly port=${1:?"file extension must be specified"}
+    NONEMPTY=$(find . -name "*.$1")
+    if [[ -n $NONEMPTY ]]
+    then 
+        find . -name "*.$1" | xargs readlink -f $OUTPUT
+    fi
+}

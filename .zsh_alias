@@ -1,0 +1,25 @@
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    #alias dir='dir --color=auto'
+    #alias vdir='vdir --color=auto'
+
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+# git alias
+alias gs='git status'
+alias gch='git checkout'
+alias gl='git log'
+alias glo='git log --oneline'
+alias gb='git branch'
+alias -- -="cd -"
+
+# conda alias
+alias condaenv='conda activate'
+
+# misc
+alias delnewline='tr "\n" " "'
