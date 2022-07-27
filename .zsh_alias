@@ -19,7 +19,7 @@ alias gb='git branch'
 alias -- -="cd -"
 
 # conda alias
-alias condaenv='conda activate'
+alias condact='conda activate'
 
 # misc
 alias delnewline='tr "\n" " "'
