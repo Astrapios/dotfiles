@@ -90,3 +90,6 @@ setopt auto_cd
 autoload -Uz fullpath
 
 export PATH="$PATH:$HOME/bin/"
+
+# Enable vim mode
+bindkey -v
