@@ -4,36 +4,15 @@
 # source antidote
 . ~/.antidote/antidote.zsh
 
-zstyle ':autocomplete:*' default-context ''
-# '': Start each new command line with normal autocompletion.
-# history-incremental-search-backward: Start in live history search mode.
-
+# zsh autocompletion settings
 zstyle ':autocomplete:*' min-input 2  # int
 # Wait until this many characters have been typed, before showing completions.
-
-zstyle ':autocomplete:*' ignored-input '' # extended glob pattern
-# '':     Always show completions.
-# '..##': Don't show completions when the input consists of two or more dots.
-
-zstyle ':autocomplete:*' list-lines 16  # int
-# If there are fewer than this many lines below the prompt, move the prompt up
-# to make room for showing this many lines of completions (approximately).
-
-zstyle ':autocomplete:history-search:*' list-lines 16  # int
-# Show this many history lines when pressing ↑.
-
-zstyle ':autocomplete:history-incremental-search-*:*' list-lines 16  # int
-# Show this many history lines when pressing ⌃R or ⌃S.
 
 zstyle ':autocomplete:*' recent-dirs zsh-z
 # cdr:  Use Zsh's `cdr` function to show recent directories as completions.
 # no:   Don't show recent directories.
 # zsh-z|zoxide|z.lua|z.sh|autojump|fasd: Use this instead (if installed).
 # ⚠️ NOTE: This setting can NOT be changed at runtime.
-
-zstyle ':autocomplete:*' insert-unambiguous no
-# no:  Tab inserts the top completion.
-# yes: Tab first inserts a substring common to all listed completions, if any.
 
 zstyle ':autocomplete:*' widget-style menu-select
 # complete-word: (Shift-)Tab inserts the top (bottom) completion.
@@ -47,6 +26,9 @@ zstyle ':autocomplete:*' fzf-completion yes
 # ⚠️ NOTE: This setting can NOT be changed at runtime and requires that you
 # have installed Fzf's shell extensions.
 
+# Autosuggestion settings
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+
 antidote load
 
 # load zsh prompt
@@ -57,6 +39,9 @@ export VISUAL='vim'
 
 # THIS FIXES CTRL P, CTRL N COMMAND HISTORY SCROLLING IN TMUX
 bindkey -e
+
+# Enable vi mode
+bindkey -v
 
 # MAKE cd BEHAVE LIKE pushd, ALLOWING MOVING BACK TO PREVIOUS DIRECTORY USING popd
 setopt auto_pushd
@@ -90,6 +75,3 @@ setopt auto_cd
 autoload -Uz fullpath
 
 export PATH="$PATH:$HOME/bin/"
-
-# Enable vim mode
-bindkey -v
