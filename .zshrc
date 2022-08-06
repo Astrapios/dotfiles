@@ -40,8 +40,10 @@ export VISUAL='vim'
 # THIS FIXES CTRL P, CTRL N COMMAND HISTORY SCROLLING IN TMUX
 bindkey -e
 
-# Enable vi mode
-bindkey -v
+# Enable loading editor
+autoload edit-command-line
+zle -N edit-command-line
+bindkey '^Xe' edit-command-line
 
 # MAKE cd BEHAVE LIKE pushd, ALLOWING MOVING BACK TO PREVIOUS DIRECTORY USING popd
 setopt auto_pushd
