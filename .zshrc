@@ -8,6 +8,10 @@
 zstyle ':autocomplete:*' min-input 2  # int
 # Wait until this many characters have been typed, before showing completions.
 
+zstyle ':autocomplete:*' list-lines 8  # int
+# If there are fewer than this many lines below the prompt, move the prompt up
+# to make room for showing this many lines of completions (approximately).
+
 zstyle ':autocomplete:*' recent-dirs zsh-z
 # cdr:  Use Zsh's `cdr` function to show recent directories as completions.
 # no:   Don't show recent directories.
@@ -26,10 +30,15 @@ zstyle ':autocomplete:*' fzf-completion yes
 # ⚠️ NOTE: This setting can NOT be changed at runtime and requires that you
 # have installed Fzf's shell extensions.
 
+zstyle ':completion:*' list-prompt   ''
+zstyle ':completion:*' select-prompt ''
+
 # Autosuggestion settings
 ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
 
 antidote load
+
+autoload -Uz compinit && compinit
 
 # load zsh prompt
 autoload -Uz promptinit && promptinit && prompt pure
