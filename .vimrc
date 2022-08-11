@@ -150,9 +150,23 @@ set foldmethod=marker
 " Backup and swap file generation folder. Separated by ',' and listed as order
 " of trial. These folders have to actually exist for vim to generate file
 " there.
+let tmppath = expand('~/.vim/vimtmp/')    " create the temp file storage dir
+" if the location does not exist.
+if !isdirectory(tmppath)
+    call system('mkdir -p ' . tmppath)
+endif    " point Vim to the defined undo directory.
+
 set backup
-set backupdir=~/.vim/vimtmp,/private/tmp,.
-set directory=~/.vim/vimtmp,/private/tmp,.
+set backupdir=tmppath,/private/tmp,.
+set directory=tmppath,/private/tmp,.
+
+" Persistent undofile
+" guard for distributions lacking the 'persistent_undo' feature.
+if has('persistent_undo')
+    " define a path to store persistent undo files.
+    set undodir=tmppath,/private/tmp,.    " finally, enable undo persistence.
+    set undofile
+endif
 
 set background=dark
 set hlsearch
