@@ -157,14 +157,14 @@ if !isdirectory(tmppath)
 endif    " point Vim to the defined undo directory.
 
 set backup
-set backupdir=tmppath,/private/tmp,.
-set directory=tmppath,/private/tmp,.
+execute "set backupdir=".tmppath
+execute "set directory=".tmppath
 
 " Persistent undofile
 " guard for distributions lacking the 'persistent_undo' feature.
 if has('persistent_undo')
     " define a path to store persistent undo files.
-    set undodir=tmppath,/private/tmp,.    " finally, enable undo persistence.
+    execute "set undodir=".tmppath
     set undofile
 endif
 
