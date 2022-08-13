@@ -1,44 +1,13 @@
+# need to initilaize compinit first for fzf-tab to work
+autoload -Uz compinit && compinit
+
 # clone antidote if necessary
 [[ -e ~/.antidote ]] || git clone https://github.com/mattmc3/antidote.git ~/.antidote
 
 # source antidote
 . ~/.antidote/antidote.zsh
 
-# zsh autocompletion settings
-zstyle ':autocomplete:*' min-input 2  # int
-# Wait until this many characters have been typed, before showing completions.
-
-zstyle ':autocomplete:*' list-lines 8  # int
-# If there are fewer than this many lines below the prompt, move the prompt up
-# to make room for showing this many lines of completions (approximately).
-
-zstyle ':autocomplete:*' recent-dirs zsh-z
-# cdr:  Use Zsh's `cdr` function to show recent directories as completions.
-# no:   Don't show recent directories.
-# zsh-z|zoxide|z.lua|z.sh|autojump|fasd: Use this instead (if installed).
-# ⚠️ NOTE: This setting can NOT be changed at runtime.
-
-zstyle ':autocomplete:*' widget-style menu-select
-# complete-word: (Shift-)Tab inserts the top (bottom) completion.
-# menu-complete: Press again to cycle to next (previous) completion.
-# menu-select:   Same as `menu-complete`, but updates selection in menu.
-# ⚠️ NOTE: This setting can NOT be changed at runtime.
-
-zstyle ':autocomplete:*' fzf-completion yes
-# no:  Tab uses Zsh's completion system only.
-# yes: Tab first tries Fzf's completion, then falls back to Zsh's.
-# ⚠️ NOTE: This setting can NOT be changed at runtime and requires that you
-# have installed Fzf's shell extensions.
-
-zstyle ':completion:*' list-prompt   ''
-zstyle ':completion:*' select-prompt ''
-
-# Autosuggestion settings
-ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
-
 antidote load
-
-autoload -Uz compinit && compinit
 
 # load zsh prompt
 autoload -Uz promptinit && promptinit && prompt pure

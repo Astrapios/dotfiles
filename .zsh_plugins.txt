@@ -2,7 +2,8 @@
 sindresorhus/pure kind:fpath
 
 # plugins
-marlonrichert/zsh-autocomplete
+#marlonrichert/zsh-autocomplete
+Aloxaf/fzf-tab 
 zsh-users/zsh-autosuggestions
 zsh-users/zsh-syntax-highlighting
 ohmyzsh/ohmyzsh path:plugins/z
