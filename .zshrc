@@ -1,3 +1,6 @@
+# make osx completion case insensitive
+zstyle ':completion:*' matcher-list '' 'm:{a-zA-Z}={A-Za-z}' 'r:|=*' 'l:|=* r:|=*'
+
 # need to initilaize compinit first for fzf-tab to work
 autoload -Uz compinit && compinit
 
