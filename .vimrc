@@ -5,10 +5,17 @@ set nocompatible
 
 " install vim-plug if it does not exist
 if empty(glob('~/.vim/autoload/plug.vim'))
-  silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
-    \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-  autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
+    if has('nvim')
+      silent !curl -fLo "${XDG_DATA_HOME:-$HOME/.local/share}"/nvim/site/autoload/plug.vim --create-dirs \
+       https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+      autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
+    else
+      silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
+        \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+      autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
+  endif
 endif
+
 call plug#begin('~/.vim/plugins')
 
 "-------------------------------------------------
@@ -27,7 +34,7 @@ endif
 " action on quickfix lists. 'update' saves files that are changed.
 
 " FZF
-Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 
 "-------------------------------------------------
 "|        Syntax Check and Autocompletion        |
@@ -278,6 +285,9 @@ nnoremap <leader>l :set list!<CR>
 
 " change to upper case while typing
 inoremap <c-u> <esc>viwUea
+
+" Fuzzy file finder
+nnoremap <silent> <leader>f :FZF<cr>
 
 " Toggle NERDTree and Tagbar
 noremap <C-n> :NERDTreeToggle<CR>
