@@ -107,6 +107,9 @@ Plug 'mtdl9/vim-log-highlighting'
 " Navigate between vim and tmux
 Plug 'christoomey/vim-tmux-navigator'
 
+" Allow system register copy in ssh -> tmux -> vim
+Plug 'ojroques/vim-oscyank', {'branch': 'main'}
+
 " Automatic parenthesis, quotes, etc. completion
 Plug 'Raimondi/delimitMate'
 
@@ -142,7 +145,7 @@ set updatetime=100
 set printoptions=paper:letter,number:n,left:1in,right:1in,top:1in:bottom:1in
 
 " access system clipboard
-set clipboard=unnamed
+set clipboard=unnamedplus
 
 " ignorecase for search
 set ignorecase 
@@ -325,4 +328,14 @@ noremap <leader>gb :Git Blame<CR>
 
 " this fixes crontab edit in mac OSX
 au BufEnter /private/tmp/crontab.* setl backupcopy=yes
+
+" ssh, tmux, vim register settings
+nmap <leader>c <Plug>OSCYankOperator
+nmap <leader>cc <leader>c_
+vmap <leader>c <Plug>OSCYankVisual
+
+autocmd TextYankPost *
+    \ if v:event.operator is 'y' && v:event.regname is '' |
+    \ execute 'OSCYankRegister "' |
+    \ endif
 " }}}
