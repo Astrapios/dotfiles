@@ -38,6 +38,11 @@ export LSCOLORS=GxBxhxDxfxhxhxhxhxcxcx
 export LS_COLORS="di=1;36:ln=1;31:so=37:pi=1;33:ex=35:bd=37:cd=37:su=37:sg=37:tw=32:ow=32"
 zstyle ':completion:*:default' list-colors ${(s.:.)LS_COLORS}
 
+# make slash not a part of the word by removing it
+# from WRODCHARS variable
+# original WORDCHARS='*?_-.[]~=/&;!#$%^(){}<>'
+WORDCHARS='*?_-.[]~=&;!#$%^(){}<>'
+
 # 10 ms for key time sequences, reduces ESC key delays
 KEYTIMEOUT=1
 
