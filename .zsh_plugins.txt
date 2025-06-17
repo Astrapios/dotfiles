@@ -8,4 +8,5 @@ zsh-users/zsh-autosuggestions
 zsh-users/zsh-syntax-highlighting
 agkozak/zsh-z
 ohmyzsh/ohmyzsh path:plugins/vi-mode
+ohmyzsh/ohmyzsh path:plugins/aws
 thewtex/tmux-mem-cpu-load
