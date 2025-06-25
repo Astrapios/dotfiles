@@ -25,7 +25,8 @@ echo Installing tmux config...
 ln -sf $SCRIPT_PATH/.tmux.conf ~/.tmux.conf
 
 echo Installing tmux plugin manager...
-[ ! -d $HOME/.tmux/plugins/tpm ] && git clone https://github.com/tmux-plugins/tpm $HOME/.tmux/plugins/tpm
+[ ! -d $HOME/.tmux/plugins/tpm ] && git clone https://github.com/tmux-plugins/tpm $HOME/.tmux/plugins/tpm \
+    && $HOME/.tmux/plugins/tpm/bin/install_plugins
 
 # Misc
 echo installing fzf...
