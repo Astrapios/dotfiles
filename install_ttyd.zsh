@@ -57,7 +57,7 @@ After=network.target
 Type=simple
 User=$CURRENT_USER
 # Configuration applied here:
-ExecStart=/usr/local/bin/ttyd -p $TTYD_PORT -c $TTYD_USER:$TTYD_PASS -W tmux new-session -A -s main
+ExecStart=/usr/local/bin/ttyd -t allowProposedApi=true -t enableMetaKey=true -p $TTYD_PORT -c $TTYD_USER:$TTYD_PASS -W tmux new-session -A -s main
 Restart=always
 RestartSec=5
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
