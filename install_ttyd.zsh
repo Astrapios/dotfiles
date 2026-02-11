@@ -3,7 +3,6 @@
 # --- Configuration ---
 # You can pre-set these or leave them blank to be prompted
 DEFAULT_PORT=2719
-DEFAULT_USER="admin"
 
 # 1. Detect Architecture and Latest Version
 ARCH=$(uname -m)
@@ -22,19 +21,6 @@ echo "--- ttyd Configuration ---"
 echo -n "Enter Port [$DEFAULT_PORT]: "
 read TTYD_PORT
 TTYD_PORT=${TTYD_PORT:-$DEFAULT_PORT}
-
-echo -n "Enter Username [$DEFAULT_USER]: "
-read TTYD_USER
-TTYD_USER=${TTYD_USER:-$DEFAULT_USER}
-
-echo -n "Enter Password: "
-read -s TTYD_PASS
-echo ""
-
-if [[ -z "$TTYD_PASS" ]]; then
-    echo "❌ Error: Password cannot be empty."
-    exit 1
-fi
 
 # 3. Install Dependencies & ttyd
 echo "--- Installing Dependencies & ttyd $LATEST_VERSION ---"
@@ -57,7 +43,7 @@ After=network.target
 Type=simple
 User=$CURRENT_USER
 # Configuration applied here:
-ExecStart=/usr/local/bin/ttyd -t allowProposedApi=true -t enableMetaKey=true -p $TTYD_PORT -c $TTYD_USER:$TTYD_PASS -W tmux new-session -A -s main
+ExecStart=/usr/local/bin/ttyd -t allowProposedApi=true -t macOptionIsMeta=true -p $TTYD_PORT -W tmux new-session -A -s main
 Restart=always
 RestartSec=5
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -74,6 +60,5 @@ sudo systemctl restart ttyd
 echo "------------------------------------------------"
 echo "✅ Setup Complete!"
 echo "URL: http://$(curl -s ifconfig.me):$TTYD_PORT"
-echo "User: $TTYD_USER"
 echo "------------------------------------------------"
 echo "⚠️  Reminder: Update your EC2 Security Group to allow TCP port $TTYD_PORT."
