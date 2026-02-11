@@ -1,8 +1,9 @@
 #!/bin/zsh
 
 # --- Configuration ---
-# You can pre-set these or leave them blank to be prompted
 DEFAULT_PORT=2719
+YES=false
+[[ "$1" == "-y" ]] && YES=true
 
 # 1. Detect Architecture and Latest Version
 ARCH=$(uname -m)
@@ -17,10 +18,14 @@ if [[ -z "$LATEST_VERSION" ]]; then
 fi
 
 # 2. Collect Configuration
-echo "--- ttyd Configuration ---"
-echo -n "Enter Port [$DEFAULT_PORT]: "
-read TTYD_PORT
-TTYD_PORT=${TTYD_PORT:-$DEFAULT_PORT}
+if $YES; then
+    TTYD_PORT=$DEFAULT_PORT
+else
+    echo "--- ttyd Configuration ---"
+    echo -n "Enter Port [$DEFAULT_PORT]: "
+    read TTYD_PORT
+    TTYD_PORT=${TTYD_PORT:-$DEFAULT_PORT}
+fi
 
 # 3. Install Dependencies & ttyd
 echo "--- Installing Dependencies & ttyd $LATEST_VERSION ---"
