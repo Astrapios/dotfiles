@@ -37,6 +37,41 @@ mkdir -p "$CODE_SERVER_USER_DIR"
 ln -sf $SCRIPT_PATH/code-server/settings.json "$CODE_SERVER_USER_DIR/settings.json"
 ln -sf $SCRIPT_PATH/code-server/keybindings.json "$CODE_SERVER_USER_DIR/keybindings.json"
 
+# Claude Code / Telegram hooks
+echo Installing Claude Code hooks...
+mkdir -p ~/bin ~/.claude ~/.config
+
+# Pixi + global python with requests
+if ! command -v pixi &> /dev/null; then
+    echo "  installing pixi..."
+    curl -fsSL https://pixi.sh/install.sh | bash
+fi
+echo "  installing global python environment..."
+pixi global install -e py --expose python python --with requests --force-reinstall
+
+# Hook script + Claude settings symlinks
+ln -sf $SCRIPT_PATH/scripts/tg-hook ~/bin/tg-hook
+ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
+
+# Telegram credentials
+if [ ! -f ~/.config/tg_hook.env ]; then
+    if $YES; then
+        echo "  skipping Telegram credentials (set manually in ~/.config/tg_hook.env)"
+    else
+        echo -n "  Telegram Bot Token (or Enter to skip): "
+        read tg_token
+        if [ -n "$tg_token" ]; then
+            echo -n "  Telegram Chat ID: "
+            read tg_chat
+            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n" "$tg_token" "$tg_chat" > ~/.config/tg_hook.env
+            chmod 600 ~/.config/tg_hook.env
+            echo "  saved to ~/.config/tg_hook.env"
+        fi
+    fi
+else
+    echo "  Telegram credentials already configured"
+fi
+
 # Misc
 echo Installing fzf...
 if [ ! -d $HOME/.fzf ]
