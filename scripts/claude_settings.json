@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_TG_HOOKS": "1"
+  },
   "hooks": {
     "Notification": [
       {
@@ -43,7 +46,5 @@
       }
     ]
   },
-  "env": {
-    "CLAUDE_TG_HOOKS": "1"
-  }
+  "skipDangerousModePermissionPrompt": true
 }

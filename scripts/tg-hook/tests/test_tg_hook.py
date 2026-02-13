@@ -298,10 +298,11 @@ class TestRouteToPane(unittest.TestCase):
     @patch("subprocess.run")
     def test_permission_allow(self, mock_run):
         """Permission prompt — 'y' sends Enter (option 1)."""
-        prompt = {"type": "permission", "pane": "%20", "num_options": 3, "ts": 0}
+        prompt = {"pane": "%20", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "yes": 1, "allow": 1, "n": 3, "no": 3, "deny": 3}}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "y")
-        self.assertIn("Allowed", result)
+        self.assertIn("Selected option 1", result)
         cmd_str = mock_run.call_args[0][0][2]  # bash -c "..."
         self.assertIn("Enter", cmd_str)
         self.assertNotIn("Down", cmd_str)  # option 1, no Down needed
@@ -309,17 +310,19 @@ class TestRouteToPane(unittest.TestCase):
     @patch("subprocess.run")
     def test_permission_deny(self, mock_run):
         """Permission prompt — 'n' navigates to last option."""
-        prompt = {"type": "permission", "pane": "%20", "num_options": 3, "ts": 0}
+        prompt = {"pane": "%20", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "yes": 1, "allow": 1, "n": 3, "no": 3, "deny": 3}}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "n")
-        self.assertIn("Denied", result)
+        self.assertIn("Selected option 3", result)
         cmd_str = mock_run.call_args[0][0][2]
         self.assertEqual(cmd_str.count("Down"), 2)  # n=3, so 2 Downs
 
     @patch("subprocess.run")
     def test_numbered_selection(self, mock_run):
         """Digit reply navigates with Down keys."""
-        prompt = {"type": "permission", "pane": "%20", "num_options": 3, "ts": 0}
+        prompt = {"pane": "%20", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "n": 3}}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "2")
         self.assertIn("Selected option 2", result)
@@ -331,7 +334,7 @@ class TestRouteToPane(unittest.TestCase):
     @patch("subprocess.run")
     def test_question_free_text(self, mock_run):
         """Free text on question prompt — navigates to Other, types, Enter."""
-        prompt = {"type": "question", "pane": "%20", "num_options": 2, "ts": 0}
+        prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "my custom answer")
         self.assertIn("Answered", result)
@@ -352,7 +355,7 @@ class TestRouteToPane(unittest.TestCase):
     @patch("subprocess.run")
     def test_question_numbered(self, mock_run):
         """Digit reply on question selects that option."""
-        prompt = {"type": "question", "pane": "%20", "num_options": 2, "ts": 0}
+        prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "1")
         self.assertIn("Selected option 1", result)
@@ -360,10 +363,19 @@ class TestRouteToPane(unittest.TestCase):
     @patch("subprocess.run")
     def test_question_extra_options(self, mock_run):
         """Question allows selecting n+1 (Type answer) and n+2 (Chat)."""
-        prompt = {"type": "question", "pane": "%20", "num_options": 2, "ts": 0}
+        prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "4")
         self.assertIn("Selected option 4", result)  # n+2 = 4
+
+    @patch("subprocess.run")
+    def test_unknown_text_defaults_to_option_1(self, mock_run):
+        """Prompt with no free_text and no matching shortcut defaults to option 1."""
+        prompt = {"pane": "%20", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "n": 3}}
+        with patch.object(tg, "load_active_prompt", return_value=prompt):
+            result = tg.route_to_pane(self.pane, self.win_idx, "whatever")
+        self.assertIn("Selected option 1", result)
 
     @patch("subprocess.run")
     def test_message_underscore_safe(self, mock_run):
@@ -477,7 +489,7 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("2. B", msg)
         self.assertIn("3. Type your answer", msg)
         self.assertIn("4. Chat about this", msg)
-        mock_save.assert_called_once_with("w4", "question", "%20", 2)
+        mock_save.assert_called_once_with("w4", "%20", total=4, free_text_at=2)
 
     def test_skips_underscore_files(self):
         """Signal processing should skip _prefixed state files."""
@@ -565,6 +577,90 @@ class TestCmdHook(unittest.TestCase):
 
 
 import time  # needed for _write_signal
+
+
+class TestComputeNewLines(unittest.TestCase):
+    """Test _compute_new_lines diff algorithm."""
+
+    def test_empty_old_returns_all_new(self):
+        result = tg._compute_new_lines([], ["a", "b", "c"])
+        self.assertEqual(result, ["a", "b", "c"])
+
+    def test_identical_returns_empty(self):
+        lines = ["a", "b", "c"]
+        result = tg._compute_new_lines(lines, lines[:])
+        self.assertEqual(result, [])
+
+    def test_scroll_down_overlap(self):
+        old = ["a", "b", "c", "d", "e"]
+        new = ["c", "d", "e", "f", "g"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, ["f", "g"])
+
+    def test_single_line_scroll(self):
+        old = ["a", "b", "c"]
+        new = ["b", "c", "d"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, ["d"])
+
+    def test_in_place_change_skipped(self):
+        """Lines that changed in place (e.g. timers) are not reported as new."""
+        old = ["a", "progress 62%", "b"]
+        new = ["a", "progress 88%", "b"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, [])
+
+    def test_scroll_with_in_place_change(self):
+        """Scrolling + in-place change: only inserted lines returned."""
+        old = ["a", "b", "progress 62%", "c", "d"]
+        new = ["b", "progress 88%", "c", "d", "e"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, ["e"])
+
+    def test_complete_change_returns_empty(self):
+        """All-replace (no common content) returns nothing — use /status instead."""
+        old = ["a", "b"]
+        new = ["x", "y", "z"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, [])
+
+
+class TestFocusState(unittest.TestCase):
+    """Test focus state file operations."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_focus"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_save_and_load_roundtrip(self):
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        state = tg._load_focus_state()
+        self.assertEqual(state, {"wid": "4", "pane": "0:4.0", "project": "myproj"})
+
+    def test_load_missing_returns_none(self):
+        self.assertIsNone(tg._load_focus_state())
+
+    def test_clear_removes_file(self):
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._clear_focus_state()
+        self.assertIsNone(tg._load_focus_state())
+
+    def test_survives_clear_signals_without_state(self):
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._clear_signals(include_state=False)
+        self.assertIsNotNone(tg._load_focus_state())
+
+    def test_cleared_by_clear_signals_with_state(self):
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._clear_signals(include_state=True)
+        self.assertIsNone(tg._load_focus_state())
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ Signal-based architecture:
   Listen is the only process that talks to Telegram.
   When listen sees a signal, it captures the tmux pane and sends that.
 """
+import difflib
 import os
 import re
 import sys
@@ -186,12 +187,15 @@ def get_pane_project(pane: str) -> str:
 
 
 def _capture_pane(pane: str, num_lines: int = 20) -> str:
-    """Capture recent lines from a tmux pane."""
+    """Capture the last num_lines from a tmux pane."""
     try:
         result = subprocess.run(
             ["tmux", "capture-pane", "-t", pane, "-p", "-S", f"-{num_lines}"],
             capture_output=True, text=True, timeout=5,
         )
+        lines = result.stdout.splitlines()
+        if len(lines) > num_lines:
+            return "\n".join(lines[-num_lines:]) + "\n"
         return result.stdout
     except Exception:
         return ""
@@ -265,12 +269,27 @@ def _clear_signals(include_state: bool = False):
             pass
 
 
-def save_active_prompt(wid: str, prompt_type: str, pane: str, num_options: int):
-    """Save active prompt state so listen can route replies with arrow keys."""
+def save_active_prompt(wid: str, pane: str, total: int,
+                       shortcuts: dict[str, int] | None = None,
+                       free_text_at: int | None = None):
+    """Save active prompt state so listen can route replies with arrow keys.
+
+    Args:
+        wid: Window ID (e.g. "w4").
+        pane: tmux pane target.
+        total: Total navigable options.
+        shortcuts: Text aliases mapped to option numbers (e.g. {"y": 1, "n": 3}).
+        free_text_at: Option index to navigate to for free-text input (Down N times), or None.
+    """
     os.makedirs(SIGNAL_DIR, exist_ok=True)
     path = os.path.join(SIGNAL_DIR, f"_active_prompt_{wid}.json")
+    state = {"pane": pane, "total": total, "ts": time.time()}
+    if shortcuts:
+        state["shortcuts"] = shortcuts
+    if free_text_at is not None:
+        state["free_text_at"] = free_text_at
     with open(path, "w") as f:
-        json.dump({"type": prompt_type, "pane": pane, "num_options": num_options, "ts": time.time()}, f)
+        json.dump(state, f)
 
 
 def load_active_prompt(wid: str) -> dict | None:
@@ -285,6 +304,33 @@ def load_active_prompt(wid: str) -> dict | None:
         return state
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _save_focus_state(wid: str, pane: str, project: str):
+    """Save focus target so listen monitors this pane."""
+    os.makedirs(SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(SIGNAL_DIR, "_focus.json")
+    with open(path, "w") as f:
+        json.dump({"wid": wid, "pane": pane, "project": project}, f)
+
+
+def _load_focus_state() -> dict | None:
+    """Load focus state. Returns None if missing."""
+    path = os.path.join(SIGNAL_DIR, "_focus.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _clear_focus_state():
+    """Remove focus state file."""
+    path = os.path.join(SIGNAL_DIR, "_focus.json")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
@@ -356,8 +402,9 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
     return header, content, options
 
 
-def process_signals() -> str | None:
-    """Process pending signal files. Returns last window index (e.g. '4') or None."""
+def process_signals(focused_wid: str | None = None) -> str | None:
+    """Process pending signal files. Returns last window index (e.g. '4') or None.
+    If focused_wid is set, stop signals for that window are suppressed."""
     if not os.path.isdir(SIGNAL_DIR):
         return None
 
@@ -392,12 +439,15 @@ def process_signals() -> str | None:
             project = get_pane_project(pane) or project
 
         if event == "stop":
-            content = ""
-            if pane:
-                time.sleep(4)
-                content = _capture_pane(pane, 30)
-            cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
-            tg_send(f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```")
+            if focused_wid and wid.lstrip("w") == focused_wid:
+                pass  # Focus is monitoring this pane — skip stop notification
+            else:
+                content = ""
+                if pane:
+                    time.sleep(4)
+                    content = _capture_pane(pane, 30)
+                cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
+                tg_send(f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```")
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
@@ -416,7 +466,10 @@ def process_signals() -> str | None:
                 title = header or "needs permission"
                 body = f"\n\n```\n{content[:2000]}\n```" if content else ""
                 tg_send(f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}")
-            save_active_prompt(wid, "permission", pane, max_opt or 3)
+            n = max_opt or 3
+            save_active_prompt(wid, pane, total=n,
+                               shortcuts={"y": 1, "yes": 1, "allow": 1,
+                                          "n": n, "no": n, "deny": n})
 
         elif event == "question":
             questions = signal.get("questions", [])
@@ -438,7 +491,8 @@ def process_signals() -> str | None:
                     parts.append(f"  {n+2}. Chat about this")
                     total_opts = n
                 tg_send("\n".join(parts))
-                save_active_prompt(wid, "question", pane, total_opts)
+                save_active_prompt(wid, pane, total=total_opts + 2,
+                                   free_text_at=total_opts)
             else:
                 tg_send(f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)")
 
@@ -473,7 +527,16 @@ def _filter_noise(raw: str) -> list[str]:
             continue
         if re.match(r'^✻ \w+ for ', s):
             continue
-        filtered.append(line)
+        # Volatile: spinner/status with timer (e.g. "✢ Coalescing… (6m 8s · …)")
+        if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
+            continue
+        # Volatile: overflow line count with timer (e.g. "+12499 more lines (5m 1s …)")
+        if re.match(r'^\+\d+ more lines \(', s):
+            continue
+        # Background hint
+        if s.startswith('ctrl+') and 'background' in s:
+            continue
+        filtered.append(line.rstrip())
     return filtered
 
 
@@ -504,65 +567,82 @@ def clean_pane_status(raw: str) -> str:
     return "\n".join(filtered).strip()
 
 
+def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
+    """Find genuinely new (inserted) lines between two captures.
+
+    Uses SequenceMatcher to handle scrolling offsets and in-place changes:
+    - 'insert': new lines that didn't exist before → included
+    - 'replace': lines changed in place (timers, progress) → skipped
+    - 'delete': lines scrolled off the top → skipped
+    - 'equal': unchanged lines → skipped
+    """
+    if not old_lines:
+        return new_lines
+    sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
+    new = []
+    for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
+        if tag == "insert":
+            new.extend(new_lines[j1:j2])
+    return new
+
+
 # ── Pane routing ─────────────────────────────────────────────────────────────
+
+def _select_option(pane: str, n: int):
+    """Navigate to option n (1-based) and press Enter in a tmux pane."""
+    p = shlex.quote(pane)
+    parts = []
+    if n > 1:
+        nav = " ".join(["Down"] * (n - 1))
+        parts.append(f"tmux send-keys -t {p} {nav}")
+        parts.append("sleep 0.1")
+    parts.append(f"tmux send-keys -t {p} Enter")
+    subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
+
 
 def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     """Route a message to a tmux pane, handling active prompts.
 
-    If there's an active question/permission prompt, translates the reply
-    into arrow-key navigation + Enter. Otherwise sends raw text.
+    If there's an active prompt, translates the reply into arrow-key
+    navigation + Enter. Otherwise sends raw text.
     Returns a confirmation message for Telegram.
     """
     wid = f"w{win_idx}"
     prompt = load_active_prompt(wid)
 
     if prompt:
-        num_opts = prompt.get("num_options", 0)
-        prompt_type = prompt.get("type", "")
+        total = prompt.get("total", 0)
+        shortcuts = prompt.get("shortcuts", {})
+        free_text_at = prompt.get("free_text_at")
         reply = text.strip()
-        _log("route", f"prompt found: type={prompt_type}, num_opts={num_opts}, reply={reply!r}, pane={pane}")
+        _log("route", f"prompt found: total={total}, reply={reply!r}, pane={pane}")
 
-        p = shlex.quote(pane)
+        prompt_pane = prompt.get("pane", pane)
+
+        # Shortcut match (e.g. "y" → 1, "n" → 3)
+        if reply.lower() in shortcuts:
+            n = shortcuts[reply.lower()]
+            _select_option(prompt_pane, n)
+            return f"📨 Selected option {n} in `{wid}`"
 
         # Numbered selection
         if reply.isdigit():
             n = int(reply)
-            total = num_opts + 2 if prompt_type == "question" else num_opts
             if 1 <= n <= total:
-                nav = " ".join(["Down"] * (n - 1))
-                parts = [f"tmux send-keys -t {p} {nav}"] if n > 1 else []
-                if n > 1:
-                    parts.append("sleep 0.1")
-                parts.append(f"tmux send-keys -t {p} Enter")
-                subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
+                _select_option(prompt_pane, n)
                 return f"📨 Selected option {n} in `{wid}`"
 
-        # Free text for questions → navigate to "Other", type, submit
-        if prompt_type == "question":
-            prompt_pane = prompt.get("pane", pane)
+        # Free text → navigate to "Other" option, type, submit
+        if free_text_at is not None:
             pp = shlex.quote(prompt_pane)
-            nav = " ".join(["Down"] * num_opts)
+            nav = " ".join(["Down"] * free_text_at)
             cmd = f"tmux send-keys -t {pp} {nav} && sleep 0.1 && tmux send-keys -t {pp} -l {shlex.quote(reply)} && tmux send-keys -t {pp} Enter"
             subprocess.run(["bash", "-c", cmd], timeout=10)
             return f"📨 Answered in `{wid}`:\n`{reply[:500]}`"
 
-        # y/n shortcuts for permission
-        if prompt_type == "permission":
-            if reply.lower() in ("y", "yes", "allow"):
-                n = 1
-            elif reply.lower() in ("n", "no", "deny"):
-                n = num_opts
-            else:
-                n = 1  # default to allow
-            parts = []
-            if n > 1:
-                nav = " ".join(["Down"] * (n - 1))
-                parts.append(f"tmux send-keys -t {p} {nav}")
-                parts.append("sleep 0.1")
-            parts.append(f"tmux send-keys -t {p} Enter")
-            subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
-            label = "Allowed" if n == 1 else "Denied"
-            return f"📨 {label} in `{wid}`"
+        # Prompt with no free text and no matching shortcut/number — default to option 1
+        _select_option(prompt_pane, 1)
+        return f"📨 Selected option 1 in `{wid}`"
 
     # Normal message: type text + Enter
     p = shlex.quote(pane)
@@ -679,6 +759,26 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n```\n{content[-3000:]}\n```")
         return None, sessions, last_win_idx
 
+    # /focus wN
+    focus_m = re.match(r"^/focus\s+w?(\d+)$", text.lower())
+    if focus_m:
+        idx = focus_m.group(1)
+        if idx in sessions:
+            pane, project = sessions[idx]
+            _save_focus_state(idx, pane, project)
+            content = clean_pane_status(_capture_pane(pane, 20)) or "(empty)"
+            tg_send(f"🔍 Focusing on `w{idx}` (`{project}`). Send `/unfocus` to stop.\n\n```\n{content[-3000:]}\n```")
+            return None, sessions, idx
+        else:
+            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}")
+            return None, sessions, last_win_idx
+
+    # /unfocus
+    if text.lower() == "/unfocus":
+        _clear_focus_state()
+        tg_send("🔍 Focus stopped.")
+        return None, sessions, last_win_idx
+
     # Parse wN prefix
     m = re.match(r"^w(\d+)\s+(.*)", text, re.DOTALL)
     if m:
@@ -724,6 +824,13 @@ def cmd_listen():
     last_win_idx = None
     RESCAN_INTERVAL = 60
 
+    # Focus monitoring state
+    focus_target_wid: str | None = None
+    focus_prev_lines: list[str] = []
+    focus_pending: list[str] = []
+    focus_last_new_ts: float = 0
+    focus_first_new_ts: float = 0
+
     # Consume existing updates to avoid replaying old messages
     offset = 0
     try:
@@ -738,7 +845,7 @@ def cmd_listen():
     except Exception:
         pass
 
-    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/stop` pause | `/quit` exit"
+    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/focus wN` | `/unfocus` | `/stop` pause | `/quit` exit"
 
     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
     tg_send(help_msg)
@@ -776,6 +883,11 @@ def cmd_listen():
                     sessions = scan_claude_sessions()
                     last_scan = time.time()
                     paused = False
+                    focus_target_wid = None
+                    focus_prev_lines = []
+                    focus_pending = []
+                    focus_last_new_ts = 0
+                    focus_first_new_ts = 0
                     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
                     tg_send("▶️ Resumed.\n\n" + help_msg)
                     _log("listen", "Resumed listening.")
@@ -793,9 +905,60 @@ def cmd_listen():
             sessions = scan_claude_sessions()
             last_scan = time.time()
 
-        signal_wid = process_signals()
+        focus_state = _load_focus_state()
+
+        signal_wid = process_signals(focused_wid=focus_state["wid"] if focus_state else None)
         if signal_wid:
             last_win_idx = signal_wid
+
+        # --- Focus monitoring ---
+        if focus_state:
+            fw = focus_state["wid"]
+            if fw != focus_target_wid:
+                focus_prev_lines = []
+                focus_pending = []
+                focus_last_new_ts = 0
+                focus_first_new_ts = 0
+                focus_target_wid = fw
+
+            fp, fproj = focus_state["pane"], focus_state["project"]
+
+            if fw not in sessions:
+                sessions = scan_claude_sessions()
+                last_scan = time.time()
+                if fw not in sessions:
+                    _clear_focus_state()
+                    tg_send(f"🔍 Focus on `w{fw}` ended — session gone.")
+                    focus_target_wid = None
+                    focus_state = None
+
+        if focus_state:
+            raw = _capture_pane(fp, 50)
+            cur_lines = _filter_noise(raw)
+
+            if focus_prev_lines:
+                new = _compute_new_lines(focus_prev_lines, cur_lines)
+                if new:
+                    focus_pending.extend(new)
+                    focus_last_new_ts = time.time()
+                    if not focus_first_new_ts:
+                        focus_first_new_ts = time.time()
+
+            focus_prev_lines = cur_lines
+
+            now = time.time()
+            debounce_ok = focus_pending and focus_last_new_ts and (now - focus_last_new_ts >= 3)
+            max_delay_ok = focus_pending and focus_first_new_ts and (now - focus_first_new_ts >= 15)
+
+            if debounce_ok or max_delay_ok:
+                chunk = "\n".join(focus_pending).strip()
+                if chunk:
+                    tg_send(f"🔍 `w{fw}` (`{fproj}`):\n```\n{chunk[:3500]}\n```")
+                focus_pending = []
+                focus_last_new_ts = 0
+                focus_first_new_ts = 0
+        elif focus_target_wid:
+            focus_target_wid = None
 
         try:
             data, offset = _poll_updates(offset, timeout=1)
