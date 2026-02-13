@@ -1012,10 +1012,30 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             targets = [(last_win_idx, sessions[last_win_idx])]
         else:
             targets = list(sessions.items())
+        explicit_lines = status_m.group(2) is not None
         for win_idx, (pane, project) in targets:
             pw = _get_pane_width(pane)
-            content = clean_pane_status(_capture_pane(pane, num_lines), pw) or "(empty)"
-            tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n```\n{content[-3000:]}\n```")
+            if explicit_lines:
+                # User asked for N filtered lines — capture extra, filter, take last N
+                raw = _capture_pane(pane, num_lines * 3 + 20)
+                filtered = clean_pane_status(raw, pw)
+                lines = filtered.splitlines()
+                content = "\n".join(lines[-num_lines:]) if lines else ""
+            else:
+                # Smart mode: show last bullet or 30 lines, whichever is bigger
+                for n in (30, 80, 200):
+                    raw = _capture_pane(pane, n)
+                    if _has_response_start(raw):
+                        break
+                raw_view = clean_pane_status(_capture_pane(pane, 30), pw)
+                if _has_response_start(raw):
+                    bullet_view = clean_pane_content(raw, "stop", pw)
+                    content = bullet_view if len(bullet_view) >= len(raw_view) else raw_view
+                else:
+                    content = raw_view
+            content = content or "(empty)"
+            header = f"📋 `w{win_idx}` — `{project}`:\n\n"
+            _send_long_message(header, content, win_idx)
         return None, sessions, last_win_idx
 
     # /focus wN
