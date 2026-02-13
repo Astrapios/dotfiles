@@ -50,7 +50,7 @@ echo "  installing global python environment..."
 pixi global install -e py --expose python python --with requests --force-reinstall
 
 # Hook script + Claude settings symlinks
-ln -sf $SCRIPT_PATH/scripts/tg-hook ~/bin/tg-hook
+ln -sf $SCRIPT_PATH/scripts/tg-hook/tg_hook.py ~/bin/tg-hook
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 
 # Telegram credentials

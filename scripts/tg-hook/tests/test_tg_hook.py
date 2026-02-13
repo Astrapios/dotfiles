@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 """Tests for tg-hook — validates formatting, routing, and content cleaning."""
-import importlib.util
-import importlib.machinery
 import json
 import os
 import re
@@ -10,12 +8,8 @@ import textwrap
 import unittest
 from unittest.mock import MagicMock, patch, call
 
-# Import tg-hook as a module (filename has no .py extension)
-_script_path = "/home/ubuntu/.dotfiles/scripts/tg-hook"
-loader = importlib.machinery.SourceFileLoader("tg_hook", _script_path)
-spec = importlib.util.spec_from_loader("tg_hook", loader)
-tg = importlib.util.module_from_spec(spec)
-loader.exec_module(tg)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import tg_hook as tg
 
 
 class TestMarkdownSafety(unittest.TestCase):
