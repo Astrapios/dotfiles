@@ -733,6 +733,83 @@ class TestDownloadTgPhoto(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestTgSendPhoto(unittest.TestCase):
+    """Test tg_send_photo function."""
+
+    @patch("requests.post")
+    def test_send_photo_success(self, mock_post):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 42}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        # Create a temp file to send
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"fake png data")
+            path = f.name
+
+        try:
+            msg_id = tg.tg_send_photo(path, "test caption")
+            self.assertEqual(msg_id, 42)
+            call_kwargs = mock_post.call_args
+            self.assertIn("sendPhoto", call_kwargs[0][0])
+            self.assertIn("photo", call_kwargs[1]["files"])
+            self.assertEqual(call_kwargs[1]["data"]["caption"], "test caption")
+            self.assertEqual(call_kwargs[1]["data"]["parse_mode"], "Markdown")
+        finally:
+            os.remove(path)
+
+    @patch("requests.post")
+    def test_send_photo_no_caption(self, mock_post):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 43}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"fake jpg data")
+            path = f.name
+
+        try:
+            tg.tg_send_photo(path)
+            call_kwargs = mock_post.call_args
+            self.assertNotIn("caption", call_kwargs[1]["data"])
+            self.assertNotIn("parse_mode", call_kwargs[1]["data"])
+        finally:
+            os.remove(path)
+
+    @patch("requests.post")
+    def test_send_photo_markdown_fallback(self, mock_post):
+        """On 400, retries without parse_mode."""
+        fail_resp = MagicMock()
+        fail_resp.status_code = 400
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 44}}
+        ok_resp.raise_for_status = MagicMock()
+
+        mock_post.side_effect = [fail_resp, ok_resp]
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"data")
+            path = f.name
+
+        try:
+            msg_id = tg.tg_send_photo(path, "caption_with_bad_markdown")
+            self.assertEqual(msg_id, 44)
+            # Second call should not have parse_mode
+            second_call = mock_post.call_args_list[1]
+            self.assertNotIn("parse_mode", second_call[1]["data"])
+        finally:
+            os.remove(path)
+
+
 class TestFocusState(unittest.TestCase):
     """Test focus state file operations."""
 

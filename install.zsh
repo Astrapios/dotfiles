@@ -52,6 +52,7 @@ pixi global install -e py --expose python python --with requests --force-reinsta
 # Hook script + Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/tg-hook/tg_hook.py ~/bin/tg-hook
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
+ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md
 
 # Telegram credentials
 if [ ! -f ~/.config/tg_hook.env ]; then

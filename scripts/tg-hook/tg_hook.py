@@ -5,6 +5,7 @@ Telegram bridge for Claude Code hooks.
 Usage:
   tg-hook notify "message"        - Send a message, don't wait
   tg-hook ask "question"          - Send a message, wait for reply, print it to stdout
+  tg-hook send-photo path [caption] - Send a photo to Telegram
   tg-hook hook                    - Read hook JSON from stdin, write signal for listen
   tg-hook listen                  - Auto-detect Claude sessions, route messages by wN prefix
 
@@ -82,6 +83,33 @@ def tg_send(text: str, chat_id: str = CHAT_ID) -> int:
             json={"chat_id": chat_id, "text": text},
             timeout=30,
         )
+    r.raise_for_status()
+    return r.json()["result"]["message_id"]
+
+
+def tg_send_photo(path: str, caption: str = "", chat_id: str = CHAT_ID) -> int:
+    """Send a photo to Telegram. Returns message_id."""
+    with open(path, "rb") as f:
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption[:1024]
+            data["parse_mode"] = "Markdown"
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT}/sendPhoto",
+            data=data,
+            files={"photo": (os.path.basename(path), f, "image/png")},
+            timeout=60,
+        )
+        if r.status_code == 400 and caption:
+            # Markdown parse failure — retry without parse_mode
+            f.seek(0)
+            data.pop("parse_mode", None)
+            r = requests.post(
+                f"https://api.telegram.org/bot{BOT}/sendPhoto",
+                data=data,
+                files={"photo": (os.path.basename(path), f, "image/png")},
+                timeout=60,
+            )
     r.raise_for_status()
     return r.json()["result"]["message_id"]
 
@@ -816,6 +844,15 @@ def cmd_ask(question: str) -> str:
     return reply
 
 
+def cmd_send_photo(path: str, caption: str = ""):
+    """Send a photo file to Telegram."""
+    if not os.path.isfile(path):
+        print(f"File not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    tg_send_photo(path, caption)
+    print(f"Photo sent: {path}")
+
+
 def cmd_hook():
     """Read hook JSON from stdin, write signal files for listen to process."""
     if not TG_HOOKS_ENABLED:
@@ -1232,6 +1269,13 @@ def main():
     elif command == "ask":
         question = sys.argv[2] if len(sys.argv) > 2 else "Yes or no?"
         cmd_ask(question)
+    elif command == "send-photo":
+        if len(sys.argv) < 3:
+            print("Usage: tg-hook send-photo <path> [caption]", file=sys.stderr)
+            sys.exit(1)
+        path = sys.argv[2]
+        caption = sys.argv[3] if len(sys.argv) > 3 else ""
+        cmd_send_photo(path, caption)
     elif command == "listen":
         cmd_listen()
     else:
