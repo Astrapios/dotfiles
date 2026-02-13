@@ -87,6 +87,49 @@ def tg_send(text: str, chat_id: str = CHAT_ID) -> int:
     return r.json()["result"]["message_id"]
 
 
+def _send_long_message(header: str, body: str, wid: str = ""):
+    """Send a header + body as one or more Telegram messages, chunking if needed.
+
+    Body is wrapped in ``` code blocks. If the total exceeds TG_MAX, body is
+    split across multiple messages at line boundaries.
+    """
+    # Reserve space for header, code block markers, and safety margin
+    overhead = len(header) + len("```\n") + len("\n```") + 50
+    chunk_size = TG_MAX - overhead
+
+    if len(body) <= chunk_size:
+        msg = f"{header}```\n{body}\n```"
+        tg_send(msg)
+        _save_last_msg(wid, msg)
+        return
+
+    lines = body.splitlines(keepends=True)
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in lines:
+        if current_len + len(line) > chunk_size and current:
+            chunks.append("".join(current))
+            current = []
+            current_len = 0
+        current.append(line)
+        current_len += len(line)
+    if current:
+        chunks.append("".join(current))
+
+    total = len(chunks)
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            label = f"{header}(1/{total})\n"
+        else:
+            label = f"(cont. {i+1}/{total})\n"
+        msg = f"{label}```\n{chunk}\n```"
+        tg_send(msg)
+    # Save the first chunk as last message for /last
+    if chunks:
+        _save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")
+
+
 def tg_send_photo(path: str, caption: str = "", chat_id: str = CHAT_ID) -> int:
     """Send a photo to Telegram. Returns message_id."""
     with open(path, "rb") as f:
@@ -582,12 +625,17 @@ def process_signals(focused_wid: str | None = None) -> str | None:
                 content = ""
                 if pane:
                     time.sleep(4)
-                    content = _capture_pane(pane, 30)
-                pw = _get_pane_width(pane) if pane else 0
+                    pw = _get_pane_width(pane)
+                    # Progressive capture: expand if starting ● not found
+                    for num_lines in (30, 80, 200):
+                        content = _capture_pane(pane, num_lines)
+                        if _has_response_start(content):
+                            break
+                else:
+                    pw = 0
                 cleaned = clean_pane_content(content, "stop", pw) if content else "(could not capture pane)"
-                msg = f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```"
-                tg_send(msg)
-                _save_last_msg(wid, msg)
+                header = f"✅{tag} Claude Code (`{project}`) finished:\n\n"
+                _send_long_message(header, cleaned, wid)
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
@@ -673,6 +721,25 @@ def _filter_noise(raw: str) -> list[str]:
             continue
         filtered.append(line.rstrip())
     return filtered
+
+
+def _has_response_start(raw: str) -> bool:
+    """Check if captured pane content contains the ● text bullet that starts a response.
+
+    Returns True if a text bullet (not a tool call like ● Bash(...)) is found
+    before the last ❯ prompt line.
+    """
+    lines = raw.splitlines()
+    end = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].strip().startswith("❯"):
+            end = i
+            break
+    for i in range(end - 1, -1, -1):
+        s = lines[i].strip()
+        if s.startswith("●") and not re.match(r'^● \w+\(', s):
+            return True
+    return False
 
 
 def clean_pane_content(raw: str, event: str, pane_width: int = 0) -> str:

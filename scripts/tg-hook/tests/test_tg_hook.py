@@ -185,6 +185,28 @@ class TestCleanPaneContent(unittest.TestCase):
         self.assertIn("line 3", result)
 
 
+class TestHasResponseStart(unittest.TestCase):
+    """Test _has_response_start for progressive capture."""
+
+    def test_found_text_bullet(self):
+        raw = "● Here is the answer\n  result\n❯ prompt"
+        self.assertTrue(tg._has_response_start(raw))
+
+    def test_only_tool_bullet(self):
+        """Tool call bullets don't count as response start."""
+        raw = "● Bash(echo hi)\n  ⎿  hi\n❯ prompt"
+        self.assertFalse(tg._has_response_start(raw))
+
+    def test_no_bullet_at_all(self):
+        """Long response cut off — no bullet visible."""
+        raw = "  line 5\n  line 6\n  line 7\n❯ prompt"
+        self.assertFalse(tg._has_response_start(raw))
+
+    def test_bullet_before_prompt(self):
+        raw = "old stuff\n● The answer is 42.\n  details\n❯ prompt"
+        self.assertTrue(tg._has_response_start(raw))
+
+
 class TestExtractPanePermission(unittest.TestCase):
     """Test _extract_pane_permission with mocked tmux."""
 
