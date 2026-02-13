@@ -139,15 +139,57 @@ def _poll_updates(offset: int, timeout: int = 1) -> tuple[dict | None, int]:
     return data, offset
 
 
-def _extract_chat_messages(data: dict) -> list[str]:
-    """Extract message texts from our chat. Returns list of stripped texts."""
+def _download_tg_photo(file_id: str, dest: str) -> str | None:
+    """Download a Telegram file by file_id to dest path. Returns path or None."""
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT}/getFile",
+            params={"file_id": file_id},
+            timeout=30,
+        )
+        r.raise_for_status()
+        file_path = r.json().get("result", {}).get("file_path", "")
+        if not file_path:
+            return None
+        r2 = requests.get(
+            f"https://api.telegram.org/file/bot{BOT}/{file_path}",
+            timeout=60,
+        )
+        r2.raise_for_status()
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(r2.content)
+        return dest
+    except Exception as e:
+        _log("photo", f"Download failed: {e}")
+        return None
+
+
+def _extract_chat_messages(data: dict) -> list[dict]:
+    """Extract messages from our chat.
+
+    Returns list of dicts with keys:
+      - "text": str (message text or caption)
+      - "photo": str | None (file_id of largest photo, if present)
+    """
     messages = []
     for upd in data.get("result", []):
         msg = upd.get("message", {})
         cid = str(msg.get("chat", {}).get("id", ""))
+        if cid != str(CHAT_ID):
+            continue
         text = msg.get("text", "")
-        if cid == str(CHAT_ID) and text:
-            messages.append(text.strip())
+        caption = msg.get("caption", "")
+        photos = msg.get("photo")
+        if photos:
+            # Last element is highest resolution
+            best = photos[-1]
+            messages.append({
+                "text": caption.strip(),
+                "photo": best.get("file_id"),
+            })
+        elif text:
+            messages.append({"text": text.strip(), "photo": None})
     return messages
 
 
@@ -1012,7 +1054,8 @@ def cmd_listen():
                 time.sleep(2)
                 continue
 
-            for text in _extract_chat_messages(data):
+            for chat_msg in _extract_chat_messages(data):
+                text = chat_msg["text"]
                 if text.lower() == "/start":
                     _clear_signals(include_state=True)
                     sessions = scan_claude_sessions()
@@ -1115,7 +1158,45 @@ def cmd_listen():
             time.sleep(2)
             continue
 
-        for text in _extract_chat_messages(data):
+        for chat_msg in _extract_chat_messages(data):
+            text = chat_msg["text"]
+            photo_id = chat_msg.get("photo")
+
+            # Photo received — download and route to Claude
+            if photo_id:
+                dest = f"/tmp/tg_photo_{int(time.time())}.jpg"
+                path = _download_tg_photo(photo_id, dest)
+                if path:
+                    caption = text
+                    # Determine target session
+                    target_idx = None
+                    remaining_text = caption
+                    m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
+                    if m and m.group(1) in sessions:
+                        target_idx = m.group(1)
+                        remaining_text = m.group(2).strip()
+                    elif len(sessions) == 1:
+                        target_idx = next(iter(sessions))
+                    elif last_win_idx and last_win_idx in sessions:
+                        target_idx = last_win_idx
+
+                    if target_idx:
+                        pane, project = sessions[target_idx]
+                        # Build instruction for Claude to read the image
+                        instruction = f"Read {path}"
+                        if remaining_text:
+                            instruction += f" — {remaining_text}"
+                        p = shlex.quote(pane)
+                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && tmux send-keys -t {p} Enter"
+                        subprocess.run(["bash", "-c", cmd], timeout=10)
+                        tg_send(f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{path}`")
+                        last_win_idx = target_idx
+                    else:
+                        tg_send(f"📷 Photo saved to `{path}` — no target session.\n{format_sessions_message(sessions)}")
+                else:
+                    tg_send("⚠️ Failed to download photo.")
+                continue
+
             prev_sessions = sessions
             action, sessions, last_win_idx = _handle_command(
                 text, sessions, last_win_idx, CMD_HELP

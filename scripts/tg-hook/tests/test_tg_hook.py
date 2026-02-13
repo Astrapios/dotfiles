@@ -659,6 +659,80 @@ class TestJoinWrappedLines(unittest.TestCase):
         self.assertEqual(result, lines)
 
 
+class TestExtractChatMessages(unittest.TestCase):
+    """Test _extract_chat_messages with text, photo, and caption messages."""
+
+    def _make_update(self, msg_fields):
+        return {"result": [{"update_id": 1, "message": {"chat": {"id": int(tg.CHAT_ID)}, **msg_fields}}]}
+
+    def test_text_message(self):
+        data = self._make_update({"text": "hello"})
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result, [{"text": "hello", "photo": None}])
+
+    def test_photo_message_no_caption(self):
+        data = self._make_update({"photo": [
+            {"file_id": "small_id", "width": 90, "height": 90},
+            {"file_id": "large_id", "width": 800, "height": 800},
+        ]})
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["photo"], "large_id")
+        self.assertEqual(result[0]["text"], "")
+
+    def test_photo_message_with_caption(self):
+        data = self._make_update({"photo": [
+            {"file_id": "small_id", "width": 90, "height": 90},
+            {"file_id": "large_id", "width": 800, "height": 800},
+        ], "caption": "w4 describe this"})
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["text"], "w4 describe this")
+        self.assertEqual(result[0]["photo"], "large_id")
+
+    def test_ignores_other_chat(self):
+        data = {"result": [{"update_id": 1, "message": {
+            "chat": {"id": 999999}, "text": "hello"
+        }}]}
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result, [])
+
+    def test_empty_message_skipped(self):
+        data = self._make_update({})
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result, [])
+
+
+class TestDownloadTgPhoto(unittest.TestCase):
+    """Test _download_tg_photo helper."""
+
+    @patch("requests.get")
+    def test_successful_download(self, mock_get):
+        # Mock getFile response
+        get_file_resp = MagicMock()
+        get_file_resp.json.return_value = {"result": {"file_path": "photos/file_1.jpg"}}
+        get_file_resp.raise_for_status = MagicMock()
+
+        # Mock file download response
+        download_resp = MagicMock()
+        download_resp.content = b"\xff\xd8\xff\xe0fake_jpeg"
+        download_resp.raise_for_status = MagicMock()
+
+        mock_get.side_effect = [get_file_resp, download_resp]
+
+        dest = "/tmp/tg_hook_test_photo.jpg"
+        result = tg._download_tg_photo("test_file_id", dest)
+        self.assertEqual(result, dest)
+        self.assertTrue(os.path.exists(dest))
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), b"\xff\xd8\xff\xe0fake_jpeg")
+        os.remove(dest)
+
+    @patch("requests.get", side_effect=Exception("network error"))
+    def test_download_failure_returns_none(self, mock_get):
+        result = tg._download_tg_photo("bad_id", "/tmp/tg_hook_test_fail.jpg")
+        self.assertIsNone(result)
+
+
 class TestFocusState(unittest.TestCase):
     """Test focus state file operations."""
 
