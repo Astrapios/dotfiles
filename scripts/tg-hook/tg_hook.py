@@ -59,6 +59,12 @@ SIGNAL_DIR = "/tmp/tg_hook_signals"
 PROMPT_EXPIRY = 300  # seconds before active prompt state expires
 
 
+# ── Logging ──────────────────────────────────────────────────────────────────
+
+def _log(tag: str, msg: str):
+    print(f"[{tag}] {msg}")
+
+
 # ── Telegram helpers ──────────────────────────────────────────────────────────
 
 def tg_send(text: str, chat_id: str = CHAT_ID) -> int:
@@ -112,6 +118,38 @@ def tg_wait_reply(after_message_id: int, timeout: int = 300) -> str:
     return "(no reply - timed out)"
 
 
+def _poll_updates(offset: int, timeout: int = 1) -> tuple[dict | None, int]:
+    """Poll Telegram getUpdates. Returns (response_data, new_offset).
+    Returns (None, offset) on error. Lets KeyboardInterrupt propagate."""
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT}/getUpdates",
+            params={"timeout": timeout, "offset": offset},
+            timeout=timeout + 10,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        return None, offset
+    for upd in data.get("result", []):
+        offset = max(offset, upd["update_id"] + 1)
+    return data, offset
+
+
+def _extract_chat_messages(data: dict) -> list[str]:
+    """Extract message texts from our chat. Returns list of stripped texts."""
+    messages = []
+    for upd in data.get("result", []):
+        msg = upd.get("message", {})
+        cid = str(msg.get("chat", {}).get("id", ""))
+        text = msg.get("text", "")
+        if cid == str(CHAT_ID) and text:
+            messages.append(text.strip())
+    return messages
+
+
 # ── tmux helpers ──────────────────────────────────────────────────────────────
 
 def get_window_id() -> str | None:
@@ -145,6 +183,18 @@ def get_pane_project(pane: str) -> str:
     except Exception:
         pass
     return "unknown"
+
+
+def _capture_pane(pane: str, num_lines: int = 20) -> str:
+    """Capture recent lines from a tmux pane."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", pane, "-p", "-S", f"-{num_lines}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout
+    except Exception:
+        return ""
 
 
 def scan_claude_sessions() -> dict[str, tuple[str, str]]:
@@ -202,6 +252,19 @@ def write_signal(event: str, data: dict, **extra):
         json.dump(signal, f)
 
 
+def _clear_signals(include_state: bool = False):
+    """Remove signal files. If include_state, also removes _prefixed state files."""
+    if not os.path.isdir(SIGNAL_DIR):
+        return
+    for f in os.listdir(SIGNAL_DIR):
+        if not include_state and f.startswith("_"):
+            continue
+        try:
+            os.remove(os.path.join(SIGNAL_DIR, f))
+        except OSError:
+            pass
+
+
 def save_active_prompt(wid: str, prompt_type: str, pane: str, num_options: int):
     """Save active prompt state so listen can route replies with arrow keys."""
     os.makedirs(SIGNAL_DIR, exist_ok=True)
@@ -222,6 +285,172 @@ def load_active_prompt(wid: str) -> dict | None:
         return state
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
+    """Extract content and options from a permission dialog in a tmux pane.
+    Returns (header, content between last dot and options, list of options)."""
+    raw = _capture_pane(pane)
+    if not raw:
+        return "", "", []
+    lines = raw.splitlines()
+
+    # Find options from last 8 lines only
+    options = []
+    for line in lines[-8:]:
+        m = re.match(r'^\s*[❯>]?\s*(\d+\.\s+.+)', line)
+        if m:
+            options.append(m.group(1).strip())
+
+    # Find the first option line index in full list
+    first_opt_idx = len(lines)
+    for i in range(len(lines) - 8, len(lines)):
+        if i >= 0 and re.match(r'^\s*[❯>]?\s*\d+\.\s+', lines[i]):
+            first_opt_idx = i
+            break
+
+    # Find last ● above the options
+    start = 0
+    for i in range(first_opt_idx - 1, -1, -1):
+        if lines[i].strip().startswith("●"):
+            start = i
+            break
+
+    # Extract tool + file from ● header (e.g. "● Update(scripts/tg-hook)")
+    header = ""
+    hdr_file = ""
+    for line in lines[start:first_opt_idx]:
+        s = line.strip()
+        m_hdr = re.match(r'^● (\w+)\((.+?)\)', s)
+        if m_hdr:
+            header = f"wants to {m_hdr.group(1).lower()} `{m_hdr.group(2)}`"
+            hdr_file = m_hdr.group(2)
+            break
+
+    # Clean: skip ● header, separators, chrome; dedent diff
+    cleaned = []
+    for line in lines[start:first_opt_idx]:
+        s = line.strip()
+        if s.startswith("●"):
+            continue
+        if re.match(r'^[─━╌]{3,}$', s):
+            continue
+        if s.startswith(("⎿", "Do you want", "Claude wants")):
+            continue
+        if s in ("Edit file", "Write file", "Create file", "Fetch", "Bash command"):
+            continue
+        if hdr_file and s in (hdr_file, hdr_file.rsplit("/", 1)[-1]):
+            continue
+        # Strip line numbers, keep -/+ at start for diff format
+        m_diff = re.match(r'^\s*\d+\s*([+-])(.*)', line)
+        m_ctx = re.match(r'^\s*\d+\s+(.*)', line)
+        if m_diff:
+            cleaned.append(f"{m_diff.group(1)}{m_diff.group(2)}")
+        elif m_ctx:
+            cleaned.append(f" {m_ctx.group(1)}")
+        elif re.match(r'^\s*\d+\s*$', line):
+            cleaned.append("")
+        else:
+            cleaned.append(line.strip())
+    content = "\n".join(cleaned).strip()
+    return header, content, options
+
+
+def process_signals() -> str | None:
+    """Process pending signal files. Returns last window index (e.g. '4') or None."""
+    if not os.path.isdir(SIGNAL_DIR):
+        return None
+
+    try:
+        files = sorted(os.listdir(SIGNAL_DIR))
+    except OSError:
+        return None
+
+    last_wid = None
+    for fname in files:
+        if not fname.endswith(".json") or fname.startswith("_"):
+            continue
+        fpath = os.path.join(SIGNAL_DIR, fname)
+        try:
+            with open(fpath) as f:
+                signal = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            try:
+                os.remove(fpath)
+            except OSError:
+                pass
+            continue
+
+        event = signal.get("event", "")
+        pane = signal.get("pane", "")
+        wid = signal.get("wid", "")
+        project = signal.get("project", "unknown")
+        tag = f" {wid}" if wid else ""
+
+        # Resolve project name from tmux pane
+        if pane:
+            project = get_pane_project(pane) or project
+
+        if event == "stop":
+            content = ""
+            if pane:
+                time.sleep(4)
+                content = _capture_pane(pane, 30)
+            cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
+            tg_send(f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```")
+
+        elif event == "permission":
+            bash_cmd = signal.get("cmd", "")
+            header, content, options = _extract_pane_permission(pane)
+            if options and not any(o.startswith("1.") for o in options):
+                options.insert(0, "1. Yes")
+            max_opt = 0
+            for o in options:
+                m_opt = re.match(r'(\d+)', o)
+                if m_opt:
+                    max_opt = max(max_opt, int(m_opt.group(1)))
+            opts_text = "\n".join(options)
+            if bash_cmd:
+                tg_send(f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}")
+            else:
+                title = header or "needs permission"
+                body = f"\n\n```\n{content[:2000]}\n```" if content else ""
+                tg_send(f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}")
+            save_active_prompt(wid, "permission", pane, max_opt or 3)
+
+        elif event == "question":
+            questions = signal.get("questions", [])
+            if questions:
+                parts = [f"❓{tag} Claude Code (`{project}`) asks:\n"]
+                total_opts = 0
+                for q in questions:
+                    parts.append(q.get("question", "?"))
+                    opts = q.get("options", [])
+                    for i, opt in enumerate(opts, 1):
+                        label = opt.get("label", "?")
+                        desc = opt.get("description", "")
+                        if desc:
+                            parts.append(f"  {i}. {label} — {desc}")
+                        else:
+                            parts.append(f"  {i}. {label}")
+                    n = len(opts)
+                    parts.append(f"  {n+1}. Type your answer")
+                    parts.append(f"  {n+2}. Chat about this")
+                    total_opts = n
+                tg_send("\n".join(parts))
+                save_active_prompt(wid, "question", pane, total_opts)
+            else:
+                tg_send(f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)")
+
+        try:
+            os.remove(fpath)
+        except OSError:
+            pass
+        if wid:
+            last_wid = wid.lstrip("w")  # "w4" → "4"
+        _log("signal", f"{event} for {wid} ({project})")
+
+    return last_wid
 
 
 # ── Pane content cleaning ────────────────────────────────────────────────────
@@ -291,7 +520,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
         num_opts = prompt.get("num_options", 0)
         prompt_type = prompt.get("type", "")
         reply = text.strip()
-        print(f"[route] prompt found: type={prompt_type}, num_opts={num_opts}, reply={reply!r}, pane={pane}")
+        _log("route", f"prompt found: type={prompt_type}, num_opts={num_opts}, reply={reply!r}, pane={pane}")
 
         p = shlex.quote(pane)
 
@@ -403,200 +632,99 @@ def cmd_hook():
                 json.dump({"cmd": cmd}, f)
 
 
-def process_signals() -> str | None:
-    """Process pending signal files. Returns last window index (e.g. '4') or None."""
-    if not os.path.isdir(SIGNAL_DIR):
-        return None
+def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
+                    cmd_help: str) -> tuple[str | None, dict, str | None]:
+    """Handle a command in active mode. Returns (action, sessions, last_win_idx).
+    action is 'pause', 'quit', or None (continue processing)."""
 
-    try:
-        files = sorted(os.listdir(SIGNAL_DIR))
-    except OSError:
-        return None
+    if text.lower() == "/stop":
+        tg_send("⏸ Paused. Send `/start` to resume or `/quit` to exit.")
+        _log("listen", "Paused.")
+        return "pause", sessions, last_win_idx
 
-    last_wid = None
-    for fname in files:
-        if not fname.endswith(".json") or fname.startswith("_"):
-            continue
-        fpath = os.path.join(SIGNAL_DIR, fname)
-        try:
-            with open(fpath) as f:
-                signal = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            try:
-                os.remove(fpath)
-            except OSError:
-                pass
-            continue
+    if text.lower() == "/quit":
+        tg_send("👋 Bye.")
+        return "quit", sessions, last_win_idx
 
-        event = signal.get("event", "")
-        pane = signal.get("pane", "")
-        wid = signal.get("wid", "")
-        project = signal.get("project", "unknown")
-        tag = f" {wid}" if wid else ""
+    if text.lower() == "/help":
+        sessions = scan_claude_sessions()
+        help_msg = format_sessions_message(sessions) + "\n\n" + cmd_help
+        tg_send(help_msg)
+        return None, sessions, last_win_idx
 
-        # Resolve project name from tmux pane
-        if pane:
-            project = get_pane_project(pane) or project
+    if text.lower() == "/sessions":
+        sessions = scan_claude_sessions()
+        tg_send(format_sessions_message(sessions))
+        return None, sessions, last_win_idx
 
-        if event == "stop":
-            content = ""
-            if pane:
-                time.sleep(4)
-                try:
-                    result = subprocess.run(
-                        ["tmux", "capture-pane", "-t", pane, "-p", "-S", "-30"],
-                        capture_output=True, text=True, timeout=5,
-                    )
-                    content = result.stdout
-                except Exception:
-                    pass
-            cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
-            tg_send(f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```")
-
-        elif event == "permission":
-            bash_cmd = signal.get("cmd", "")
-            header, content, options = _extract_pane_permission(pane)
-            if options and not any(o.startswith("1.") for o in options):
-                options.insert(0, "1. Yes")
-            max_opt = 0
-            for o in options:
-                m_opt = re.match(r'(\d+)', o)
-                if m_opt:
-                    max_opt = max(max_opt, int(m_opt.group(1)))
-            opts_text = "\n".join(options)
-            if bash_cmd:
-                tg_send(f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}")
-            else:
-                title = header or "needs permission"
-                body = f"\n\n```\n{content[:2000]}\n```" if content else ""
-                tg_send(f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}")
-            save_active_prompt(wid, "permission", pane, max_opt or 3)
-
-        elif event == "question":
-            questions = signal.get("questions", [])
-            if questions:
-                parts = [f"❓{tag} Claude Code (`{project}`) asks:\n"]
-                total_opts = 0
-                for q in questions:
-                    parts.append(q.get("question", "?"))
-                    opts = q.get("options", [])
-                    for i, opt in enumerate(opts, 1):
-                        label = opt.get("label", "?")
-                        desc = opt.get("description", "")
-                        if desc:
-                            parts.append(f"  {i}. {label} — {desc}")
-                        else:
-                            parts.append(f"  {i}. {label}")
-                    n = len(opts)
-                    parts.append(f"  {n+1}. Type your answer")
-                    parts.append(f"  {n+2}. Chat about this")
-                    total_opts = n
-                tg_send("\n".join(parts))
-                save_active_prompt(wid, "question", pane, total_opts)
-            else:
-                tg_send(f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)")
-
-        try:
-            os.remove(fpath)
-        except OSError:
-            pass
-        if wid:
-            last_wid = wid.lstrip("w")  # "w4" → "4"
-        print(f"[signal] {event} for {wid} ({project})")
-
-    return last_wid
-
-
-def _extract_pane_permission(pane: str) -> tuple[str, list[str]]:
-    """Extract content and options from a permission dialog in a tmux pane.
-    Returns (content between last ● and options, list of options)."""
-    try:
-        result = subprocess.run(
-            ["tmux", "capture-pane", "-t", pane, "-p", "-S", "-20"],
-            capture_output=True, text=True, timeout=5,
-        )
-        lines = result.stdout.splitlines()
-    except Exception:
-        return "", []
-
-    # Find options from last 8 lines only
-    options = []
-    for line in lines[-8:]:
-        m = re.match(r'^\s*[❯>]?\s*(\d+\.\s+.+)', line)
-        if m:
-            options.append(m.group(1).strip())
-
-    # Find the first option line index in full list
-    first_opt_idx = len(lines)
-    for i in range(len(lines) - 8, len(lines)):
-        if i >= 0 and re.match(r'^\s*[❯>]?\s*\d+\.\s+', lines[i]):
-            first_opt_idx = i
-            break
-
-    # Find last ● above the options
-    start = 0
-    for i in range(first_opt_idx - 1, -1, -1):
-        if lines[i].strip().startswith("●"):
-            start = i
-            break
-
-    # Extract tool + file from ● header (e.g. "● Update(scripts/tg-hook)")
-    header = ""
-    hdr_file = ""
-    for line in lines[start:first_opt_idx]:
-        s = line.strip()
-        m_hdr = re.match(r'^● (\w+)\((.+?)\)', s)
-        if m_hdr:
-            header = f"wants to {m_hdr.group(1).lower()} `{m_hdr.group(2)}`"
-            hdr_file = m_hdr.group(2)
-            break
-
-    # Clean: skip ● header, separators, chrome; dedent diff
-    cleaned = []
-    for line in lines[start:first_opt_idx]:
-        s = line.strip()
-        if s.startswith("●"):
-            continue
-        if re.match(r'^[─━╌]{3,}$', s):
-            continue
-        if s.startswith(("⎿", "Do you want", "Claude wants")):
-            continue
-        if s in ("Edit file", "Write file", "Create file", "Fetch", "Bash command"):
-            continue
-        if hdr_file and s in (hdr_file, hdr_file.rsplit("/", 1)[-1]):
-            continue
-        # Strip line numbers, keep -/+ at start for diff format
-        m_diff = re.match(r'^\s*\d+\s*([+-])(.*)', line)
-        m_ctx = re.match(r'^\s*\d+\s+(.*)', line)
-        if m_diff:
-            cleaned.append(f"{m_diff.group(1)}{m_diff.group(2)}")
-        elif m_ctx:
-            cleaned.append(f" {m_ctx.group(1)}")
-        elif re.match(r'^\s*\d+\s*$', line):
-            cleaned.append("")
+    # /status [wN] [lines]
+    status_m = re.match(r"^/status(?:\s+w?(\d+))?(?:\s+(\d+))?$", text.lower())
+    if status_m:
+        idx = status_m.group(1)
+        num_lines = int(status_m.group(2)) if status_m.group(2) else 20
+        targets = []
+        if idx and idx in sessions:
+            targets = [(idx, sessions[idx])]
+        elif idx:
+            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}")
+            return None, sessions, last_win_idx
+        elif len(sessions) == 1:
+            targets = list(sessions.items())
+        elif last_win_idx and last_win_idx in sessions:
+            targets = [(last_win_idx, sessions[last_win_idx])]
         else:
-            cleaned.append(line.strip())
-    content = "\n".join(cleaned).strip()
-    return header, content, options
+            targets = list(sessions.items())
+        for win_idx, (pane, project) in targets:
+            content = clean_pane_status(_capture_pane(pane, num_lines)) or "(empty)"
+            tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n```\n{content[-3000:]}\n```")
+        return None, sessions, last_win_idx
+
+    # Parse wN prefix
+    m = re.match(r"^w(\d+)\s+(.*)", text, re.DOTALL)
+    if m:
+        win_idx = m.group(1)
+        prompt = m.group(2).strip()
+        if win_idx in sessions:
+            pane, project = sessions[win_idx]
+            confirm = route_to_pane(pane, win_idx, prompt)
+            tg_send(confirm)
+            _log(f"w{win_idx}", confirm[:100])
+            return None, sessions, win_idx
+        else:
+            tg_send(f"⚠️ No Claude session at `w{win_idx}`.\n{format_sessions_message(sessions)}")
+            return None, sessions, last_win_idx
+
+    # No prefix — route to last used or only session
+    target_idx = None
+    if len(sessions) == 1:
+        target_idx = next(iter(sessions))
+    elif last_win_idx and last_win_idx in sessions:
+        target_idx = last_win_idx
+
+    if target_idx:
+        pane, project = sessions[target_idx]
+        confirm = route_to_pane(pane, target_idx, text)
+        tg_send(confirm)
+        _log(f"w{target_idx}", confirm[:100])
+        return None, sessions, target_idx
+    elif len(sessions) == 0:
+        tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.")
+    else:
+        tg_send(f"⚠️ Multiple sessions — prefix with `wN`.\n{format_sessions_message(sessions)}")
+
+    return None, sessions, last_win_idx
 
 
 def cmd_listen():
     """Poll Telegram and auto-route messages to Claude sessions by wN prefix."""
-    # Clear stale signals from before this listen started
-    if os.path.isdir(SIGNAL_DIR):
-        for f in os.listdir(SIGNAL_DIR):
-            if f.startswith("_"):
-                continue
-            try:
-                os.remove(os.path.join(SIGNAL_DIR, f))
-            except OSError:
-                pass
+    _clear_signals()
 
     sessions = scan_claude_sessions()
     last_scan = time.time()
     last_win_idx = None
     RESCAN_INTERVAL = 60
 
+    # Consume existing updates to avoid replaying old messages
     offset = 0
     try:
         r = requests.get(
@@ -612,11 +740,10 @@ def cmd_listen():
 
     CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/stop` pause | `/quit` exit"
 
-    help_msg = format_sessions_message(sessions)
-    help_msg += "\n\n" + CMD_HELP
+    help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
     tg_send(help_msg)
-    print(f"Listening. Found {len(sessions)} Claude session(s).")
-    print("Press Ctrl+C to stop")
+    _log("listen", f"Found {len(sessions)} Claude session(s).")
+    _log("listen", "Press Ctrl+C to stop")
 
     paused = False
     script_path = os.path.realpath(__file__)
@@ -626,59 +753,39 @@ def cmd_listen():
         # Auto-reload on file change
         try:
             if os.path.getmtime(script_path) != script_mtime:
-                print("Script changed, reloading...")
+                _log("listen", "Script changed, reloading...")
                 tg_send("🔄 Reloading...")
                 os.execv(sys.executable, [sys.executable, script_path, "listen"])
         except OSError:
             pass
+
         # --- Paused mode: only respond to /start, /help, /quit ---
         if paused:
             try:
-                r = requests.get(
-                    f"https://api.telegram.org/bot{BOT}/getUpdates",
-                    params={"timeout": 5, "offset": offset},
-                    timeout=15,
-                )
-                r.raise_for_status()
-                data = r.json()
+                data, offset = _poll_updates(offset, timeout=5)
             except KeyboardInterrupt:
                 tg_send("👋 Bye.")
                 break
-            except Exception:
+            if data is None:
                 time.sleep(2)
                 continue
 
-            for upd in data.get("result", []):
-                offset = max(offset, upd["update_id"] + 1)
-                msg = upd.get("message", {})
-                cid = str(msg.get("chat", {}).get("id", ""))
-                text = msg.get("text", "")
-                if cid != str(CHAT_ID) or not text:
-                    continue
-                text = text.strip()
-
+            for text in _extract_chat_messages(data):
                 if text.lower() == "/start":
-                    # Clear stale signals accumulated while paused
-                    if os.path.isdir(SIGNAL_DIR):
-                        for f in os.listdir(SIGNAL_DIR):
-                            try:
-                                os.remove(os.path.join(SIGNAL_DIR, f))
-                            except OSError:
-                                pass
+                    _clear_signals(include_state=True)
                     sessions = scan_claude_sessions()
                     last_scan = time.time()
                     paused = False
-                    help_msg = format_sessions_message(sessions)
-                    help_msg += "\n\n" + CMD_HELP
+                    help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
                     tg_send("▶️ Resumed.\n\n" + help_msg)
-                    print("Resumed listening.")
+                    _log("listen", "Resumed listening.")
                 elif text.lower() == "/quit":
                     tg_send("👋 Bye.")
                     return
                 elif text.lower() == "/help":
-                    tg_send(f"⏸ Paused. Send `/start` to resume or `/quit` to exit.")
+                    tg_send("⏸ Paused. Send `/start` to resume or `/quit` to exit.")
                 else:
-                    tg_send(f"⏸ Paused. Send `/start` to resume.")
+                    tg_send("⏸ Paused. Send `/start` to resume.")
             continue
 
         # --- Active mode ---
@@ -691,116 +798,26 @@ def cmd_listen():
             last_win_idx = signal_wid
 
         try:
-            r = requests.get(
-                f"https://api.telegram.org/bot{BOT}/getUpdates",
-                params={"timeout": 1, "offset": offset},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
+            data, offset = _poll_updates(offset, timeout=1)
         except KeyboardInterrupt:
             tg_send("👋 Bye.")
             break
-        except Exception:
+        if data is None:
             time.sleep(2)
             continue
 
-        for upd in data.get("result", []):
-            offset = max(offset, upd["update_id"] + 1)
-            msg = upd.get("message", {})
-            cid = str(msg.get("chat", {}).get("id", ""))
-            text = msg.get("text", "")
-
-            if cid != str(CHAT_ID) or not text:
-                continue
-
-            text = text.strip()
-
-            if text.lower() == "/stop":
+        for text in _extract_chat_messages(data):
+            prev_sessions = sessions
+            action, sessions, last_win_idx = _handle_command(
+                text, sessions, last_win_idx, CMD_HELP
+            )
+            if sessions is not prev_sessions:
+                last_scan = time.time()
+            if action == "pause":
                 paused = True
-                tg_send("⏸ Paused. Send `/start` to resume or `/quit` to exit.")
-                print("Paused.")
                 break
-
-            if text.lower() == "/quit":
-                tg_send("👋 Bye.")
+            elif action == "quit":
                 return
-
-            if text.lower() == "/help":
-                sessions = scan_claude_sessions()
-                last_scan = time.time()
-                help_msg = format_sessions_message(sessions)
-                help_msg += "\n\n" + CMD_HELP
-                tg_send(help_msg)
-                continue
-
-            if text.lower() == "/sessions":
-                sessions = scan_claude_sessions()
-                last_scan = time.time()
-                tg_send(format_sessions_message(sessions))
-                continue
-
-            # /status [wN] [lines]
-            status_m = re.match(r"^/status(?:\s+w?(\d+))?(?:\s+(\d+))?$", text.lower())
-            if status_m:
-                idx = status_m.group(1)
-                num_lines = int(status_m.group(2)) if status_m.group(2) else 20
-                targets = []
-                if idx and idx in sessions:
-                    targets = [(idx, sessions[idx])]
-                elif idx:
-                    tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}")
-                    continue
-                elif len(sessions) == 1:
-                    targets = list(sessions.items())
-                elif last_win_idx and last_win_idx in sessions:
-                    targets = [(last_win_idx, sessions[last_win_idx])]
-                else:
-                    targets = list(sessions.items())
-                for win_idx, (pane, project) in targets:
-                    try:
-                        result = subprocess.run(
-                            ["tmux", "capture-pane", "-t", pane, "-p", "-S", f"-{num_lines}"],
-                            capture_output=True, text=True, timeout=5,
-                        )
-                        content = clean_pane_status(result.stdout) or "(empty)"
-                    except Exception:
-                        content = "(error reading pane)"
-                    tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n```\n{content[-3000:]}\n```")
-                continue
-
-            # Parse wN prefix
-            m = re.match(r"^w(\d+)\s+(.*)", text, re.DOTALL)
-            if m:
-                win_idx = m.group(1)
-                prompt = m.group(2).strip()
-                if win_idx in sessions:
-                    pane, project = sessions[win_idx]
-                    confirm = route_to_pane(pane, win_idx, prompt)
-                    tg_send(confirm)
-                    print(f"[w{win_idx}] {confirm[:100]}")
-                    last_win_idx = win_idx
-                else:
-                    tg_send(f"⚠️ No Claude session at `w{win_idx}`.\n{format_sessions_message(sessions)}")
-                continue
-
-            # No prefix — route to last used or only session
-            target_idx = None
-            if len(sessions) == 1:
-                target_idx = next(iter(sessions))
-            elif last_win_idx and last_win_idx in sessions:
-                target_idx = last_win_idx
-
-            if target_idx:
-                pane, project = sessions[target_idx]
-                confirm = route_to_pane(pane, target_idx, text)
-                tg_send(confirm)
-                print(f"[w{target_idx}] {confirm[:100]}")
-                last_win_idx = target_idx
-            elif len(sessions) == 0:
-                tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.")
-            else:
-                tg_send(f"⚠️ Multiple sessions — prefix with `wN`.\n{format_sessions_message(sessions)}")
 
 
 def main():
