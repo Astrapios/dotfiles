@@ -304,7 +304,9 @@ def _clear_signals(include_state: bool = False):
 
 def save_active_prompt(wid: str, pane: str, total: int,
                        shortcuts: dict[str, int] | None = None,
-                       free_text_at: int | None = None):
+                       free_text_at: int | None = None,
+                       remaining_qs: list[dict] | None = None,
+                       project: str | None = None):
     """Save active prompt state so listen can route replies with arrow keys.
 
     Args:
@@ -313,6 +315,8 @@ def save_active_prompt(wid: str, pane: str, total: int,
         total: Total navigable options.
         shortcuts: Text aliases mapped to option numbers (e.g. {"y": 1, "n": 3}).
         free_text_at: Option index to navigate to for free-text input (Down N times), or None.
+        remaining_qs: Remaining questions for multi-question AskUserQuestion prompts.
+        project: Project name for formatting follow-up Telegram messages.
     """
     os.makedirs(SIGNAL_DIR, exist_ok=True)
     path = os.path.join(SIGNAL_DIR, f"_active_prompt_{wid}.json")
@@ -321,6 +325,10 @@ def save_active_prompt(wid: str, pane: str, total: int,
         state["shortcuts"] = shortcuts
     if free_text_at is not None:
         state["free_text_at"] = free_text_at
+    if remaining_qs is not None:
+        state["remaining_qs"] = remaining_qs
+    if project:
+        state["project"] = project
     with open(path, "w") as f:
         json.dump(state, f)
 
@@ -443,6 +451,24 @@ def _save_last_msg(wid: str, msg: str):
     _last_messages[wid.lstrip("w")] = msg
 
 
+def _format_question_msg(tag: str, project: str, question: dict) -> str:
+    """Format a single AskUserQuestion question for Telegram."""
+    parts = [f"❓{tag} Claude Code (`{project}`) asks:\n"]
+    parts.append(question.get("question", "?"))
+    opts = question.get("options", [])
+    for i, opt in enumerate(opts, 1):
+        label = opt.get("label", "?")
+        desc = opt.get("description", "")
+        if desc:
+            parts.append(f"  {i}. {label} — {desc}")
+        else:
+            parts.append(f"  {i}. {label}")
+    n = len(opts)
+    parts.append(f"  {n+1}. Type your answer")
+    parts.append(f"  {n+2}. Chat about this")
+    return "\n".join(parts)
+
+
 def process_signals(focused_wid: str | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
     If focused_wid is set, stop signals for that window are suppressed."""
@@ -520,27 +546,16 @@ def process_signals(focused_wid: str | None = None) -> str | None:
         elif event == "question":
             questions = signal.get("questions", [])
             if questions:
-                parts = [f"❓{tag} Claude Code (`{project}`) asks:\n"]
-                total_opts = 0
-                for q in questions:
-                    parts.append(q.get("question", "?"))
-                    opts = q.get("options", [])
-                    for i, opt in enumerate(opts, 1):
-                        label = opt.get("label", "?")
-                        desc = opt.get("description", "")
-                        if desc:
-                            parts.append(f"  {i}. {label} — {desc}")
-                        else:
-                            parts.append(f"  {i}. {label}")
-                    n = len(opts)
-                    parts.append(f"  {n+1}. Type your answer")
-                    parts.append(f"  {n+2}. Chat about this")
-                    total_opts = n
-                msg = "\n".join(parts)
+                # Send only the first question; remaining sent after each answer
+                msg = _format_question_msg(tag, project, questions[0])
                 tg_send(msg)
                 _save_last_msg(wid, msg)
-                save_active_prompt(wid, pane, total=total_opts + 2,
-                                   free_text_at=total_opts)
+                first_opts = len(questions[0].get("options", []))
+                remaining = questions[1:] if len(questions) > 1 else None
+                save_active_prompt(wid, pane, total=first_opts + 2,
+                                   free_text_at=first_opts,
+                                   remaining_qs=remaining,
+                                   project=project)
             else:
                 msg = f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)"
                 tg_send(msg)
@@ -674,15 +689,43 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
         total = prompt.get("total", 0)
         shortcuts = prompt.get("shortcuts", {})
         free_text_at = prompt.get("free_text_at")
+        remaining_qs = prompt.get("remaining_qs")
         reply = text.strip()
         _log("route", f"prompt found: total={total}, reply={reply!r}, pane={pane}")
 
         prompt_pane = prompt.get("pane", pane)
 
+        proj = prompt.get("project", "")
+        tag = f" {wid}" if wid else ""
+
+        def _advance_question():
+            """Handle next question or auto-confirm submission."""
+            if remaining_qs:
+                next_q = remaining_qs[0]
+                rest = remaining_qs[1:]
+                n_opts = len(next_q.get("options", []))
+                # Send next question to Telegram
+                msg = _format_question_msg(tag, proj, next_q)
+                tg_send(msg)
+                _save_last_msg(wid, msg)
+                save_active_prompt(wid, prompt_pane, total=n_opts + 2,
+                                   free_text_at=n_opts,
+                                   remaining_qs=rest,
+                                   project=proj)
+            elif remaining_qs is not None:
+                # Last question answered — prompt user to confirm submission
+                msg = f"❓{tag} Submit answers? (y/n)"
+                tg_send(msg)
+                _save_last_msg(wid, msg)
+                save_active_prompt(wid, prompt_pane, total=2,
+                                   shortcuts={"y": 1, "yes": 1,
+                                              "n": 2, "no": 2})
+
         # Shortcut match (e.g. "y" → 1, "n" → 3)
         if reply.lower() in shortcuts:
             n = shortcuts[reply.lower()]
             _select_option(prompt_pane, n)
+            _advance_question()
             return f"📨 Selected option {n} in `{wid}`"
 
         # Numbered selection
@@ -690,18 +733,23 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             n = int(reply)
             if 1 <= n <= total:
                 _select_option(prompt_pane, n)
+                _advance_question()
                 return f"📨 Selected option {n} in `{wid}`"
 
-        # Free text → navigate to "Other" option, type, submit
+        # Free text → navigate to "Type something.", type directly, Enter to submit
         if free_text_at is not None:
             pp = shlex.quote(prompt_pane)
             nav = " ".join(["Down"] * free_text_at)
-            cmd = f"tmux send-keys -t {pp} {nav} && sleep 0.1 && tmux send-keys -t {pp} -l {shlex.quote(reply)} && tmux send-keys -t {pp} Enter"
+            cmd = (f"tmux send-keys -t {pp} {nav} && sleep 0.2 && "
+                   f"tmux send-keys -t {pp} -l {shlex.quote(reply)} && sleep 0.1 && "
+                   f"tmux send-keys -t {pp} Enter")
             subprocess.run(["bash", "-c", cmd], timeout=10)
+            _advance_question()
             return f"📨 Answered in `{wid}`:\n`{reply[:500]}`"
 
         # Prompt with no free text and no matching shortcut/number — default to option 1
         _select_option(prompt_pane, 1)
+        _advance_question()
         return f"📨 Selected option 1 in `{wid}`"
 
     # Normal message: type text + Enter
@@ -748,8 +796,12 @@ def cmd_hook():
     elif event == "Notification":
         ntype = data.get("notification_type", "")
         if ntype == "permission_prompt":
-            wid = get_window_id() or "unknown"
             msg = data.get("message", "")
+            # AskUserQuestion fires "needs your attention" but has no blocking
+            # permission dialog — just suppress, PreToolUse handles the question
+            if "needs your attention" in msg:
+                return
+            wid = get_window_id() or "unknown"
             bash_cmd = ""
             if "bash" in msg.lower():
                 cmd_file = os.path.join(SIGNAL_DIR, f"_bash_cmd_{wid}.json")

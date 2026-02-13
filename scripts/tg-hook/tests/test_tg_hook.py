@@ -333,24 +333,22 @@ class TestRouteToPane(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_question_free_text(self, mock_run):
-        """Free text on question prompt — navigates to Other, types, Enter."""
+        """Free text on question prompt — navigate to Type something, type, Enter."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "my custom answer")
         self.assertIn("Answered", result)
         self.assertIn("`my custom answer`", result)
         cmd_str = mock_run.call_args[0][0][2]
-        self.assertEqual(cmd_str.count("Down"), 2)  # 2 Downs to reach Other
-        self.assertIn("sleep 0.1", cmd_str)
+        self.assertEqual(cmd_str.count("Down"), 2)
         self.assertIn("my custom answer", cmd_str)
-        self.assertIn("Enter", cmd_str)
-        # No Enter between Down and text (the bug we fixed)
+        # Sequence: Down×2 → type text → Enter (submit)
+        self.assertEqual(cmd_str.count("Enter"), 1)
         down_pos = cmd_str.rfind("Down")
-        enter_pos = cmd_str.find("Enter")
         text_pos = cmd_str.find("my custom answer")
-        self.assertGreater(text_pos, down_pos, "Text should come after Downs")
-        # First Enter should be AFTER text, not between Down and text
-        self.assertGreater(enter_pos, text_pos, "Enter should come after text, not between Down and text")
+        enter_pos = cmd_str.find("Enter")
+        self.assertGreater(text_pos, down_pos, "Text after Downs")
+        self.assertGreater(enter_pos, text_pos, "Enter after text")
 
     @patch("subprocess.run")
     def test_question_numbered(self, mock_run):
@@ -489,7 +487,8 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("2. B", msg)
         self.assertIn("3. Type your answer", msg)
         self.assertIn("4. Chat about this", msg)
-        mock_save.assert_called_once_with("w4", "%20", total=4, free_text_at=2)
+        mock_save.assert_called_once_with("w4", "%20", total=4, free_text_at=2,
+                                                 remaining_qs=None, project="proj")
 
     def test_skips_underscore_files(self):
         """Signal processing should skip _prefixed state files."""
