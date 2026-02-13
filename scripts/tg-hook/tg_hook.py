@@ -58,7 +58,6 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "") or _creds.get("TELEGRAM_CHAT_ID
 TG_HOOKS_ENABLED = os.environ.get("CLAUDE_TG_HOOKS", "") == "1"
 TG_MAX = 4096  # Telegram message character limit
 SIGNAL_DIR = "/tmp/tg_hook_signals"
-PROMPT_EXPIRY = 300  # seconds before active prompt state expires
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -447,17 +446,48 @@ def save_active_prompt(wid: str, pane: str, total: int,
 
 
 def load_active_prompt(wid: str) -> dict | None:
-    """Load and remove active prompt state. Returns None if expired or missing."""
+    """Load and remove active prompt state. Returns None if missing."""
     path = os.path.join(SIGNAL_DIR, f"_active_prompt_{wid}.json")
     try:
         with open(path) as f:
             state = json.load(f)
         os.remove(path)
-        if time.time() - state.get("ts", 0) > PROMPT_EXPIRY:
-            return None
         return state
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _pane_has_prompt(pane: str) -> bool:
+    """Check if a tmux pane still shows a permission/question dialog."""
+    try:
+        raw = _capture_pane(pane, 10)
+        for line in raw.splitlines():
+            if re.match(r'^\s*[❯>]?\s*\d+\.\s+', line):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _cleanup_stale_prompts():
+    """Remove active prompt files whose pane no longer shows a dialog."""
+    if not os.path.isdir(SIGNAL_DIR):
+        return
+    for fname in os.listdir(SIGNAL_DIR):
+        if not fname.startswith("_active_prompt_"):
+            continue
+        path = os.path.join(SIGNAL_DIR, fname)
+        try:
+            with open(path) as f:
+                state = json.load(f)
+            pane = state.get("pane", "")
+            if pane and not _pane_has_prompt(pane):
+                os.remove(path)
+        except (OSError, json.JSONDecodeError):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 def _save_focus_state(wid: str, pane: str, project: str):
@@ -981,13 +1011,28 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         return "pause", sessions, last_win_idx
 
     if text.lower() == "/quit":
-        tg_send("👋 Bye.")
-        return "quit", sessions, last_win_idx
+        tg_send("⚠️ Shut down listener? Reply `y` to confirm.")
+        return "quit_pending", sessions, last_win_idx
 
     if text.lower() == "/help":
         sessions = scan_claude_sessions()
-        help_msg = format_sessions_message(sessions) + "\n\n" + cmd_help
-        tg_send(help_msg)
+        help_lines = [
+            "📖 *Commands:*",
+            "`/sessions` — list active Claude sessions",
+            "`/status [wN] [lines]` — show last response or N filtered lines",
+            "`/last [wN]` — re-send last Telegram message for a session",
+            "`/focus wN` — monitor a session in real-time",
+            "`/unfocus` — stop real-time monitoring",
+            "`/new [dir]` — start new Claude session (default: `~/projects/`)",
+            "`/interrupt [wN]` — interrupt current task (Esc)",
+            "`/kill wN` — exit a Claude session (Ctrl+C x3)",
+            "`/stop` — pause the listener",
+            "`/quit` — shut down the listener",
+            "",
+            "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
+            "*Photos:* send a photo to have Claude read it. Add `wN` in caption to target.",
+        ]
+        tg_send("\n".join(help_lines))
         return None, sessions, last_win_idx
 
     if text.lower() == "/sessions":
@@ -1059,6 +1104,73 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         tg_send("🔍 Focus stopped.")
         return None, sessions, last_win_idx
 
+    # /new [dir]
+    new_m = re.match(r"^/new(?:\s+(.+))?$", text)
+    if new_m:
+        dir_arg = new_m.group(1).strip() if new_m.group(1) else None
+        if dir_arg:
+            work_dir = os.path.expanduser(dir_arg)
+        else:
+            ts = time.strftime("%m%d-%H%M")
+            work_dir = os.path.expanduser(f"~/projects/claude-{ts}")
+        os.makedirs(work_dir, exist_ok=True)
+        try:
+            result = subprocess.run(
+                ["tmux", "new-window", "-d", "-P", "-F", "#{window_index}",
+                 f"bash -c 'cd {shlex.quote(work_dir)} && claude'"],
+                capture_output=True, text=True, timeout=10,
+            )
+            new_idx = result.stdout.strip()
+            sessions = scan_claude_sessions()
+            proj = work_dir.rstrip("/").rsplit("/", 1)[-1]
+            tg_send(f"🚀 Started Claude in `w{new_idx}` (`{proj}`):\n`{work_dir}`")
+            return None, sessions, new_idx
+        except Exception as e:
+            tg_send(f"⚠️ Failed to start session: `{e}`")
+            return None, sessions, last_win_idx
+
+    # /interrupt [wN]
+    int_m = re.match(r"^/interrupt(?:\s+w?(\d+))?$", text.lower())
+    if int_m:
+        idx = int_m.group(1) or last_win_idx
+        if idx and idx in sessions:
+            pane, project = sessions[idx]
+            p = shlex.quote(pane)
+            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+            tg_send(f"⏹ Interrupted `w{idx}` (`{project}`).")
+            return None, sessions, idx
+        elif idx:
+            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}")
+        else:
+            tg_send("⚠️ No window specified. Use `/interrupt wN`.")
+        return None, sessions, last_win_idx
+
+    # /kill wN
+    kill_m = re.match(r"^/kill\s+w?(\d+)$", text.lower())
+    if kill_m:
+        idx = kill_m.group(1)
+        if idx in sessions:
+            pane, project = sessions[idx]
+            p = shlex.quote(pane)
+            # Three Ctrl+C with delays — reliably exits Claude Code
+            subprocess.run(
+                ["bash", "-c",
+                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
+                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
+                 f"tmux send-keys -t {p} C-c"],
+                timeout=10,
+            )
+            time.sleep(2)
+            sessions = scan_claude_sessions()
+            if idx in sessions:
+                tg_send(f"⚠️ `w{idx}` (`{project}`) still running after Ctrl+C.")
+            else:
+                tg_send(f"🛑 Killed `w{idx}` (`{project}`).")
+            return None, sessions, last_win_idx
+        else:
+            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}")
+            return None, sessions, last_win_idx
+
     # /last [wN]
     last_m = re.match(r"^/last(?:\s+w?(\d+))?$", text.lower())
     if last_m:
@@ -1124,6 +1236,9 @@ def cmd_listen():
     last_win_idx = None
     RESCAN_INTERVAL = 60
 
+    # Prompt cleanup timer
+    last_prompt_cleanup: float = 0
+
     # Focus monitoring state
     focus_target_wid: str | None = None
     focus_pane_width: int = 0
@@ -1146,7 +1261,7 @@ def cmd_listen():
     except Exception:
         pass
 
-    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/unfocus` | `/stop` pause | `/quit` exit"
+    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/unfocus` | `/new [dir]` | `/interrupt [wN]` | `/kill wN` | `/stop` pause | `/quit` exit"
 
     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
     tg_send(help_msg)
@@ -1154,6 +1269,7 @@ def cmd_listen():
     _log("listen", "Press Ctrl+C to stop")
 
     paused = False
+    quit_pending = False
     script_path = os.path.realpath(__file__)
     script_mtime = os.path.getmtime(script_path)
 
@@ -1207,6 +1323,11 @@ def cmd_listen():
         if time.time() - last_scan > RESCAN_INTERVAL:
             sessions = scan_claude_sessions()
             last_scan = time.time()
+
+        # Periodically clean up stale prompts (pane no longer shows dialog)
+        if time.time() - last_prompt_cleanup > 5:
+            _cleanup_stale_prompts()
+            last_prompt_cleanup = time.time()
 
         focus_state = _load_focus_state()
 
@@ -1321,6 +1442,16 @@ def cmd_listen():
                     tg_send("⚠️ Failed to download photo.")
                 continue
 
+            # Handle quit confirmation
+            if quit_pending:
+                quit_pending = False
+                if text.lower() in ("y", "yes"):
+                    tg_send("👋 Bye.")
+                    return
+                else:
+                    tg_send("Cancelled.")
+                continue
+
             prev_sessions = sessions
             action, sessions, last_win_idx = _handle_command(
                 text, sessions, last_win_idx, CMD_HELP
@@ -1330,6 +1461,8 @@ def cmd_listen():
             if action == "pause":
                 paused = True
                 break
+            elif action == "quit_pending":
+                quit_pending = True
             elif action == "quit":
                 return
 

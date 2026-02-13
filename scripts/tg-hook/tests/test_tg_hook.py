@@ -832,6 +832,148 @@ class TestTgSendPhoto(unittest.TestCase):
             os.remove(path)
 
 
+class TestPaneHasPrompt(unittest.TestCase):
+    """Test _pane_has_prompt detects numbered option dialogs."""
+
+    @patch("subprocess.run")
+    def test_detects_numbered_options(self, mock_run):
+        mock_run.return_value = MagicMock(stdout=(
+            "● Bash(echo hi)\n"
+            "  ⎿  Bash command\n"
+            "❯ 1. Yes\n"
+            "  2. Yes, and don't ask again\n"
+            "  3. No (esc)\n"
+        ))
+        self.assertTrue(tg._pane_has_prompt("0:4.0"))
+
+    @patch("subprocess.run")
+    def test_detects_indented_options_without_cursor(self, mock_run):
+        """Options without ❯ prefix (e.g. non-selected items)."""
+        mock_run.return_value = MagicMock(stdout=(
+            "● Update(test.py)\n"
+            "  ⎿  Edit file\n"
+            "  1. Yes\n"
+            "  2. No (esc)\n"
+        ))
+        self.assertTrue(tg._pane_has_prompt("0:4.0"))
+
+    @patch("subprocess.run")
+    def test_no_options(self, mock_run):
+        mock_run.return_value = MagicMock(stdout=(
+            "● Here is the answer\n"
+            "  The result is 42.\n"
+            "❯ prompt\n"
+        ))
+        self.assertFalse(tg._pane_has_prompt("0:4.0"))
+
+    @patch("subprocess.run")
+    def test_empty_pane(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="")
+        self.assertFalse(tg._pane_has_prompt("0:4.0"))
+
+    @patch("subprocess.run", side_effect=Exception("tmux error"))
+    def test_exception_returns_false(self, mock_run):
+        self.assertFalse(tg._pane_has_prompt("0:4.0"))
+
+    @patch("subprocess.run")
+    def test_numbered_list_in_response_is_false_positive(self, mock_run):
+        """A numbered list in Claude's response will match — known limitation.
+
+        This documents the behavior rather than asserting it 'should' be false.
+        The cost of false positives is low (prompt state kept a bit longer).
+        """
+        mock_run.return_value = MagicMock(stdout=(
+            "Here are the steps:\n"
+            "  1. Install dependencies\n"
+            "  2. Run the tests\n"
+            "  3. Deploy\n"
+            "❯ prompt\n"
+        ))
+        # This IS a false positive — numbered content looks like options
+        self.assertTrue(tg._pane_has_prompt("0:4.0"))
+
+
+class TestCleanupStalePrompts(unittest.TestCase):
+    """Test _cleanup_stale_prompts removes prompts whose pane no longer shows dialog."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_cleanup"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "_pane_has_prompt", return_value=False)
+    def test_removes_stale_prompt(self, mock_has):
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        with open(path, "w") as f:
+            json.dump({"pane": "0:4.0", "total": 3}, f)
+        tg._cleanup_stale_prompts()
+        self.assertFalse(os.path.exists(path))
+
+    @patch.object(tg, "_pane_has_prompt", return_value=True)
+    def test_keeps_active_prompt(self, mock_has):
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        with open(path, "w") as f:
+            json.dump({"pane": "0:4.0", "total": 3}, f)
+        tg._cleanup_stale_prompts()
+        self.assertTrue(os.path.exists(path))
+
+    def test_removes_corrupt_file(self):
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        with open(path, "w") as f:
+            f.write("not json{{{")
+        tg._cleanup_stale_prompts()
+        self.assertFalse(os.path.exists(path))
+
+    @patch.object(tg, "_pane_has_prompt", return_value=False)
+    def test_ignores_non_prompt_state_files(self, mock_has):
+        """Should not touch _bash_cmd or _focus files."""
+        bash_path = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
+        focus_path = os.path.join(self.signal_dir, "_focus.json")
+        with open(bash_path, "w") as f:
+            json.dump({"cmd": "echo"}, f)
+        with open(focus_path, "w") as f:
+            json.dump({"wid": "4"}, f)
+        tg._cleanup_stale_prompts()
+        self.assertTrue(os.path.exists(bash_path))
+        self.assertTrue(os.path.exists(focus_path))
+
+    def test_mixed_stale_and_active(self):
+        """Multiple prompt files — removes only stale ones."""
+        stale = os.path.join(self.signal_dir, "_active_prompt_w1.json")
+        active = os.path.join(self.signal_dir, "_active_prompt_w2.json")
+        with open(stale, "w") as f:
+            json.dump({"pane": "0:1.0", "total": 3}, f)
+        with open(active, "w") as f:
+            json.dump({"pane": "0:2.0", "total": 3}, f)
+        # w1 pane has no prompt, w2 pane still has prompt
+        def side_effect(pane):
+            return pane == "0:2.0"
+        with patch.object(tg, "_pane_has_prompt", side_effect=side_effect):
+            tg._cleanup_stale_prompts()
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(os.path.exists(active))
+
+    def test_missing_pane_key_keeps_file(self):
+        """Prompt file with no pane key is kept (can't verify pane state)."""
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        with open(path, "w") as f:
+            json.dump({"total": 3}, f)
+        tg._cleanup_stale_prompts()
+        # Empty pane string short-circuits — file not removed
+        self.assertTrue(os.path.exists(path))
+
+    def test_nonexistent_signal_dir(self):
+        """No crash when signal dir doesn't exist."""
+        tg.SIGNAL_DIR = "/tmp/tg_hook_nonexistent_dir_xyz"
+        tg._cleanup_stale_prompts()  # should not raise
+
+
 class TestFocusState(unittest.TestCase):
     """Test focus state file operations."""
 
@@ -868,6 +1010,564 @@ class TestFocusState(unittest.TestCase):
         tg._save_focus_state("4", "0:4.0", "myproj")
         tg._clear_signals(include_state=True)
         self.assertIsNone(tg._load_focus_state())
+
+
+class TestSendLongMessage(unittest.TestCase):
+    """Test _send_long_message chunking logic."""
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_short_message_single_send(self, mock_send):
+        """Body that fits in one message — sent as single message."""
+        tg._send_long_message("header:\n", "short body", wid="4")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("header:", msg)
+        self.assertIn("```\nshort body\n```", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_long_message_chunked(self, mock_send):
+        """Body exceeding TG_MAX is split into multiple messages."""
+        # Create body that exceeds chunk_size
+        line = "x" * 79 + "\n"  # 80 chars per line
+        body = line * 100  # 8000 chars total — exceeds TG_MAX minus overhead
+        tg._send_long_message("H:\n", body, wid="4")
+        self.assertGreater(mock_send.call_count, 1)
+        # First chunk has header + (1/N) label
+        first_msg = mock_send.call_args_list[0][0][0]
+        self.assertIn("H:", first_msg)
+        self.assertIn("(1/", first_msg)
+        # Subsequent chunks have (cont. N/N) label
+        second_msg = mock_send.call_args_list[1][0][0]
+        self.assertIn("(cont.", second_msg)
+        # All chunks wrapped in code blocks
+        for c in mock_send.call_args_list:
+            self.assertIn("```", c[0][0])
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_empty_body(self, mock_send):
+        tg._send_long_message("H:\n", "", wid="4")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("```\n\n```", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_single_long_line_no_break(self, mock_send):
+        """Single line with no newlines — can't split at line boundary."""
+        body = "x" * 8000
+        tg._send_long_message("H:\n", body, wid="4")
+        # The chunking loop puts entire line in one chunk if no newlines
+        # Result: single very long message (truncated by tg_send)
+        self.assertEqual(mock_send.call_count, 1)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_saves_last_msg(self, mock_send):
+        """Verifies _last_messages is updated."""
+        tg._send_long_message("H:\n", "body", wid="7")
+        self.assertIn("7", tg._last_messages)
+        self.assertIn("body", tg._last_messages["7"])
+
+
+class TestTgSendMarkdownFallback(unittest.TestCase):
+    """Test tg_send Markdown 400 fallback."""
+
+    @patch("requests.post")
+    def test_markdown_400_retries_without_parse_mode(self, mock_post):
+        """On 400, retries without Markdown parse_mode."""
+        fail_resp = MagicMock()
+        fail_resp.status_code = 400
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 1}}
+        ok_resp.raise_for_status = MagicMock()
+
+        mock_post.side_effect = [fail_resp, ok_resp]
+
+        tg.tg_send("text with _bad_ markdown")
+
+        self.assertEqual(mock_post.call_count, 2)
+        # First call has parse_mode
+        first_call = mock_post.call_args_list[0]
+        self.assertEqual(first_call[1]["json"]["parse_mode"], "Markdown")
+        # Second call has no parse_mode
+        second_call = mock_post.call_args_list[1]
+        self.assertNotIn("parse_mode", second_call[1]["json"])
+
+    @patch("requests.post")
+    def test_success_on_first_try(self, mock_post):
+        """200 response — no retry needed."""
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 1}}
+        ok_resp.raise_for_status = MagicMock()
+        mock_post.return_value = ok_resp
+
+        result = tg.tg_send("clean text")
+        self.assertEqual(result, 1)
+        mock_post.assert_called_once()
+
+
+class TestLoadActivePrompt(unittest.TestCase):
+    """Test load_active_prompt — no time-based expiry."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_prompt"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_load_and_remove(self):
+        """Loading a prompt returns state and removes the file."""
+        tg.save_active_prompt("w4", "0:4.0", total=3)
+        state = tg.load_active_prompt("w4")
+        self.assertIsNotNone(state)
+        self.assertEqual(state["pane"], "0:4.0")
+        self.assertEqual(state["total"], 3)
+        # File should be gone after load
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        self.assertFalse(os.path.exists(path))
+
+    def test_missing_returns_none(self):
+        self.assertIsNone(tg.load_active_prompt("w99"))
+
+    def test_old_timestamp_still_loads(self):
+        """Prompt with ancient timestamp still loads — no time-based expiry."""
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        state = {"pane": "0:4.0", "total": 3, "ts": 1000000.0}  # year 1970
+        with open(path, "w") as f:
+            json.dump(state, f)
+        loaded = tg.load_active_prompt("w4")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["total"], 3)
+
+    def test_corrupt_file_returns_none(self):
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        with open(path, "w") as f:
+            f.write("{corrupt")
+        self.assertIsNone(tg.load_active_prompt("w4"))
+
+    def test_save_with_all_fields(self):
+        """All optional fields are persisted."""
+        tg.save_active_prompt("w4", "0:4.0", total=5,
+                              shortcuts={"y": 1, "n": 5},
+                              free_text_at=3,
+                              remaining_qs=[{"question": "Q2?"}],
+                              project="myproj")
+        state = tg.load_active_prompt("w4")
+        self.assertEqual(state["shortcuts"], {"y": 1, "n": 5})
+        self.assertEqual(state["free_text_at"], 3)
+        self.assertEqual(state["remaining_qs"], [{"question": "Q2?"}])
+        self.assertEqual(state["project"], "myproj")
+
+
+class TestHandleCommand(unittest.TestCase):
+    """Test _handle_command for new commands."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.cmd_help = "help text"
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_help_command(self, mock_send):
+        action, sessions, last = tg._handle_command(
+            "/help", self.sessions, "4", self.cmd_help)
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Commands", msg)
+        self.assertIn("/sessions", msg)
+        self.assertIn("/status", msg)
+        self.assertIn("/focus", msg)
+        self.assertIn("/new", msg)
+        self.assertIn("/kill", msg)
+        self.assertIn("/interrupt", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_stop_command(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/stop", self.sessions, "4", self.cmd_help)
+        self.assertEqual(action, "pause")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_quit_command(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/quit", self.sessions, "4", self.cmd_help)
+        self.assertEqual(action, "quit_pending")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Shut down", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_sessions_command(self, mock_scan, mock_send):
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command(
+            "/sessions", self.sessions, "4", self.cmd_help)
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Active Claude sessions", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_interrupt_command(self, mock_run, mock_send):
+        action, _, last = tg._handle_command(
+            "/interrupt w4", self.sessions, "4", self.cmd_help)
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Interrupted", msg)
+        # Check tmux send-keys Escape was sent
+        cmd_str = mock_run.call_args[0][0][2]
+        self.assertIn("Escape", cmd_str)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_interrupt_no_session(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/interrupt w99", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_interrupt_no_window_specified(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/interrupt", self.sessions, None, self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No window specified", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_interrupt_defaults_to_last_win(self, mock_send):
+        with patch("subprocess.run"):
+            action, _, last = tg._handle_command(
+                "/interrupt", self.sessions, "5", self.cmd_help)
+        self.assertEqual(last, "5")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Interrupted", msg)
+        self.assertIn("`w5`", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg, "scan_claude_sessions")
+    def test_kill_command_success(self, mock_scan, mock_run, mock_send):
+        """Kill removes session — success message."""
+        mock_scan.return_value = {"4": ("0:4.0", "myproj")}  # w5 gone
+        with patch("time.sleep"):
+            action, sessions, _ = tg._handle_command(
+                "/kill w5", self.sessions, "4", self.cmd_help)
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Killed", msg)
+        # Verify three C-c sent
+        cmd_str = mock_run.call_args[0][0][2]
+        self.assertEqual(cmd_str.count("C-c"), 3)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg, "scan_claude_sessions")
+    def test_kill_command_still_running(self, mock_scan, mock_run, mock_send):
+        """Kill doesn't remove session — warning message."""
+        mock_scan.return_value = self.sessions  # w5 still there
+        with patch("time.sleep"):
+            action, _, _ = tg._handle_command(
+                "/kill w5", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("still running", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_kill_nonexistent_session(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/kill w99", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg, "scan_claude_sessions")
+    def test_new_command_default_dir(self, mock_scan, mock_run, mock_send):
+        """New session with default directory."""
+        mock_run.return_value = MagicMock(stdout="6\n")
+        mock_scan.return_value = {**self.sessions, "6": ("0:6.0", "claude-0213-1500")}
+        action, sessions, last = tg._handle_command(
+            "/new", self.sessions, "4", self.cmd_help)
+        self.assertIsNone(action)
+        self.assertEqual(last, "6")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Started Claude", msg)
+        self.assertIn("`w6`", msg)
+        # Should create window with claude command
+        cmd_arg = mock_run.call_args[0][0]
+        self.assertIn("new-window", cmd_arg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg, "scan_claude_sessions")
+    def test_new_command_custom_dir(self, mock_scan, mock_run, mock_send):
+        """New session with user-specified directory."""
+        mock_run.return_value = MagicMock(stdout="7\n")
+        mock_scan.return_value = {**self.sessions, "7": ("0:7.0", "mydir")}
+        action, _, last = tg._handle_command(
+            "/new ~/mydir", self.sessions, "4", self.cmd_help)
+        self.assertEqual(last, "7")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Started Claude", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run", side_effect=Exception("tmux error"))
+    def test_new_command_failure(self, mock_run, mock_send):
+        action, _, _ = tg._handle_command(
+            "/new", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Failed to start", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_last_command(self, mock_send):
+        tg._last_messages["4"] = "previous message"
+        action, _, _ = tg._handle_command(
+            "/last w4", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertEqual(msg, "previous message")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_last_command_no_saved(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/last w99", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No saved message", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    def test_wn_prefix_routing(self, mock_route, mock_send):
+        action, _, last = tg._handle_command(
+            "w4 hello", self.sessions, None, self.cmd_help)
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        mock_route.assert_called_once_with("0:4.0", "4", "hello")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    def test_no_prefix_single_session(self, mock_route, mock_send):
+        """Single session — routes without prefix."""
+        sessions = {"4": ("0:4.0", "myproj")}
+        action, _, last = tg._handle_command(
+            "hello", sessions, None, self.cmd_help)
+        self.assertEqual(last, "4")
+        mock_route.assert_called_once()
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_no_prefix_multiple_sessions_no_last(self, mock_send):
+        """Multiple sessions, no last — asks user to specify."""
+        action, _, _ = tg._handle_command(
+            "hello", self.sessions, None, self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Multiple sessions", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    def test_no_prefix_uses_last_win(self, mock_route, mock_send):
+        """Multiple sessions but last_win_idx set — routes to it."""
+        action, _, last = tg._handle_command(
+            "hello", self.sessions, "5", self.cmd_help)
+        self.assertEqual(last, "5")
+        mock_route.assert_called_once_with("0:5.0", "5", "hello")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_no_sessions(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "hello", {}, None, self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No Claude sessions", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_wn_nonexistent_session(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "w99 hello", self.sessions, "4", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No Claude session at `w99`", msg)
+
+
+class TestComputeNewLinesEdgeCases(unittest.TestCase):
+    """Additional edge cases for _compute_new_lines."""
+
+    def test_both_empty(self):
+        result = tg._compute_new_lines([], [])
+        self.assertEqual(result, [])
+
+    def test_new_empty_old_has_content(self):
+        result = tg._compute_new_lines(["a", "b"], [])
+        self.assertEqual(result, [])
+
+    def test_single_line_identical(self):
+        result = tg._compute_new_lines(["a"], ["a"])
+        # Single equal line < 3 threshold → returns all new
+        self.assertEqual(result, ["a"])
+
+    def test_interleaved_inserts(self):
+        """New lines inserted between existing lines."""
+        old = ["a", "b", "c", "d", "e"]
+        new = ["a", "b", "NEW1", "c", "d", "NEW2", "e"]
+        result = tg._compute_new_lines(old, new)
+        self.assertIn("NEW1", result)
+        self.assertIn("NEW2", result)
+        self.assertNotIn("a", result)
+
+
+class TestCmdHookEdgeCases(unittest.TestCase):
+    """Test cmd_hook edge cases."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_hook_edge"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_enabled = tg.TG_HOOKS_ENABLED
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.TG_HOOKS_ENABLED = self._orig_enabled
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch("sys.stdin")
+    def test_hooks_disabled_consumes_stdin(self, mock_stdin):
+        """With CLAUDE_TG_HOOKS != '1', stdin is consumed but no signal written."""
+        tg.TG_HOOKS_ENABLED = False
+        mock_stdin.read.return_value = '{"hook_event_name": "Stop"}'
+        tg.cmd_hook()
+        mock_stdin.read.assert_called_once()
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(signals, [])
+
+    @patch("sys.stdin")
+    def test_empty_stdin(self, mock_stdin):
+        """Empty stdin — no crash, no signal."""
+        tg.TG_HOOKS_ENABLED = True
+        mock_stdin.read.return_value = ""
+        tg.cmd_hook()  # should not raise
+
+    @patch("sys.stdin")
+    def test_invalid_json(self, mock_stdin):
+        """Invalid JSON — no crash, no signal."""
+        tg.TG_HOOKS_ENABLED = True
+        mock_stdin.read.return_value = "not json{{"
+        tg.cmd_hook()  # should not raise
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(signals, [])
+
+    @patch("sys.stdin")
+    def test_unknown_event_ignored(self, mock_stdin):
+        """Unknown hook_event_name — no signal written."""
+        tg.TG_HOOKS_ENABLED = True
+        mock_stdin.read.return_value = json.dumps({
+            "hook_event_name": "UnknownEvent", "cwd": "/tmp"
+        })
+        tg.cmd_hook()
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(signals, [])
+
+    @patch("sys.stdin")
+    def test_needs_attention_suppressed(self, mock_stdin):
+        """AskUserQuestion 'needs your attention' notification is suppressed."""
+        tg.TG_HOOKS_ENABLED = True
+        mock_stdin.read.return_value = json.dumps({
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "Claude needs your attention",
+            "cwd": "/tmp",
+        })
+        tg.cmd_hook()
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(signals, [])
+
+    @patch.object(tg, "get_window_id", return_value="w4")
+    @patch("sys.stdin")
+    def test_question_signal_written(self, mock_stdin, mock_wid):
+        """AskUserQuestion PreToolUse creates question signal."""
+        tg.TG_HOOKS_ENABLED = True
+        questions = [{"question": "Pick?", "options": [{"label": "A"}]}]
+        mock_stdin.read.return_value = json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": questions},
+            "cwd": "/tmp/proj",
+        })
+        os.environ["TMUX_PANE"] = "%20"
+        tg.cmd_hook()
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(len(signals), 1)
+        with open(os.path.join(self.signal_dir, signals[0])) as f:
+            sig = json.load(f)
+        self.assertEqual(sig["event"], "question")
+        self.assertEqual(sig["questions"], questions)
+
+
+class TestDownloadTgPhotoEdgeCases(unittest.TestCase):
+    """Additional edge cases for _download_tg_photo."""
+
+    @patch("requests.get")
+    def test_empty_file_path(self, mock_get):
+        """getFile returns empty file_path — returns None."""
+        resp = MagicMock()
+        resp.json.return_value = {"result": {"file_path": ""}}
+        resp.raise_for_status = MagicMock()
+        mock_get.return_value = resp
+        result = tg._download_tg_photo("file_id", "/tmp/test.jpg")
+        self.assertIsNone(result)
+
+    @patch("requests.get")
+    def test_missing_result_key(self, mock_get):
+        """getFile returns no result key — returns None."""
+        resp = MagicMock()
+        resp.json.return_value = {}
+        resp.raise_for_status = MagicMock()
+        mock_get.return_value = resp
+        result = tg._download_tg_photo("file_id", "/tmp/test.jpg")
+        self.assertIsNone(result)
+
+
+class TestMultiQuestionFlow(unittest.TestCase):
+    """Test multi-question AskUserQuestion routing through route_to_pane."""
+
+    def setUp(self):
+        self.pane = "0:4.0"
+        self.win_idx = "4"
+
+    @patch("subprocess.run")
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_first_question_saves_remaining(self, mock_send, mock_run):
+        """Answering first question sends second question to Telegram."""
+        remaining = [{"question": "Q2?", "options": [
+            {"label": "X", "description": "opt X"},
+        ]}]
+        prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
+                  "free_text_at": 2, "remaining_qs": remaining,
+                  "project": "myproj"}
+        with patch.object(tg, "load_active_prompt", return_value=prompt):
+            result = tg.route_to_pane(self.pane, self.win_idx, "1")
+        self.assertIn("Selected option 1", result)
+        # Should have sent the second question
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Q2?", msg)
+        self.assertIn("X", msg)
+
+    @patch("subprocess.run")
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "save_active_prompt")
+    def test_last_question_prompts_submit(self, mock_save, mock_send, mock_run):
+        """Answering last question prompts 'Submit answers?'."""
+        prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
+                  "free_text_at": 2, "remaining_qs": [],
+                  "project": "myproj"}
+        with patch.object(tg, "load_active_prompt", return_value=prompt):
+            result = tg.route_to_pane(self.pane, self.win_idx, "1")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Submit answers?", msg)
+        # Should save prompt with y/n shortcuts for confirmation
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args
+        self.assertEqual(call_kwargs[1]["total"], 2)
+        self.assertIn("y", call_kwargs[1]["shortcuts"])
 
 
 if __name__ == "__main__":
