@@ -211,7 +211,7 @@ def _join_wrapped_lines(lines: list[str], width: int) -> list[str]:
         prev_len = len(result[-1])
         s = line.lstrip()
         indent = len(line) - len(s)
-        if (prev_len >= width - 5 and indent >= 2 and s and
+        if (prev_len >= width - 15 and indent >= 2 and s and
                 not re.match(r'[●•─━❯✻⏵⏸>*\-\d]', s)):
             result[-1] += " " + s
         else:
@@ -487,7 +487,8 @@ def process_signals(focused_wid: str | None = None) -> str | None:
                 if pane:
                     time.sleep(4)
                     content = _capture_pane(pane, 30)
-                cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
+                pw = _get_pane_width(pane) if pane else 0
+                cleaned = clean_pane_content(content, "stop", pw) if content else "(could not capture pane)"
                 msg = f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```"
                 tg_send(msg)
                 _save_last_msg(wid, msg)
@@ -589,7 +590,7 @@ def _filter_noise(raw: str) -> list[str]:
     return filtered
 
 
-def clean_pane_content(raw: str, event: str) -> str:
+def clean_pane_content(raw: str, event: str, pane_width: int = 0) -> str:
     """Clean captured tmux pane content."""
     lines = raw.splitlines()
     if event == "stop":
@@ -607,6 +608,8 @@ def clean_pane_content(raw: str, event: str) -> str:
                 break
         lines = lines[start:end]
     filtered = _filter_noise("\n".join(lines))
+    if pane_width:
+        filtered = _join_wrapped_lines(filtered, pane_width)
     return "\n".join(filtered).strip()
 
 
@@ -889,6 +892,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
 def cmd_listen():
     """Poll Telegram and auto-route messages to Claude sessions by wN prefix."""
     _clear_signals()
+    # Clear stale prompt state — after restart, no in-memory context to handle them
+    if os.path.isdir(SIGNAL_DIR):
+        for f in os.listdir(SIGNAL_DIR):
+            if f.startswith("_active_prompt_") or f.startswith("_bash_cmd_"):
+                try:
+                    os.remove(os.path.join(SIGNAL_DIR, f))
+                except OSError:
+                    pass
 
     sessions = scan_claude_sessions()
     last_scan = time.time()

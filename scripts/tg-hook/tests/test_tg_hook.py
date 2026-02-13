@@ -634,25 +634,25 @@ class TestJoinWrappedLines(unittest.TestCase):
         self.assertEqual(result, ["short line", "another short"])
 
     def test_joins_continuation(self):
-        # Line at width 80, followed by indented continuation
-        lines = ["x" * 78, "  continued text"]
+        # Line near width 80 (within margin of 15), followed by indented continuation
+        lines = ["x" * 68, "  continued text"]
         result = tg._join_wrapped_lines(lines, 80)
-        self.assertEqual(result, ["x" * 78 + " continued text"])
+        self.assertEqual(result, ["x" * 68 + " continued text"])
 
     def test_preserves_bullet_after_long_line(self):
-        lines = ["x" * 78, "● New bullet point"]
+        lines = ["x" * 68, "● New bullet point"]
         result = tg._join_wrapped_lines(lines, 80)
-        self.assertEqual(result, ["x" * 78, "● New bullet point"])
+        self.assertEqual(result, ["x" * 68, "● New bullet point"])
 
     def test_preserves_numbered_item(self):
-        lines = ["x" * 78, "  2. Second item"]
+        lines = ["x" * 68, "  2. Second item"]
         result = tg._join_wrapped_lines(lines, 80)
-        self.assertEqual(result, ["x" * 78, "  2. Second item"])
+        self.assertEqual(result, ["x" * 68, "  2. Second item"])
 
     def test_chains_multiple_wraps(self):
-        lines = ["x" * 78, "  " + "y" * 76, "  final part"]
+        lines = ["x" * 68, "  " + "y" * 66, "  final part"]
         result = tg._join_wrapped_lines(lines, 80)
-        self.assertEqual(result, ["x" * 78 + " " + "y" * 76 + " final part"])
+        self.assertEqual(result, ["x" * 68 + " " + "y" * 66 + " final part"])
 
     def test_skips_when_width_unknown(self):
         lines = ["x" * 78, "  continued"]
