@@ -26,6 +26,7 @@ import re
 import sys
 import json
 import time
+import shlex
 import subprocess
 import requests
 
@@ -290,25 +291,31 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
         num_opts = prompt.get("num_options", 0)
         prompt_type = prompt.get("type", "")
         reply = text.strip()
+        print(f"[route] prompt found: type={prompt_type}, num_opts={num_opts}, reply={reply!r}, pane={pane}")
+
+        p = shlex.quote(pane)
 
         # Numbered selection
         if reply.isdigit():
             n = int(reply)
             total = num_opts + 2 if prompt_type == "question" else num_opts
             if 1 <= n <= total:
-                for _ in range(n - 1):
-                    subprocess.run(["tmux", "send-keys", "-t", pane, "Down"])
-                subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"])
+                nav = " ".join(["Down"] * (n - 1))
+                parts = [f"tmux send-keys -t {p} {nav}"] if n > 1 else []
+                if n > 1:
+                    parts.append("sleep 0.1")
+                parts.append(f"tmux send-keys -t {p} Enter")
+                subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
                 return f"📨 Selected option {n} in `{wid}`"
 
-        # Free text for questions → navigate to "Other", type directly, submit
+        # Free text for questions → navigate to "Other", type, submit
         if prompt_type == "question":
-            for _ in range(num_opts):
-                subprocess.run(["tmux", "send-keys", "-t", pane, "Down"])
-                time.sleep(0.05)
-            subprocess.run(["tmux", "send-keys", "-t", pane, "-l", reply])
-            subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"])
-            return f"📨 Answered in `{wid}`:\n_{reply[:500]}_"
+            prompt_pane = prompt.get("pane", pane)
+            pp = shlex.quote(prompt_pane)
+            nav = " ".join(["Down"] * num_opts)
+            cmd = f"tmux send-keys -t {pp} {nav} && sleep 0.1 && tmux send-keys -t {pp} -l {shlex.quote(reply)} && tmux send-keys -t {pp} Enter"
+            subprocess.run(["bash", "-c", cmd], timeout=10)
+            return f"📨 Answered in `{wid}`:\n`{reply[:500]}`"
 
         # y/n shortcuts for permission
         if prompt_type == "permission":
@@ -318,16 +325,21 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
                 n = num_opts
             else:
                 n = 1  # default to allow
-            for _ in range(n - 1):
-                subprocess.run(["tmux", "send-keys", "-t", pane, "Down"])
-            subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"])
+            parts = []
+            if n > 1:
+                nav = " ".join(["Down"] * (n - 1))
+                parts.append(f"tmux send-keys -t {p} {nav}")
+                parts.append("sleep 0.1")
+            parts.append(f"tmux send-keys -t {p} Enter")
+            subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
             label = "Allowed" if n == 1 else "Denied"
             return f"📨 {label} in `{wid}`"
 
     # Normal message: type text + Enter
-    subprocess.run(["tmux", "send-keys", "-t", pane, "-l", text])
-    subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"])
-    return f"📨 Sent to `{wid}`:\n_{text[:500]}_"
+    p = shlex.quote(pane)
+    cmd = f"tmux send-keys -t {p} -l {shlex.quote(text)} && tmux send-keys -t {p} Enter"
+    subprocess.run(["bash", "-c", cmd], timeout=10)
+    return f"📨 Sent to `{wid}`:\n`{text[:500]}`"
 
 
 # ── Commands ─────────────────────────────────────────────────────────────────
@@ -339,7 +351,7 @@ def cmd_notify(message: str):
 
 def cmd_ask(question: str) -> str:
     """Send a question, wait for reply, print to stdout."""
-    msg_id = tg_send(f"❓ *Claude Code asks:*\n{question}\n\n_Reply to respond_")
+    msg_id = tg_send(f"❓ *Claude Code asks:*\n{question}\n\nReply to respond")
     reply = tg_wait_reply(msg_id)
     print(reply)
     return reply
@@ -368,15 +380,17 @@ def cmd_hook():
         ntype = data.get("notification_type", "")
         if ntype == "permission_prompt":
             wid = get_window_id() or "unknown"
-            cmd_file = os.path.join(SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+            msg = data.get("message", "")
             bash_cmd = ""
-            try:
-                with open(cmd_file) as f:
-                    bash_cmd = json.load(f).get("cmd", "")
-                os.remove(cmd_file)
-            except (OSError, json.JSONDecodeError):
-                pass
-            write_signal("permission", data, cmd=bash_cmd, message=data.get("message", ""))
+            if "bash" in msg.lower():
+                cmd_file = os.path.join(SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+                try:
+                    with open(cmd_file) as f:
+                        bash_cmd = json.load(f).get("cmd", "")
+                    os.remove(cmd_file)
+                except (OSError, json.JSONDecodeError):
+                    pass
+            write_signal("permission", data, cmd=bash_cmd, message=msg)
     elif event == "PreToolUse":
         if tool == "AskUserQuestion":
             write_signal("question", data, questions=data.get("tool_input", {}).get("questions", []))
@@ -427,6 +441,7 @@ def process_signals() -> str | None:
         if event == "stop":
             content = ""
             if pane:
+                time.sleep(4)
                 try:
                     result = subprocess.run(
                         ["tmux", "capture-pane", "-t", pane, "-p", "-S", "-30"],
@@ -436,7 +451,7 @@ def process_signals() -> str | None:
                 except Exception:
                     pass
             cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
-            tg_send(f"✅{tag} Claude Code ({project}) finished:\n\n{cleaned[:3000]}")
+            tg_send(f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```")
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
@@ -450,17 +465,17 @@ def process_signals() -> str | None:
                     max_opt = max(max_opt, int(m_opt.group(1)))
             opts_text = "\n".join(options)
             if bash_cmd:
-                tg_send(f"🔧{tag} Claude Code ({project}) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}")
+                tg_send(f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}")
             else:
                 title = header or "needs permission"
-                lang = "diff" if any(l.startswith(("+", "-")) for l in content.splitlines()) else ""
-                tg_send(f"🔧{tag} Claude Code ({project}) {title}:\n\n```{lang}\n{content[:2000]}\n```\n{opts_text}")
+                body = f"\n\n```\n{content[:2000]}\n```" if content else ""
+                tg_send(f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}")
             save_active_prompt(wid, "permission", pane, max_opt or 3)
 
         elif event == "question":
             questions = signal.get("questions", [])
             if questions:
-                parts = [f"❓{tag} Claude Code ({project}) asks:\n"]
+                parts = [f"❓{tag} Claude Code (`{project}`) asks:\n"]
                 total_opts = 0
                 for q in questions:
                     parts.append(q.get("question", "?"))
@@ -479,7 +494,7 @@ def process_signals() -> str | None:
                 tg_send("\n".join(parts))
                 save_active_prompt(wid, "question", pane, total_opts)
             else:
-                tg_send(f"❓{tag} Claude Code ({project}) asks:\n\n(check terminal)")
+                tg_send(f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)")
 
         try:
             os.remove(fpath)
@@ -532,7 +547,7 @@ def _extract_pane_permission(pane: str) -> tuple[str, list[str]]:
         s = line.strip()
         m_hdr = re.match(r'^● (\w+)\((.+?)\)', s)
         if m_hdr:
-            header = f"wants to {m_hdr.group(1).lower()} {m_hdr.group(2)}"
+            header = f"wants to {m_hdr.group(1).lower()} `{m_hdr.group(2)}`"
             hdr_file = m_hdr.group(2)
             break
 
@@ -678,8 +693,8 @@ def cmd_listen():
         try:
             r = requests.get(
                 f"https://api.telegram.org/bot{BOT}/getUpdates",
-                params={"timeout": 5, "offset": offset},
-                timeout=15,
+                params={"timeout": 1, "offset": offset},
+                timeout=10,
             )
             r.raise_for_status()
             data = r.json()
@@ -751,7 +766,7 @@ def cmd_listen():
                         content = clean_pane_status(result.stdout) or "(empty)"
                     except Exception:
                         content = "(error reading pane)"
-                    tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n{content[-3000:]}")
+                    tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n```\n{content[-3000:]}\n```")
                 continue
 
             # Parse wN prefix
