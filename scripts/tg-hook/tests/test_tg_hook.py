@@ -598,15 +598,15 @@ class TestComputeNewLines(unittest.TestCase):
         self.assertEqual(result, ["f", "g"])
 
     def test_single_line_scroll(self):
-        old = ["a", "b", "c"]
-        new = ["b", "c", "d"]
+        old = ["a", "b", "c", "d", "e"]
+        new = ["b", "c", "d", "e", "f"]
         result = tg._compute_new_lines(old, new)
-        self.assertEqual(result, ["d"])
+        self.assertEqual(result, ["f"])
 
     def test_in_place_change_skipped(self):
         """Lines that changed in place (e.g. timers) are not reported as new."""
-        old = ["a", "progress 62%", "b"]
-        new = ["a", "progress 88%", "b"]
+        old = ["a", "b", "progress 62%", "c", "d"]
+        new = ["a", "b", "progress 88%", "c", "d"]
         result = tg._compute_new_lines(old, new)
         self.assertEqual(result, [])
 
@@ -617,12 +617,47 @@ class TestComputeNewLines(unittest.TestCase):
         result = tg._compute_new_lines(old, new)
         self.assertEqual(result, ["e"])
 
-    def test_complete_change_returns_empty(self):
-        """All-replace (no common content) returns nothing — use /status instead."""
+    def test_complete_change_returns_all(self):
+        """No overlap (content scrolled past window) returns all new lines."""
         old = ["a", "b"]
         new = ["x", "y", "z"]
         result = tg._compute_new_lines(old, new)
-        self.assertEqual(result, [])
+        self.assertEqual(result, ["x", "y", "z"])
+
+
+class TestJoinWrappedLines(unittest.TestCase):
+    """Test _join_wrapped_lines for Claude Code terminal wrapping."""
+
+    def test_no_wrapping(self):
+        lines = ["short line", "another short"]
+        result = tg._join_wrapped_lines(lines, 80)
+        self.assertEqual(result, ["short line", "another short"])
+
+    def test_joins_continuation(self):
+        # Line at width 80, followed by indented continuation
+        lines = ["x" * 78, "  continued text"]
+        result = tg._join_wrapped_lines(lines, 80)
+        self.assertEqual(result, ["x" * 78 + " continued text"])
+
+    def test_preserves_bullet_after_long_line(self):
+        lines = ["x" * 78, "● New bullet point"]
+        result = tg._join_wrapped_lines(lines, 80)
+        self.assertEqual(result, ["x" * 78, "● New bullet point"])
+
+    def test_preserves_numbered_item(self):
+        lines = ["x" * 78, "  2. Second item"]
+        result = tg._join_wrapped_lines(lines, 80)
+        self.assertEqual(result, ["x" * 78, "  2. Second item"])
+
+    def test_chains_multiple_wraps(self):
+        lines = ["x" * 78, "  " + "y" * 76, "  final part"]
+        result = tg._join_wrapped_lines(lines, 80)
+        self.assertEqual(result, ["x" * 78 + " " + "y" * 76 + " final part"])
+
+    def test_skips_when_width_unknown(self):
+        lines = ["x" * 78, "  continued"]
+        result = tg._join_wrapped_lines(lines, 0)
+        self.assertEqual(result, lines)
 
 
 class TestFocusState(unittest.TestCase):

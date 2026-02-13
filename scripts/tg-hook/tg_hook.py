@@ -186,6 +186,39 @@ def get_pane_project(pane: str) -> str:
     return "unknown"
 
 
+def _get_pane_width(pane: str) -> int:
+    """Get the character width of a tmux pane."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display", "-t", pane, "-p", "#{pane_width}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return 0
+
+
+def _join_wrapped_lines(lines: list[str], width: int) -> list[str]:
+    """Join lines that were soft-wrapped by Claude Code's terminal formatter.
+
+    Detects wraps by checking if the previous line is close to pane width
+    and the current line is an indented continuation (not a new bullet/marker).
+    """
+    if width < 40 or not lines:
+        return lines
+    result = [lines[0]]
+    for line in lines[1:]:
+        prev_len = len(result[-1])
+        s = line.lstrip()
+        indent = len(line) - len(s)
+        if (prev_len >= width - 5 and indent >= 2 and s and
+                not re.match(r'[●•─━❯✻⏵⏸>*\-\d]', s)):
+            result[-1] += " " + s
+        else:
+            result.append(line)
+    return result
+
+
 def _capture_pane(pane: str, num_lines: int = 20) -> str:
     """Capture the last num_lines from a tmux pane."""
     try:
@@ -561,9 +594,11 @@ def clean_pane_content(raw: str, event: str) -> str:
     return "\n".join(filtered).strip()
 
 
-def clean_pane_status(raw: str) -> str:
+def clean_pane_status(raw: str, pane_width: int = 0) -> str:
     """Clean captured pane content for /status display."""
     filtered = _filter_noise(raw)
+    if pane_width:
+        filtered = _join_wrapped_lines(filtered, pane_width)
     return "\n".join(filtered).strip()
 
 
@@ -579,8 +614,14 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     if not old_lines:
         return new_lines
     sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
+    opcodes = sm.get_opcodes()
+    # Count equal lines to detect meaningful overlap
+    equal_count = sum(j2 - j1 for tag, _, _, j1, j2 in opcodes if tag == "equal")
+    if equal_count < 3:
+        # Content scrolled past capture window — no reliable anchor
+        return new_lines
     new = []
-    for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
+    for tag, _i1, _i2, j1, j2 in opcodes:
         if tag == "insert":
             new.extend(new_lines[j1:j2])
     return new
@@ -755,7 +796,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         else:
             targets = list(sessions.items())
         for win_idx, (pane, project) in targets:
-            content = clean_pane_status(_capture_pane(pane, num_lines)) or "(empty)"
+            pw = _get_pane_width(pane)
+            content = clean_pane_status(_capture_pane(pane, num_lines), pw) or "(empty)"
             tg_send(f"📋 `w{win_idx}` — `{project}`:\n\n```\n{content[-3000:]}\n```")
         return None, sessions, last_win_idx
 
@@ -766,7 +808,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         if idx in sessions:
             pane, project = sessions[idx]
             _save_focus_state(idx, pane, project)
-            content = clean_pane_status(_capture_pane(pane, 20)) or "(empty)"
+            pw = _get_pane_width(pane)
+            content = clean_pane_status(_capture_pane(pane, 20), pw) or "(empty)"
             tg_send(f"🔍 Focusing on `w{idx}` (`{project}`). Send `/unfocus` to stop.\n\n```\n{content[-3000:]}\n```")
             return None, sessions, idx
         else:
@@ -826,6 +869,7 @@ def cmd_listen():
 
     # Focus monitoring state
     focus_target_wid: str | None = None
+    focus_pane_width: int = 0
     focus_prev_lines: list[str] = []
     focus_pending: list[str] = []
     focus_last_new_ts: float = 0
@@ -884,6 +928,7 @@ def cmd_listen():
                     last_scan = time.time()
                     paused = False
                     focus_target_wid = None
+                    focus_pane_width = 0
                     focus_prev_lines = []
                     focus_pending = []
                     focus_last_new_ts = 0
@@ -920,6 +965,7 @@ def cmd_listen():
                 focus_last_new_ts = 0
                 focus_first_new_ts = 0
                 focus_target_wid = fw
+                focus_pane_width = _get_pane_width(focus_state["pane"])
 
             fp, fproj = focus_state["pane"], focus_state["project"]
 
@@ -935,6 +981,13 @@ def cmd_listen():
         if focus_state:
             raw = _capture_pane(fp, 50)
             cur_lines = _filter_noise(raw)
+            # Strip prompt line and continuation (user typing)
+            for i in range(len(cur_lines) - 1, -1, -1):
+                if cur_lines[i].strip().startswith("❯"):
+                    cur_lines = cur_lines[:i]
+                    break
+            if focus_pane_width:
+                cur_lines = _join_wrapped_lines(cur_lines, focus_pane_width)
 
             if focus_prev_lines:
                 new = _compute_new_lines(focus_prev_lines, cur_lines)
