@@ -435,6 +435,14 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
     return header, content, options
 
 
+_last_messages: dict[str, str] = {}  # wid -> last sent message
+
+
+def _save_last_msg(wid: str, msg: str):
+    """Track the last message sent for a window."""
+    _last_messages[wid.lstrip("w")] = msg
+
+
 def process_signals(focused_wid: str | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
     If focused_wid is set, stop signals for that window are suppressed."""
@@ -480,7 +488,9 @@ def process_signals(focused_wid: str | None = None) -> str | None:
                     time.sleep(4)
                     content = _capture_pane(pane, 30)
                 cleaned = clean_pane_content(content, "stop") if content else "(could not capture pane)"
-                tg_send(f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```")
+                msg = f"✅{tag} Claude Code (`{project}`) finished:\n\n```\n{cleaned[:3000]}\n```"
+                tg_send(msg)
+                _save_last_msg(wid, msg)
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
@@ -494,11 +504,13 @@ def process_signals(focused_wid: str | None = None) -> str | None:
                     max_opt = max(max_opt, int(m_opt.group(1)))
             opts_text = "\n".join(options)
             if bash_cmd:
-                tg_send(f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}")
+                msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}"
             else:
                 title = header or "needs permission"
                 body = f"\n\n```\n{content[:2000]}\n```" if content else ""
-                tg_send(f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}")
+                msg = f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}"
+            tg_send(msg)
+            _save_last_msg(wid, msg)
             n = max_opt or 3
             save_active_prompt(wid, pane, total=n,
                                shortcuts={"y": 1, "yes": 1, "allow": 1,
@@ -523,11 +535,15 @@ def process_signals(focused_wid: str | None = None) -> str | None:
                     parts.append(f"  {n+1}. Type your answer")
                     parts.append(f"  {n+2}. Chat about this")
                     total_opts = n
-                tg_send("\n".join(parts))
+                msg = "\n".join(parts)
+                tg_send(msg)
+                _save_last_msg(wid, msg)
                 save_active_prompt(wid, pane, total=total_opts + 2,
                                    free_text_at=total_opts)
             else:
-                tg_send(f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)")
+                msg = f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)"
+                tg_send(msg)
+                _save_last_msg(wid, msg)
 
         try:
             os.remove(fpath)
@@ -822,6 +838,18 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         tg_send("🔍 Focus stopped.")
         return None, sessions, last_win_idx
 
+    # /last [wN]
+    last_m = re.match(r"^/last(?:\s+w?(\d+))?$", text.lower())
+    if last_m:
+        idx = last_m.group(1) or last_win_idx
+        if idx and idx in _last_messages:
+            tg_send(_last_messages[idx])
+        elif idx:
+            tg_send(f"⚠️ No saved message for `w{idx}`.")
+        else:
+            tg_send("⚠️ No window specified. Use `/last wN`.")
+        return None, sessions, last_win_idx
+
     # Parse wN prefix
     m = re.match(r"^w(\d+)\s+(.*)", text, re.DOTALL)
     if m:
@@ -889,7 +917,7 @@ def cmd_listen():
     except Exception:
         pass
 
-    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/focus wN` | `/unfocus` | `/stop` pause | `/quit` exit"
+    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/unfocus` | `/stop` pause | `/quit` exit"
 
     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
     tg_send(help_msg)
@@ -1006,7 +1034,9 @@ def cmd_listen():
             if debounce_ok or max_delay_ok:
                 chunk = "\n".join(focus_pending).strip()
                 if chunk:
-                    tg_send(f"🔍 `w{fw}` (`{fproj}`):\n```\n{chunk[:3500]}\n```")
+                    msg = f"🔍 `w{fw}` (`{fproj}`):\n```\n{chunk[:3500]}\n```"
+                    tg_send(msg)
+                    _save_last_msg(fw, msg)
                 focus_pending = []
                 focus_last_new_ts = 0
                 focus_first_new_ts = 0
