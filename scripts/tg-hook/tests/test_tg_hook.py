@@ -779,7 +779,7 @@ class TestExtractChatMessages(unittest.TestCase):
     def test_text_message(self):
         data = self._make_update({"text": "hello"})
         result = tg._extract_chat_messages(data)
-        self.assertEqual(result, [{"text": "hello", "photo": None, "callback": None}])
+        self.assertEqual(result, [{"text": "hello", "photo": None, "callback": None, "reply_wid": None}])
 
     def test_photo_message_no_caption(self):
         data = self._make_update({"photo": [
@@ -812,6 +812,49 @@ class TestExtractChatMessages(unittest.TestCase):
         data = self._make_update({})
         result = tg._extract_chat_messages(data)
         self.assertEqual(result, [])
+
+    def test_reply_wid_from_reply_to_message(self):
+        """reply_to_message with wN text → reply_wid extracted."""
+        data = self._make_update({
+            "text": "fix the bug",
+            "reply_to_message": {"text": "🔔 `w4` (`myproj`): stopped"},
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["reply_wid"], "4")
+
+    def test_reply_wid_none_when_no_wn(self):
+        """reply_to_message with no wN pattern → reply_wid is None."""
+        data = self._make_update({
+            "text": "hello",
+            "reply_to_message": {"text": "some message without session id"},
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertIsNone(result[0]["reply_wid"])
+
+    def test_reply_wid_none_when_no_reply(self):
+        """No reply_to_message → reply_wid is None."""
+        data = self._make_update({"text": "hello"})
+        result = tg._extract_chat_messages(data)
+        self.assertIsNone(result[0]["reply_wid"])
+
+    def test_reply_wid_from_caption(self):
+        """reply_to_message with wN in caption → reply_wid extracted."""
+        data = self._make_update({
+            "text": "looks good",
+            "reply_to_message": {"caption": "📷 Photo from `w7`"},
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["reply_wid"], "7")
+
+    def test_reply_wid_on_photo_message(self):
+        """Photo message with reply_to_message → reply_wid extracted."""
+        data = self._make_update({
+            "photo": [{"file_id": "abc", "width": 800, "height": 800}],
+            "caption": "check this",
+            "reply_to_message": {"text": "`w3` response"},
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["reply_wid"], "3")
 
 
 class TestDownloadTgPhoto(unittest.TestCase):

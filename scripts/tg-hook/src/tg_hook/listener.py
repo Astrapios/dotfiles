@@ -278,6 +278,11 @@ def cmd_listen():
             text = chat_msg["text"]
             photo_id = chat_msg.get("photo")
 
+            # Reply-to routing: use wid from the replied-to message
+            reply_wid = chat_msg.get("reply_wid")
+            if reply_wid and reply_wid in sessions:
+                last_win_idx = reply_wid
+
             # Photo received — download and route to Claude
             if photo_id:
                 dest = f"/tmp/tg_photo_{int(time.time())}.jpg"

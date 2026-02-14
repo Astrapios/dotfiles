@@ -1,5 +1,6 @@
 """Telegram API: send, poll, photos, keyboards."""
 import os
+import re
 import time
 
 import requests
@@ -287,6 +288,15 @@ def _extract_chat_messages(data: dict) -> list[dict]:
             continue
         text = msg.get("text", "")
         caption = msg.get("caption", "")
+
+        reply_msg = msg.get("reply_to_message", {})
+        reply_text = reply_msg.get("text", "") or reply_msg.get("caption", "")
+        reply_wid = None
+        if reply_text:
+            wid_m = re.search(r"w(\d+)", reply_text)
+            if wid_m:
+                reply_wid = wid_m.group(1)
+
         photos = msg.get("photo")
         if photos:
             best = photos[-1]
@@ -294,7 +304,9 @@ def _extract_chat_messages(data: dict) -> list[dict]:
                 "text": caption.strip(),
                 "photo": best.get("file_id"),
                 "callback": None,
+                "reply_wid": reply_wid,
             })
         elif text:
-            messages.append({"text": text.strip(), "photo": None, "callback": None})
+            messages.append({"text": text.strip(), "photo": None,
+                             "callback": None, "reply_wid": reply_wid})
     return messages
