@@ -690,7 +690,7 @@ class TestExtractChatMessages(unittest.TestCase):
     def test_text_message(self):
         data = self._make_update({"text": "hello"})
         result = tg._extract_chat_messages(data)
-        self.assertEqual(result, [{"text": "hello", "photo": None}])
+        self.assertEqual(result, [{"text": "hello", "photo": None, "callback": None}])
 
     def test_photo_message_no_caption(self):
         data = self._make_update({"photo": [
@@ -701,6 +701,7 @@ class TestExtractChatMessages(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["photo"], "large_id")
         self.assertEqual(result[0]["text"], "")
+        self.assertIsNone(result[0]["callback"])
 
     def test_photo_message_with_caption(self):
         data = self._make_update({"photo": [
@@ -1568,6 +1569,459 @@ class TestMultiQuestionFlow(unittest.TestCase):
         call_kwargs = mock_save.call_args
         self.assertEqual(call_kwargs[1]["total"], 2)
         self.assertIn("y", call_kwargs[1]["shortcuts"])
+
+
+class TestBuildInlineKeyboard(unittest.TestCase):
+    """Test _build_inline_keyboard helper."""
+
+    def test_single_row(self):
+        result = tg._build_inline_keyboard([
+            [("Allow", "perm_w4_1"), ("Deny", "perm_w4_3")],
+        ])
+        self.assertEqual(result, {"inline_keyboard": [
+            [{"text": "Allow", "callback_data": "perm_w4_1"},
+             {"text": "Deny", "callback_data": "perm_w4_3"}],
+        ]})
+
+    def test_multiple_rows(self):
+        result = tg._build_inline_keyboard([
+            [("A", "a1"), ("B", "a2"), ("C", "a3")],
+            [("D", "a4")],
+        ])
+        self.assertEqual(len(result["inline_keyboard"]), 2)
+        self.assertEqual(len(result["inline_keyboard"][0]), 3)
+        self.assertEqual(len(result["inline_keyboard"][1]), 1)
+
+    def test_empty(self):
+        result = tg._build_inline_keyboard([])
+        self.assertEqual(result, {"inline_keyboard": []})
+
+
+class TestResolveAlias(unittest.TestCase):
+    """Test _resolve_alias for short command aliases."""
+
+    def test_status_bare(self):
+        self.assertEqual(tg._resolve_alias("s", False), "/status")
+
+    def test_status_with_window(self):
+        self.assertEqual(tg._resolve_alias("s4", False), "/status w4")
+
+    def test_status_with_window_and_lines(self):
+        self.assertEqual(tg._resolve_alias("s4 10", False), "/status w4 10")
+
+    def test_focus(self):
+        self.assertEqual(tg._resolve_alias("f4", False), "/focus w4")
+
+    def test_interrupt(self):
+        self.assertEqual(tg._resolve_alias("i4", False), "/interrupt w4")
+
+    def test_help_alias(self):
+        self.assertEqual(tg._resolve_alias("?", False), "/help")
+
+    def test_unfocus_alias(self):
+        self.assertEqual(tg._resolve_alias("uf", False), "/unfocus")
+
+    def test_passthrough_normal_text(self):
+        self.assertEqual(tg._resolve_alias("fix the bug", False), "fix the bug")
+
+    def test_passthrough_slash_command(self):
+        self.assertEqual(tg._resolve_alias("/status", False), "/status")
+
+    def test_suppressed_with_active_prompt(self):
+        """Aliases suppressed when a prompt is active."""
+        self.assertEqual(tg._resolve_alias("s", True), "s")
+        self.assertEqual(tg._resolve_alias("f4", True), "f4")
+        self.assertEqual(tg._resolve_alias("?", True), "?")
+
+    def test_digits_not_aliased(self):
+        """Pure digit replies must not be aliased."""
+        self.assertEqual(tg._resolve_alias("1", False), "1")
+        self.assertEqual(tg._resolve_alias("3", False), "3")
+
+    def test_y_n_not_aliased(self):
+        """y/n replies must not be aliased."""
+        self.assertEqual(tg._resolve_alias("y", False), "y")
+        self.assertEqual(tg._resolve_alias("n", False), "n")
+        self.assertEqual(tg._resolve_alias("yes", False), "yes")
+        self.assertEqual(tg._resolve_alias("no", False), "no")
+
+
+class TestExtractChatMessagesCallbacks(unittest.TestCase):
+    """Test _extract_chat_messages with callback_query updates."""
+
+    def test_callback_query(self):
+        data = {"result": [{
+            "update_id": 100,
+            "callback_query": {
+                "id": "cb123",
+                "data": "perm_w4_1",
+                "message": {
+                    "message_id": 42,
+                    "chat": {"id": int(tg.CHAT_ID)},
+                },
+            },
+        }]}
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["text"], "")
+        self.assertIsNone(result[0]["photo"])
+        self.assertEqual(result[0]["callback"]["id"], "cb123")
+        self.assertEqual(result[0]["callback"]["data"], "perm_w4_1")
+        self.assertEqual(result[0]["callback"]["message_id"], 42)
+
+    def test_callback_other_chat_ignored(self):
+        data = {"result": [{
+            "update_id": 100,
+            "callback_query": {
+                "id": "cb999",
+                "data": "perm_w4_1",
+                "message": {
+                    "message_id": 42,
+                    "chat": {"id": 999999},
+                },
+            },
+        }]}
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result, [])
+
+    def test_mixed_callbacks_and_messages(self):
+        data = {"result": [
+            {
+                "update_id": 100,
+                "callback_query": {
+                    "id": "cb1",
+                    "data": "perm_w4_1",
+                    "message": {"message_id": 10, "chat": {"id": int(tg.CHAT_ID)}},
+                },
+            },
+            {
+                "update_id": 101,
+                "message": {"chat": {"id": int(tg.CHAT_ID)}, "text": "hello"},
+            },
+        ]}
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(len(result), 2)
+        self.assertIsNotNone(result[0]["callback"])
+        self.assertIsNone(result[1]["callback"])
+
+
+class TestHandleCallback(unittest.TestCase):
+    """Test _handle_callback dispatcher."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "_select_option")
+    @patch.object(tg, "load_active_prompt")
+    def test_perm_allow(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
+        mock_load.return_value = {"pane": "0:4.0", "total": 3}
+        callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
+        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        mock_select.assert_called_once_with("0:4.0", 1)
+        mock_answer.assert_called_once_with("cb1")
+        mock_remove.assert_called_once_with(42)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Allowed", msg)
+        self.assertIn("`w4`", msg)
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "_select_option")
+    @patch.object(tg, "load_active_prompt")
+    def test_perm_deny(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
+        mock_load.return_value = {"pane": "0:4.0", "total": 3}
+        callback = {"id": "cb1", "data": "perm_w4_3", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        mock_select.assert_called_once_with("0:4.0", 3)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Denied", msg)
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "_select_option")
+    @patch.object(tg, "load_active_prompt")
+    def test_perm_always(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
+        mock_load.return_value = {"pane": "0:4.0", "total": 3}
+        callback = {"id": "cb1", "data": "perm_w4_2", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        mock_select.assert_called_once_with("0:4.0", 2)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Always allowed", msg)
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "load_active_prompt")
+    def test_perm_expired(self, mock_load, mock_answer, mock_remove):
+        mock_load.return_value = None  # prompt file gone
+        callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        # Should call answer twice: once in main flow, once with "Prompt expired"
+        self.assertEqual(mock_answer.call_count, 2)
+        mock_answer.assert_any_call("cb1", "Prompt expired")
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Selected option 1")
+    def test_question_select(self, mock_route, mock_send, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "q_w4_1", "message_id": 42}
+        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        mock_route.assert_called_once_with("0:4.0", "4", "1")
+        self.assertEqual(last, "4")
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_status(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_status_w4", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/status w4", self.sessions, None, "")
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_focus(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_focus_w4", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/focus w4", self.sessions, None, "")
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_sess_select(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "sess_4", "message_id": 42}
+        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/status w4", self.sessions, "4", "")
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    def test_unknown_callback(self, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "unknown_xyz", "message_id": 42}
+        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        self.assertEqual(sessions, self.sessions)
+
+
+class TestSessionsKeyboard(unittest.TestCase):
+    """Test _sessions_keyboard helper."""
+
+    def test_empty_sessions(self):
+        self.assertIsNone(tg._sessions_keyboard({}))
+
+    def test_single_session(self):
+        result = tg._sessions_keyboard({"4": ("0:4.0", "myproj")})
+        self.assertIsNotNone(result)
+        buttons = result["inline_keyboard"]
+        self.assertEqual(len(buttons), 1)
+        self.assertEqual(len(buttons[0]), 1)
+        self.assertIn("w4", buttons[0][0]["text"])
+        self.assertEqual(buttons[0][0]["callback_data"], "sess_4")
+
+    def test_multiple_sorted(self):
+        result = tg._sessions_keyboard({
+            "5": ("0:5.0", "beta"),
+            "2": ("0:2.0", "alpha"),
+            "8": ("0:8.0", "gamma"),
+        })
+        buttons = result["inline_keyboard"]
+        # Should be sorted by window index
+        all_buttons = [b for row in buttons for b in row]
+        self.assertEqual(all_buttons[0]["callback_data"], "sess_2")
+        self.assertEqual(all_buttons[1]["callback_data"], "sess_5")
+        self.assertEqual(all_buttons[2]["callback_data"], "sess_8")
+
+
+class TestTgSendWithKeyboard(unittest.TestCase):
+    """Test tg_send with reply_markup parameter."""
+
+    @patch("requests.post")
+    def test_keyboard_in_payload(self, mock_post):
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 1}}
+        ok_resp.raise_for_status = MagicMock()
+        mock_post.return_value = ok_resp
+
+        kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
+        tg.tg_send("test", reply_markup=kb)
+
+        payload = mock_post.call_args[1]["json"]
+        self.assertEqual(payload["reply_markup"], kb)
+
+    @patch("requests.post")
+    def test_none_keyboard_excluded(self, mock_post):
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 1}}
+        ok_resp.raise_for_status = MagicMock()
+        mock_post.return_value = ok_resp
+
+        tg.tg_send("test", reply_markup=None)
+
+        payload = mock_post.call_args[1]["json"]
+        self.assertNotIn("reply_markup", payload)
+
+    @patch("requests.post")
+    def test_keyboard_survives_markdown_fallback(self, mock_post):
+        """On 400 retry, keyboard is still included."""
+        fail_resp = MagicMock()
+        fail_resp.status_code = 400
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 1}}
+        ok_resp.raise_for_status = MagicMock()
+
+        mock_post.side_effect = [fail_resp, ok_resp]
+
+        kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
+        tg.tg_send("bad _markdown_", reply_markup=kb)
+
+        # Second call (fallback) should still have reply_markup
+        fallback_payload = mock_post.call_args_list[1][1]["json"]
+        self.assertEqual(fallback_payload["reply_markup"], kb)
+        self.assertNotIn("parse_mode", fallback_payload)
+
+
+class TestSendLongMessageWithKeyboard(unittest.TestCase):
+    """Test _send_long_message with reply_markup parameter."""
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_short_message_gets_keyboard(self, mock_send):
+        kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
+        tg._send_long_message("H:\n", "short body", wid="4", reply_markup=kb)
+        mock_send.assert_called_once()
+        _, kwargs = mock_send.call_args
+        self.assertEqual(kwargs.get("reply_markup"), kb)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_chunked_keyboard_on_last_only(self, mock_send):
+        """Multi-chunk: keyboard attached to last chunk only."""
+        kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
+        line = "x" * 79 + "\n"
+        body = line * 100  # exceeds TG_MAX
+        tg._send_long_message("H:\n", body, wid="4", reply_markup=kb)
+        self.assertGreater(mock_send.call_count, 1)
+        # All calls except last should have reply_markup=None
+        for c in mock_send.call_args_list[:-1]:
+            self.assertIsNone(c[1].get("reply_markup"))
+        # Last call should have the keyboard
+        last_call = mock_send.call_args_list[-1]
+        self.assertEqual(last_call[1].get("reply_markup"), kb)
+
+
+class TestProcessSignalsWithKeyboards(unittest.TestCase):
+    """Test that process_signals attaches inline keyboards."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_signals_kb"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg, "_extract_pane_permission",
+                  return_value=("wants to update `t.py`", "+new=True", ["1. Yes", "2. No"]))
+    @patch.object(tg, "save_active_prompt")
+    def test_permission_has_keyboard(self, mock_save, mock_extract, mock_proj, mock_send):
+        self._write_signal("permission", cmd="", message="needs permission")
+        tg.process_signals()
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("perm_w4_1", buttons)
+        self.assertIn("perm_w4_2", buttons)  # Always allow
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_stop_has_keyboard(self, mock_sleep, mock_run, mock_proj, mock_send):
+        self._write_signal("stop")
+        tg.process_signals()
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_status_w4", buttons)
+        self.assertIn("cmd_focus_w4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg, "save_active_prompt")
+    def test_question_has_keyboard(self, mock_save, mock_proj, mock_send):
+        questions = [{"question": "Pick?", "options": [
+            {"label": "Alpha", "description": "a"},
+            {"label": "Beta", "description": "b"},
+        ]}]
+        self._write_signal("question", questions=questions)
+        tg.process_signals()
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(buttons[0]["text"], "Alpha")
+        self.assertEqual(buttons[0]["callback_data"], "q_w4_1")
+        self.assertEqual(buttons[1]["text"], "Beta")
+        self.assertEqual(buttons[1]["callback_data"], "q_w4_2")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg, "save_active_prompt")
+    def test_question_no_options_no_keyboard(self, mock_save, mock_proj, mock_send):
+        """Question with no options should not have keyboard."""
+        questions = [{"question": "What?", "options": []}]
+        self._write_signal("question", questions=questions)
+        tg.process_signals()
+        _, kwargs = mock_send.call_args
+        self.assertIsNone(kwargs.get("reply_markup"))
+
+
+class TestAnyActivePrompt(unittest.TestCase):
+    """Test _any_active_prompt helper."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_any_prompt"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_no_prompts(self):
+        self.assertFalse(tg._any_active_prompt())
+
+    def test_has_prompt(self):
+        path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
+        with open(path, "w") as f:
+            json.dump({"pane": "0:4.0"}, f)
+        self.assertTrue(tg._any_active_prompt())
+
+    def test_other_state_files_not_counted(self):
+        path = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
+        with open(path, "w") as f:
+            json.dump({"cmd": "echo"}, f)
+        self.assertFalse(tg._any_active_prompt())
 
 
 if __name__ == "__main__":
