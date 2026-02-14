@@ -205,8 +205,10 @@ def _set_bot_commands():
         {"command": "status", "description": "Show last response or pane status"},
         {"command": "sessions", "description": "List active Claude sessions"},
         {"command": "help", "description": "Show available commands"},
-        {"command": "focus", "description": "Monitor a session in real-time"},
+        {"command": "focus", "description": "Watch completed responses from a session"},
+        {"command": "deepfocus", "description": "Stream all session output in real-time"},
         {"command": "unfocus", "description": "Stop real-time monitoring"},
+        {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},
         {"command": "interrupt", "description": "Interrupt current task (Esc)"},
         {"command": "last", "description": "Re-send last message for a session"},
         {"command": "new", "description": "Start new Claude session"},
@@ -458,10 +460,13 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]]) -> str:
     """Format a sessions map into a Telegram message."""
     if not sessions:
         return "⚠️ No Claude sessions found in tmux."
+    names = _load_session_names()
     lines = ["📋 *Active Claude sessions:*"]
     for idx in sorted(sessions, key=int):
         target, project = sessions[idx]
-        lines.append(f"  `w{idx}` — `{project}` (`{target}`)")
+        name = names.get(idx, "")
+        label = f"`w{idx}` [`{name}`]" if name else f"`w{idx}`"
+        lines.append(f"  {label} — `{project}` (`{target}`)")
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)
 
@@ -470,10 +475,13 @@ def _sessions_keyboard(sessions: dict) -> dict | None:
     """Build inline keyboard with one button per session."""
     if not sessions:
         return None
+    names = _load_session_names()
     buttons = []
     for idx in sorted(sessions, key=int):
         _, project = sessions[idx]
-        buttons.append((f"w{idx} {project}"[:20], f"sess_{idx}"))
+        name = names.get(idx, "")
+        label = f"w{idx} [{name}]" if name else f"w{idx} {project}"
+        buttons.append((label[:20], f"sess_{idx}"))
     rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
     return _build_inline_keyboard(rows)
 
@@ -482,10 +490,13 @@ def _command_sessions_keyboard(cmd: str, sessions: dict) -> dict | None:
     """Build inline keyboard to pick a session for a command (focus, interrupt, kill)."""
     if not sessions:
         return None
+    names = _load_session_names()
     buttons = []
     for idx in sorted(sessions, key=int):
         _, project = sessions[idx]
-        buttons.append((f"w{idx} {project}"[:20], f"cmd_{cmd}_{idx}"))
+        name = names.get(idx, "")
+        label = f"w{idx} [{name}]" if name else f"w{idx} {project}"
+        buttons.append((label[:20], f"cmd_{cmd}_{idx}"))
     rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
     return _build_inline_keyboard(rows)
 
@@ -628,6 +639,89 @@ def _clear_focus_state():
         pass
 
 
+def _save_deepfocus_state(wid: str, pane: str, project: str):
+    """Save deepfocus target so listen streams all output from this pane."""
+    os.makedirs(SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(SIGNAL_DIR, "_deepfocus.json")
+    with open(path, "w") as f:
+        json.dump({"wid": wid, "pane": pane, "project": project}, f)
+
+
+def _load_deepfocus_state() -> dict | None:
+    """Load deepfocus state. Returns None if missing."""
+    path = os.path.join(SIGNAL_DIR, "_deepfocus.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _clear_deepfocus_state():
+    """Remove deepfocus state file."""
+    path = os.path.join(SIGNAL_DIR, "_deepfocus.json")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _save_session_name(wid: str, name: str):
+    """Save a friendly name for a session."""
+    os.makedirs(SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(SIGNAL_DIR, "_names.json")
+    names = _load_session_names()
+    names[wid] = name
+    with open(path, "w") as f:
+        json.dump(names, f)
+
+
+def _clear_session_name(wid: str):
+    """Remove a session's friendly name."""
+    path = os.path.join(SIGNAL_DIR, "_names.json")
+    names = _load_session_names()
+    names.pop(wid, None)
+    try:
+        with open(path, "w") as f:
+            json.dump(names, f)
+    except OSError:
+        pass
+
+
+def _load_session_names() -> dict[str, str]:
+    """Load session names. Returns empty dict on failure."""
+    path = os.path.join(SIGNAL_DIR, "_names.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _resolve_name(target: str, sessions: dict) -> str | None:
+    """Resolve a session name or numeric index to a window index.
+    Returns the index string (e.g. '4') or None."""
+    # Direct numeric match
+    if target in sessions:
+        return target
+    # Name lookup (case-insensitive)
+    names = _load_session_names()
+    for idx, name in names.items():
+        if name.lower() == target.lower() and idx in sessions:
+            return idx
+    return None
+
+
+def _wid_label(idx: str) -> str:
+    """Format a window index with its name for display.
+    Returns '`w4 [auth]`' or just '`w4`' if unnamed."""
+    names = _load_session_names()
+    name = names.get(idx, "")
+    if name:
+        return f"`w{idx} [{name}]`"
+    return f"`w{idx}`"
+
+
 def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
     """Extract content and options from a permission dialog in a tmux pane.
     Returns (header, content between last dot and options, list of options)."""
@@ -723,9 +817,9 @@ def _format_question_msg(tag: str, project: str, question: dict) -> str:
     return "\n".join(parts)
 
 
-def process_signals(focused_wid: str | None = None) -> str | None:
+def process_signals(focused_wids: set[str] | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
-    If focused_wid is set, stop signals for that window are suppressed."""
+    If focused_wids is set, stop signals for those windows are suppressed."""
     if not os.path.isdir(SIGNAL_DIR):
         return None
 
@@ -753,14 +847,16 @@ def process_signals(focused_wid: str | None = None) -> str | None:
         pane = signal.get("pane", "")
         wid = signal.get("wid", "")
         project = signal.get("project", "unknown")
-        tag = f" {wid}" if wid else ""
+        # Build tag with session name if available
+        w_idx = wid.lstrip("w") if wid else ""
+        tag = f" {_wid_label(w_idx)}" if w_idx else ""
 
         # Resolve project name from tmux pane
         if pane:
             project = get_pane_project(pane) or project
 
         if event == "stop":
-            if focused_wid and wid.lstrip("w") == focused_wid:
+            if focused_wids and w_idx in focused_wids:
                 pass  # Focus is monitoring this pane — skip stop notification
             else:
                 content = ""
@@ -975,6 +1071,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     Returns a confirmation message for Telegram.
     """
     wid = f"w{win_idx}"
+    label = _wid_label(win_idx)
     prompt = load_active_prompt(wid)
 
     if prompt:
@@ -1021,7 +1118,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             n = shortcuts[reply.lower()]
             _select_option(prompt_pane, n)
             _advance_question()
-            return f"📨 Selected option {n} in `{wid}`"
+            return f"📨 Selected option {n} in {label}"
 
         # Numbered selection
         if reply.isdigit():
@@ -1029,7 +1126,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             if 1 <= n <= total:
                 _select_option(prompt_pane, n)
                 _advance_question()
-                return f"📨 Selected option {n} in `{wid}`"
+                return f"📨 Selected option {n} in {label}"
 
         # Free text → navigate to "Type something.", type directly, Enter to submit
         if free_text_at is not None:
@@ -1040,18 +1137,18 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
                    f"tmux send-keys -t {pp} Enter")
             subprocess.run(["bash", "-c", cmd], timeout=10)
             _advance_question()
-            return f"📨 Answered in `{wid}`:\n`{reply[:500]}`"
+            return f"📨 Answered in {label}:\n`{reply[:500]}`"
 
         # Prompt with no free text and no matching shortcut/number — default to option 1
         _select_option(prompt_pane, 1)
         _advance_question()
-        return f"📨 Selected option 1 in `{wid}`"
+        return f"📨 Selected option 1 in {label}"
 
     # Normal message: type text + Enter
     p = shlex.quote(pane)
     cmd = f"tmux send-keys -t {p} -l {shlex.quote(text)} && tmux send-keys -t {p} Enter"
     subprocess.run(["bash", "-c", cmd], timeout=10)
-    return f"📨 Sent to `{wid}`:\n`{text[:500]}`"
+    return f"📨 Sent to {label}:\n`{text[:500]}`"
 
 
 # ── Commands ─────────────────────────────────────────────────────────────────
@@ -1159,6 +1256,10 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^f(\d+)$", stripped)
     if m:
         return f"/focus w{m.group(1)}"
+    # df4 → /deepfocus w4
+    m = re.match(r"^df(\d+)$", stripped)
+    if m:
+        return f"/deepfocus w{m.group(1)}"
     # i4 → /interrupt w4
     m = re.match(r"^i(\d+)$", stripped)
     if m:
@@ -1190,8 +1291,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             "`/sessions` — list active Claude sessions",
             "`/status [wN] [lines]` — show last response or N filtered lines",
             "`/last [wN]` — re-send last Telegram message for a session",
-            "`/focus wN` — monitor a session in real-time",
-            "`/unfocus` — stop real-time monitoring",
+            "`/focus wN` — watch completed responses",
+            "`/deepfocus wN` — stream all output in real-time",
+            "`/unfocus` — stop monitoring",
+            "`/name wN [label]` — name a session",
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
             "`/interrupt [wN]` — interrupt current task (Esc)",
             "`/kill wN` — exit a Claude session (Ctrl+C x3)",
@@ -1200,7 +1303,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             "",
             "*Aliases:*",
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
-            "`f4` focus w4 | `uf` unfocus | `i4` interrupt w4",
+            "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
             "`?` help",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
@@ -1215,16 +1318,17 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
                 reply_markup=_sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
-    # /status [wN] [lines]
-    status_m = re.match(r"^/status(?:\s+w?(\d+))?(?:\s+(\d+))?$", text.lower())
+    # /status [wN|name] [lines]
+    status_m = re.match(r"^/status(?:\s+w?(\w[\w-]*))?(?:\s+(\d+))?$", text.lower())
     if status_m:
-        idx = status_m.group(1)
+        raw_target = status_m.group(1)
         num_lines = int(status_m.group(2)) if status_m.group(2) else 20
+        idx = _resolve_name(raw_target, sessions) if raw_target else None
         targets = []
-        if idx and idx in sessions:
+        if raw_target and idx:
             targets = [(idx, sessions[idx])]
-        elif idx:
-            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}",
+        elif raw_target:
+            tg_send(f"⚠️ No session `{raw_target}`.\n{format_sessions_message(sessions)}",
                     reply_markup=_sessions_keyboard(sessions))
             return None, sessions, last_win_idx
         elif len(sessions) == 1:
@@ -1259,9 +1363,37 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
                 else:
                     content = raw_view
             content = content or "(empty)"
-            header = f"📋 `w{win_idx}` — `{project}`:\n\n"
+            header = f"📋 {_wid_label(win_idx)} — `{project}`:\n\n"
             _send_long_message(header, content, win_idx)
         return None, sessions, last_win_idx
+
+    # /deepfocus (bare — show session picker)
+    if text.lower().strip() == "/deepfocus":
+        sessions = scan_claude_sessions()
+        kb = _command_sessions_keyboard("deepfocus", sessions)
+        if kb:
+            tg_send("🔬 Deep focus on which session?", reply_markup=kb)
+        else:
+            tg_send("⚠️ No Claude sessions found.")
+        return None, sessions, last_win_idx
+
+    # /deepfocus wN|name
+    dfocus_m = re.match(r"^/deepfocus\s+w?(\w[\w-]*)$", text.lower())
+    if dfocus_m:
+        raw_target = dfocus_m.group(1)
+        idx = _resolve_name(raw_target, sessions)
+        if idx:
+            pane, project = sessions[idx]
+            _save_deepfocus_state(idx, pane, project)
+            _clear_focus_state()
+            pw = _get_pane_width(pane)
+            content = clean_pane_status(_capture_pane(pane, 20), pw) or "(empty)"
+            tg_send(f"🔬 Deep focus on {_wid_label(idx)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{content[-3000:]}\n```")
+            return None, sessions, idx
+        else:
+            tg_send(f"⚠️ No session `{raw_target}`.\n{format_sessions_message(sessions)}",
+                    reply_markup=_sessions_keyboard(sessions))
+            return None, sessions, last_win_idx
 
     # /focus (bare — show session picker)
     if text.lower().strip() == "/focus":
@@ -1273,26 +1405,43 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             tg_send("⚠️ No Claude sessions found.")
         return None, sessions, last_win_idx
 
-    # /focus wN
-    focus_m = re.match(r"^/focus\s+w?(\d+)$", text.lower())
+    # /focus wN|name
+    focus_m = re.match(r"^/focus\s+w?(\w[\w-]*)$", text.lower())
     if focus_m:
-        idx = focus_m.group(1)
-        if idx in sessions:
+        raw_target = focus_m.group(1)
+        idx = _resolve_name(raw_target, sessions)
+        if idx:
             pane, project = sessions[idx]
             _save_focus_state(idx, pane, project)
+            _clear_deepfocus_state()
             pw = _get_pane_width(pane)
             content = clean_pane_status(_capture_pane(pane, 20), pw) or "(empty)"
-            tg_send(f"🔍 Focusing on `w{idx}` (`{project}`). Send `/unfocus` to stop.\n\n```\n{content[-3000:]}\n```")
+            tg_send(f"🔍 Focusing on {_wid_label(idx)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{content[-3000:]}\n```")
             return None, sessions, idx
         else:
-            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}",
+            tg_send(f"⚠️ No session `{raw_target}`.\n{format_sessions_message(sessions)}",
                     reply_markup=_sessions_keyboard(sessions))
             return None, sessions, last_win_idx
 
     # /unfocus
     if text.lower() == "/unfocus":
         _clear_focus_state()
+        _clear_deepfocus_state()
         tg_send("🔍 Focus stopped.")
+        return None, sessions, last_win_idx
+
+    # /name wN|name [label]
+    name_m = re.match(r"^/name\s+w?(\w[\w-]*)(?:\s+(.+))?$", text)
+    if name_m:
+        raw_target = name_m.group(1)
+        idx = _resolve_name(raw_target, sessions) or raw_target
+        label = name_m.group(2).strip() if name_m.group(2) else None
+        if label:
+            _save_session_name(idx, label)
+            tg_send(f"✏️ Session `w{idx}` named `{label}`.")
+        else:
+            _clear_session_name(idx)
+            tg_send(f"✏️ Session `w{idx}` name cleared.")
         return None, sessions, last_win_idx
 
     # /new [dir]
@@ -1320,25 +1469,26 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             tg_send(f"⚠️ Failed to start session: `{e}`")
             return None, sessions, last_win_idx
 
-    # /interrupt [wN]
-    int_m = re.match(r"^/interrupt(?:\s+w?(\d+))?$", text.lower())
+    # /interrupt [wN|name]
+    int_m = re.match(r"^/interrupt(?:\s+w?(\w[\w-]*))?$", text.lower())
     if int_m:
-        idx = int_m.group(1)
-        if idx and idx in sessions:
+        raw_target = int_m.group(1)
+        idx = _resolve_name(raw_target, sessions) if raw_target else None
+        if idx:
             pane, project = sessions[idx]
             p = shlex.quote(pane)
             subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
-            tg_send(f"⏹ Interrupted `w{idx}` (`{project}`).")
+            tg_send(f"⏹ Interrupted {_wid_label(idx)} (`{project}`).")
             return None, sessions, idx
-        elif idx:
-            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}",
+        elif raw_target:
+            tg_send(f"⚠️ No session `{raw_target}`.\n{format_sessions_message(sessions)}",
                     reply_markup=_sessions_keyboard(sessions))
         elif len(sessions) == 1:
             idx = next(iter(sessions))
             pane, project = sessions[idx]
             p = shlex.quote(pane)
             subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
-            tg_send(f"⏹ Interrupted `w{idx}` (`{project}`).")
+            tg_send(f"⏹ Interrupted {_wid_label(idx)} (`{project}`).")
             return None, sessions, idx
         else:
             sessions = scan_claude_sessions()
@@ -1359,11 +1509,12 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             tg_send("⚠️ No Claude sessions found.")
         return None, sessions, last_win_idx
 
-    # /kill wN
-    kill_m = re.match(r"^/kill\s+w?(\d+)$", text.lower())
+    # /kill wN|name
+    kill_m = re.match(r"^/kill\s+w?(\w[\w-]*)$", text.lower())
     if kill_m:
-        idx = kill_m.group(1)
-        if idx in sessions:
+        raw_target = kill_m.group(1)
+        idx = _resolve_name(raw_target, sessions)
+        if idx:
             pane, project = sessions[idx]
             p = shlex.quote(pane)
             # Three Ctrl+C with delays — reliably exits Claude Code
@@ -1377,23 +1528,24 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             time.sleep(2)
             sessions = scan_claude_sessions()
             if idx in sessions:
-                tg_send(f"⚠️ `w{idx}` (`{project}`) still running after Ctrl+C.")
+                tg_send(f"⚠️ {_wid_label(idx)} (`{project}`) still running after Ctrl+C.")
             else:
-                tg_send(f"🛑 Killed `w{idx}` (`{project}`).")
+                tg_send(f"🛑 Killed {_wid_label(idx)} (`{project}`).")
             return None, sessions, last_win_idx
         else:
-            tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}",
+            tg_send(f"⚠️ No session `{raw_target}`.\n{format_sessions_message(sessions)}",
                     reply_markup=_sessions_keyboard(sessions))
             return None, sessions, last_win_idx
 
-    # /last [wN]
-    last_m = re.match(r"^/last(?:\s+w?(\d+))?$", text.lower())
+    # /last [wN|name]
+    last_m = re.match(r"^/last(?:\s+w?(\w[\w-]*))?$", text.lower())
     if last_m:
-        idx = last_m.group(1)
+        raw_target = last_m.group(1)
+        idx = _resolve_name(raw_target, sessions) if raw_target else None
         if idx and idx in _last_messages:
             tg_send(_last_messages[idx])
-        elif idx:
-            tg_send(f"⚠️ No saved message for `w{idx}`.")
+        elif raw_target:
+            tg_send(f"⚠️ No saved message for `{raw_target}`.")
         elif len(_last_messages) == 1:
             tg_send(list(_last_messages.values())[0])
         elif _last_messages:
@@ -1424,6 +1576,17 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             tg_send(f"⚠️ No Claude session at `w{win_idx}`.\n{format_sessions_message(sessions)}",
                     reply_markup=_sessions_keyboard(sessions))
             return None, sessions, last_win_idx
+
+    # Name prefix: first word matches a known session name
+    words = text.split(None, 1)
+    if len(words) == 2:
+        name_idx = _resolve_name(words[0], sessions)
+        if name_idx is not None:
+            pane, project = sessions[name_idx]
+            confirm = route_to_pane(pane, name_idx, words[1].strip())
+            tg_send(confirm)
+            _log(f"w{name_idx}", confirm[:100])
+            return None, sessions, name_idx
 
     # No prefix — route to last used or only session
     target_idx = None
@@ -1486,7 +1649,8 @@ def _handle_callback(callback: dict, sessions: dict,
                 label = "\u274c Denied"
             else:
                 label = f"Selected option {n}"
-            tg_send(f"{label} in `{wid}`")
+            w_idx = wid.lstrip("w")
+            tg_send(f"{label} in {_wid_label(w_idx)}")
             _log("callback", f"perm {wid} option {n}")
         else:
             _answer_callback_query(cb_id, "Prompt expired")
@@ -1505,7 +1669,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|interrupt|kill|last)_(w?)(\d+)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|last)_(w?)(\d+)$", cb_data)
     if m:
         cmd, _, idx = m.group(1), m.group(2), m.group(3)
         text = f"/{cmd} w{idx}"
@@ -1547,13 +1711,18 @@ def cmd_listen():
     # Prompt cleanup timer
     last_prompt_cleanup: float = 0
 
-    # Focus monitoring state
+    # Lightweight focus (completed responses only)
     focus_target_wid: str | None = None
     focus_pane_width: int = 0
-    focus_prev_lines: list[str] = []
-    focus_pending: list[str] = []
-    focus_last_new_ts: float = 0
-    focus_first_new_ts: float = 0
+    focus_last_hash: int = 0
+
+    # Deep focus (streams all output)
+    deepfocus_target_wid: str | None = None
+    deepfocus_pane_width: int = 0
+    deepfocus_prev_lines: list[str] = []
+    deepfocus_pending: list[str] = []
+    deepfocus_last_new_ts: float = 0
+    deepfocus_first_new_ts: float = 0
 
     # Consume existing updates to avoid replaying old messages
     offset = 0
@@ -1569,7 +1738,7 @@ def cmd_listen():
     except Exception:
         pass
 
-    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/unfocus` | `/new [dir]` | `/interrupt [wN]` | `/kill wN` | `/stop` pause | `/quit` exit"
+    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/deepfocus wN` | `/unfocus` | `/name wN [label]` | `/new [dir]` | `/interrupt [wN]` | `/kill wN` | `/stop` pause | `/quit` exit"
 
     _set_bot_commands()
     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
@@ -1612,10 +1781,13 @@ def cmd_listen():
                     paused = False
                     focus_target_wid = None
                     focus_pane_width = 0
-                    focus_prev_lines = []
-                    focus_pending = []
-                    focus_last_new_ts = 0
-                    focus_first_new_ts = 0
+                    focus_last_hash = 0
+                    deepfocus_target_wid = None
+                    deepfocus_pane_width = 0
+                    deepfocus_prev_lines = []
+                    deepfocus_pending = []
+                    deepfocus_last_new_ts = 0
+                    deepfocus_first_new_ts = 0
                     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
                     tg_send("▶️ Resumed.\n\n" + help_msg,
                             reply_markup=_sessions_keyboard(sessions))
@@ -1640,69 +1812,106 @@ def cmd_listen():
             last_prompt_cleanup = time.time()
 
         focus_state = _load_focus_state()
+        deepfocus_state = _load_deepfocus_state()
+        focused_wids: set[str] = set()
+        if focus_state:
+            focused_wids.add(focus_state["wid"])
+        if deepfocus_state:
+            focused_wids.add(deepfocus_state["wid"])
 
-        signal_wid = process_signals(focused_wid=focus_state["wid"] if focus_state else None)
+        signal_wid = process_signals(focused_wids=focused_wids or None)
         if signal_wid:
             last_win_idx = signal_wid
 
-        # --- Focus monitoring ---
+        # --- Lightweight focus monitoring (completed responses only) ---
         if focus_state:
             fw = focus_state["wid"]
             if fw != focus_target_wid:
-                focus_prev_lines = []
-                focus_pending = []
-                focus_last_new_ts = 0
-                focus_first_new_ts = 0
                 focus_target_wid = fw
                 focus_pane_width = _get_pane_width(focus_state["pane"])
-
+                focus_last_hash = 0
             fp, fproj = focus_state["pane"], focus_state["project"]
-
             if fw not in sessions:
                 sessions = scan_claude_sessions()
                 last_scan = time.time()
                 if fw not in sessions:
                     _clear_focus_state()
-                    tg_send(f"🔍 Focus on `w{fw}` ended — session gone.")
+                    tg_send(f"🔍 Focus on {_wid_label(fw)} ended — session gone.")
                     focus_target_wid = None
                     focus_state = None
+            if focus_state:
+                for n in (50, 150):
+                    raw = _capture_pane(fp, n)
+                    if _has_response_start(raw):
+                        break
+                cleaned = clean_pane_content(raw, "stop", focus_pane_width)
+                if cleaned:
+                    h = hash(cleaned)
+                    if h != focus_last_hash and focus_last_hash != 0:
+                        header = f"🔍 {_wid_label(fw)} (`{fproj}`):\n\n"
+                        _send_long_message(header, cleaned, fw)
+                    focus_last_hash = h
+        elif focus_target_wid:
+            focus_target_wid = None
 
-        if focus_state:
-            raw = _capture_pane(fp, 50)
+        # --- Deep focus monitoring (streams all output) ---
+        if deepfocus_state:
+            dfw = deepfocus_state["wid"]
+            if dfw != deepfocus_target_wid:
+                deepfocus_prev_lines = []
+                deepfocus_pending = []
+                deepfocus_last_new_ts = 0
+                deepfocus_first_new_ts = 0
+                deepfocus_target_wid = dfw
+                deepfocus_pane_width = _get_pane_width(deepfocus_state["pane"])
+
+            dfp, dfproj = deepfocus_state["pane"], deepfocus_state["project"]
+
+            if dfw not in sessions:
+                sessions = scan_claude_sessions()
+                last_scan = time.time()
+                if dfw not in sessions:
+                    _clear_deepfocus_state()
+                    tg_send(f"🔬 Deep focus on {_wid_label(dfw)} ended — session gone.")
+                    deepfocus_target_wid = None
+                    deepfocus_state = None
+
+        if deepfocus_state:
+            raw = _capture_pane(dfp, 50)
             cur_lines = _filter_noise(raw)
             # Strip prompt line and continuation (user typing)
             for i in range(len(cur_lines) - 1, -1, -1):
                 if cur_lines[i].strip().startswith("❯"):
                     cur_lines = cur_lines[:i]
                     break
-            if focus_pane_width:
-                cur_lines = _join_wrapped_lines(cur_lines, focus_pane_width)
+            if deepfocus_pane_width:
+                cur_lines = _join_wrapped_lines(cur_lines, deepfocus_pane_width)
 
-            if focus_prev_lines:
-                new = _compute_new_lines(focus_prev_lines, cur_lines)
+            if deepfocus_prev_lines:
+                new = _compute_new_lines(deepfocus_prev_lines, cur_lines)
                 if new:
-                    focus_pending.extend(new)
-                    focus_last_new_ts = time.time()
-                    if not focus_first_new_ts:
-                        focus_first_new_ts = time.time()
+                    deepfocus_pending.extend(new)
+                    deepfocus_last_new_ts = time.time()
+                    if not deepfocus_first_new_ts:
+                        deepfocus_first_new_ts = time.time()
 
-            focus_prev_lines = cur_lines
+            deepfocus_prev_lines = cur_lines
 
             now = time.time()
-            debounce_ok = focus_pending and focus_last_new_ts and (now - focus_last_new_ts >= 3)
-            max_delay_ok = focus_pending and focus_first_new_ts and (now - focus_first_new_ts >= 15)
+            debounce_ok = deepfocus_pending and deepfocus_last_new_ts and (now - deepfocus_last_new_ts >= 3)
+            max_delay_ok = deepfocus_pending and deepfocus_first_new_ts and (now - deepfocus_first_new_ts >= 15)
 
             if debounce_ok or max_delay_ok:
-                chunk = "\n".join(focus_pending).strip()
+                chunk = "\n".join(deepfocus_pending).strip()
                 if chunk:
-                    msg = f"🔍 `w{fw}` (`{fproj}`):\n```\n{chunk[:3500]}\n```"
+                    msg = f"🔬 {_wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
                     tg_send(msg)
-                    _save_last_msg(fw, msg)
-                focus_pending = []
-                focus_last_new_ts = 0
-                focus_first_new_ts = 0
-        elif focus_target_wid:
-            focus_target_wid = None
+                    _save_last_msg(dfw, msg)
+                deepfocus_pending = []
+                deepfocus_last_new_ts = 0
+                deepfocus_first_new_ts = 0
+        elif deepfocus_target_wid:
+            deepfocus_target_wid = None
 
         try:
             data, offset = _poll_updates(offset, timeout=1)

@@ -304,6 +304,15 @@ class TestRouteToPane(unittest.TestCase):
     def setUp(self):
         self.pane = "0:4.0"
         self.win_idx = "4"
+        self.signal_dir = "/tmp/tg_hook_test_route"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("subprocess.run")
     def test_normal_message(self, mock_run):
@@ -1726,6 +1735,15 @@ class TestHandleCallback(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_callback"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
@@ -2065,7 +2083,9 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("sessions", names)
         self.assertIn("help", names)
         self.assertIn("quit", names)
-        self.assertEqual(len(commands), 12)
+        self.assertIn("deepfocus", names)
+        self.assertIn("name", names)
+        self.assertEqual(len(commands), 14)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -2314,6 +2334,602 @@ class TestCallbackCommandExpanded(unittest.TestCase):
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/last w4", self.sessions, None, "")
         self.assertIsNone(action)
+
+
+class TestDeepFocusState(unittest.TestCase):
+    """Test deepfocus state file operations."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_deepfocus"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_save_and_load_roundtrip(self):
+        tg._save_deepfocus_state("4", "0:4.0", "myproj")
+        state = tg._load_deepfocus_state()
+        self.assertEqual(state, {"wid": "4", "pane": "0:4.0", "project": "myproj"})
+
+    def test_load_missing_returns_none(self):
+        self.assertIsNone(tg._load_deepfocus_state())
+
+    def test_clear_removes_file(self):
+        tg._save_deepfocus_state("4", "0:4.0", "myproj")
+        tg._clear_deepfocus_state()
+        self.assertIsNone(tg._load_deepfocus_state())
+
+    def test_survives_clear_signals_without_state(self):
+        tg._save_deepfocus_state("4", "0:4.0", "myproj")
+        tg._clear_signals(include_state=False)
+        self.assertIsNotNone(tg._load_deepfocus_state())
+
+    def test_cleared_by_clear_signals_with_state(self):
+        tg._save_deepfocus_state("4", "0:4.0", "myproj")
+        tg._clear_signals(include_state=True)
+        self.assertIsNone(tg._load_deepfocus_state())
+
+
+class TestSessionNames(unittest.TestCase):
+    """Test session name state operations."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_names"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_save_and_load(self):
+        tg._save_session_name("4", "auth")
+        names = tg._load_session_names()
+        self.assertEqual(names, {"4": "auth"})
+
+    def test_multiple_names(self):
+        tg._save_session_name("4", "auth")
+        tg._save_session_name("5", "refactor")
+        names = tg._load_session_names()
+        self.assertEqual(names, {"4": "auth", "5": "refactor"})
+
+    def test_clear_name(self):
+        tg._save_session_name("4", "auth")
+        tg._clear_session_name("4")
+        names = tg._load_session_names()
+        self.assertEqual(names, {})
+
+    def test_load_empty(self):
+        names = tg._load_session_names()
+        self.assertEqual(names, {})
+
+    def test_survives_clear_signals_without_state(self):
+        tg._save_session_name("4", "auth")
+        tg._clear_signals(include_state=False)
+        names = tg._load_session_names()
+        self.assertEqual(names, {"4": "auth"})
+
+    def test_cleared_by_clear_signals_with_state(self):
+        tg._save_session_name("4", "auth")
+        tg._clear_signals(include_state=True)
+        names = tg._load_session_names()
+        self.assertEqual(names, {})
+
+
+class TestDeepFocusAlias(unittest.TestCase):
+    """Test df alias in _resolve_alias."""
+
+    def test_df4_resolves(self):
+        self.assertEqual(tg._resolve_alias("df4", False), "/deepfocus w4")
+
+    def test_df10_resolves(self):
+        self.assertEqual(tg._resolve_alias("df10", False), "/deepfocus w10")
+
+    def test_suppressed_with_active_prompt(self):
+        self.assertEqual(tg._resolve_alias("df4", True), "df4")
+
+
+class TestDeepFocusCommand(unittest.TestCase):
+    """Test /deepfocus command handling."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_dfcmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_bare_deepfocus_shows_picker(self, mock_scan, mock_send):
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command("/deepfocus", self.sessions, "4", "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Deep focus on which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_deepfocus_4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_deepfocus_wn(self, mock_run, mock_send):
+        mock_run.return_value = MagicMock(stdout="some content\n")
+        action, _, last = tg._handle_command(
+            "/deepfocus w4", self.sessions, None, "")
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Deep focus on `w4`", msg)
+        # Should have saved deepfocus state
+        state = tg._load_deepfocus_state()
+        self.assertIsNotNone(state)
+        self.assertEqual(state["wid"], "4")
+        # Should have cleared regular focus
+        self.assertIsNone(tg._load_focus_state())
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_deepfocus_clears_focus(self, mock_run, mock_send):
+        """Deepfocus clears any existing focus state (mutual exclusion)."""
+        mock_run.return_value = MagicMock(stdout="content\n")
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._handle_command("/deepfocus w4", self.sessions, None, "")
+        self.assertIsNone(tg._load_focus_state())
+        self.assertIsNotNone(tg._load_deepfocus_state())
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_deepfocus_no_session(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/deepfocus w99", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+
+class TestFocusClearsDeepfocus(unittest.TestCase):
+    """Test that /focus clears deepfocus state."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_focus_df"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_focus_clears_deepfocus(self, mock_run, mock_send):
+        mock_run.return_value = MagicMock(stdout="content\n")
+        tg._save_deepfocus_state("4", "0:4.0", "myproj")
+        tg._handle_command("/focus w4", self.sessions, None, "")
+        self.assertIsNone(tg._load_deepfocus_state())
+        self.assertIsNotNone(tg._load_focus_state())
+
+
+class TestUnfocusClearsBoth(unittest.TestCase):
+    """Test that /unfocus clears both focus and deepfocus states."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_unfocus"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_unfocus_clears_both(self, mock_send):
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._save_deepfocus_state("5", "0:5.0", "other")
+        tg._handle_command("/unfocus", self.sessions, None, "")
+        self.assertIsNone(tg._load_focus_state())
+        self.assertIsNone(tg._load_deepfocus_state())
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Focus stopped", msg)
+
+
+class TestNameCommand(unittest.TestCase):
+    """Test /name command handling."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_namecmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_name_set(self, mock_send):
+        tg._handle_command("/name w4 auth-refactor", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("named `auth-refactor`", msg)
+        names = tg._load_session_names()
+        self.assertEqual(names["4"], "auth-refactor")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_name_clear(self, mock_send):
+        tg._save_session_name("4", "old-name")
+        tg._handle_command("/name w4", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("name cleared", msg)
+        names = tg._load_session_names()
+        self.assertNotIn("4", names)
+
+
+class TestFormatSessionsWithNames(unittest.TestCase):
+    """Test format_sessions_message includes session names."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_fmtnames"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_with_name(self):
+        tg._save_session_name("4", "auth")
+        sessions = {"4": ("0:4.0", "myproj")}
+        msg = tg.format_sessions_message(sessions)
+        self.assertIn("[`auth`]", msg)
+        self.assertIn("`w4`", msg)
+        self.assertIn("`myproj`", msg)
+
+    def test_without_name(self):
+        sessions = {"4": ("0:4.0", "myproj")}
+        msg = tg.format_sessions_message(sessions)
+        self.assertNotIn("[", msg)
+        self.assertIn("`w4`", msg)
+
+    def test_name_in_backticks_markdown_safe(self):
+        """Session names with underscores must be in backticks."""
+        tg._save_session_name("4", "my_auth")
+        sessions = {"4": ("0:4.0", "proj")}
+        msg = tg.format_sessions_message(sessions)
+        self.assertIn("[`my_auth`]", msg)
+        # Remove code blocks and check no bare underscores
+        stripped = re.sub(r'```.*?```', '', msg, flags=re.DOTALL)
+        stripped = re.sub(r'`[^`]+`', '', stripped)
+        self.assertNotIn('_', stripped)
+
+
+class TestDeepFocusCallback(unittest.TestCase):
+    """Test cmd_deepfocus callback handler."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_deepfocus_callback(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_deepfocus_4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/deepfocus w4", self.sessions, None, "")
+        self.assertIsNone(action)
+
+
+class TestProcessSignalsFocusedWids(unittest.TestCase):
+    """Test process_signals with focused_wids set."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_sig_wids"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_stop_suppressed_by_focus_set(self, mock_sleep, mock_run, mock_proj, mock_send):
+        """Stop signal suppressed when wid is in focused_wids set."""
+        self._write_signal("stop")
+        tg.process_signals(focused_wids={"4"})
+        mock_send.assert_not_called()
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_stop_not_suppressed_different_wid(self, mock_sleep, mock_run, mock_proj, mock_send):
+        """Stop signal NOT suppressed when wid not in focused_wids."""
+        self._write_signal("stop")
+        tg.process_signals(focused_wids={"5"})
+        mock_send.assert_called_once()
+
+
+class TestProcessSignalsWithNames(unittest.TestCase):
+    """Test that process_signals includes session names in tags."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_sig_names"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_stop_includes_name(self, mock_sleep, mock_run, mock_proj, mock_send):
+        tg._save_session_name("4", "auth")
+        self._write_signal("stop")
+        tg.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("`w4 [auth]`", msg)
+
+
+class TestHelpIncludesNewCommands(unittest.TestCase):
+    """Test /help includes deepfocus, name, and df alias."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_help_has_deepfocus(self, mock_send):
+        tg._handle_command("/help", self.sessions, "4", "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("/deepfocus", msg)
+        self.assertIn("/name", msg)
+        self.assertIn("df4", msg)
+
+
+class TestResolveName(unittest.TestCase):
+    """Test _resolve_name helper for name-based session routing."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_resolve"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_numeric_index(self):
+        """Direct numeric index returns itself."""
+        self.assertEqual(tg._resolve_name("4", self.sessions), "4")
+
+    def test_numeric_not_in_sessions(self):
+        """Numeric index not in sessions returns None."""
+        self.assertIsNone(tg._resolve_name("99", self.sessions))
+
+    def test_name_lookup(self):
+        """Name lookup returns correct index."""
+        tg._save_session_name("4", "auth")
+        self.assertEqual(tg._resolve_name("auth", self.sessions), "4")
+
+    def test_name_case_insensitive(self):
+        """Name lookup is case-insensitive."""
+        tg._save_session_name("4", "Auth")
+        self.assertEqual(tg._resolve_name("auth", self.sessions), "4")
+        self.assertEqual(tg._resolve_name("AUTH", self.sessions), "4")
+
+    def test_unknown_name(self):
+        """Unknown name returns None."""
+        self.assertIsNone(tg._resolve_name("nonexistent", self.sessions))
+
+    def test_name_for_dead_session(self):
+        """Name for a session not in the live sessions dict returns None."""
+        tg._save_session_name("99", "dead")
+        self.assertIsNone(tg._resolve_name("dead", self.sessions))
+
+    def test_none_target(self):
+        """None target returns None."""
+        self.assertIsNone(tg._resolve_name(None, self.sessions))
+
+
+class TestNameBasedCommands(unittest.TestCase):
+    """Test commands accept session names as targets."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_namecmds"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+        tg._save_session_name("4", "auth")
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_focus_by_name(self, mock_run, mock_send):
+        mock_run.return_value = MagicMock(stdout="content\n")
+        action, _, last = tg._handle_command(
+            "/focus auth", self.sessions, None, "")
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Focusing on `w4 [auth]`", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_deepfocus_by_name(self, mock_run, mock_send):
+        mock_run.return_value = MagicMock(stdout="content\n")
+        action, _, last = tg._handle_command(
+            "/deepfocus auth", self.sessions, None, "")
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Deep focus on `w4 [auth]`", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_interrupt_by_name(self, mock_run, mock_send):
+        action, _, last = tg._handle_command(
+            "/interrupt auth", self.sessions, None, "")
+        self.assertEqual(last, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Interrupted `w4 [auth]`", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg, "scan_claude_sessions")
+    def test_kill_by_name(self, mock_scan, mock_run, mock_send):
+        mock_scan.return_value = {"5": ("0:5.0", "other")}  # w4 gone
+        with patch("time.sleep"):
+            action, _, _ = tg._handle_command(
+                "/kill auth", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Killed", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_last_by_name(self, mock_send):
+        tg._last_messages["4"] = "previous msg"
+        action, _, _ = tg._handle_command(
+            "/last auth", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertEqual(msg, "previous msg")
+        tg._last_messages.pop("4", None)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_status_by_name(self, mock_run, mock_send):
+        mock_run.return_value = MagicMock(stdout="● Answer\n  42\n❯ prompt")
+        action, _, _ = tg._handle_command(
+            "/status auth", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("`w4 [auth]`", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_name_rename_by_name(self, mock_send):
+        """Rename a session using its current name."""
+        action, _, _ = tg._handle_command(
+            "/name auth newname", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("named `newname`", msg)
+        names = tg._load_session_names()
+        self.assertEqual(names["4"], "newname")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_unknown_name_error(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/focus nonexistent", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+        self.assertIn("nonexistent", msg)
+
+
+class TestNamePrefixRouting(unittest.TestCase):
+    """Test name-prefix message routing (e.g. 'auth fix the bug')."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_nameprefix"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.SIGNAL_DIR
+        tg.SIGNAL_DIR = self.signal_dir
+        tg._save_session_name("4", "auth")
+
+    def tearDown(self):
+        tg.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix the bug`")
+    def test_name_prefix_routes(self, mock_route, mock_send):
+        """'auth fix the bug' routes to session named 'auth'."""
+        action, _, last = tg._handle_command(
+            "auth fix the bug", self.sessions, None, "")
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        mock_route.assert_called_once_with("0:4.0", "4", "fix the bug")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_unknown_word_falls_through(self, mock_send):
+        """Unknown first word with multiple sessions asks to specify."""
+        action, _, _ = tg._handle_command(
+            "randomword hello", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Multiple sessions", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    def test_wn_prefix_still_works(self, mock_route, mock_send):
+        """w4 hello still works (backward compat)."""
+        action, _, last = tg._handle_command(
+            "w4 hello", self.sessions, None, "")
+        self.assertEqual(last, "4")
+        mock_route.assert_called_once_with("0:4.0", "4", "hello")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    def test_name_case_insensitive(self, mock_route, mock_send):
+        """Name prefix is case-insensitive."""
+        action, _, last = tg._handle_command(
+            "Auth fix it", self.sessions, None, "")
+        self.assertEqual(last, "4")
+        mock_route.assert_called_once_with("0:4.0", "4", "fix it")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    def test_single_word_no_prefix(self, mock_route, mock_send):
+        """Single word that isn't a name doesn't trigger name routing."""
+        sessions = {"4": ("0:4.0", "myproj")}
+        action, _, _ = tg._handle_command(
+            "hello", sessions, None, "")
+        # Should route to single session as no-prefix fallback
+        mock_route.assert_called_once_with("0:4.0", "4", "hello")
 
 
 if __name__ == "__main__":
