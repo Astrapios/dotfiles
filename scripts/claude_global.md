@@ -5,7 +5,7 @@
 When the user asks you to show, send, or share an image, figure, chart, screenshot, or any visual file to Telegram, use:
 
 ```bash
-pixi run -m ~/.dotfiles/scripts/tg-hook/pixi.toml tg-hook send-photo /path/to/file.png "optional caption"
+tg-hook send-photo /path/to/file.png "optional caption"
 ```
 
 This sends the file directly to the user's Telegram chat. Use it for:
