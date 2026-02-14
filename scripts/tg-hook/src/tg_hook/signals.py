@@ -85,7 +85,7 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
-            perm_header, perm_body, options = content._extract_pane_permission(pane)
+            perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
             if options and not any(o.startswith("1.") for o in options):
                 options.insert(0, "1. Yes")
             max_opt = 0
@@ -97,19 +97,19 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
             n = max_opt or 3
             perm_kb = telegram._build_inline_keyboard([[
                 ("\u2705 Allow", f"perm_{wid}_1"),
-                ("\u274c Deny", f"perm_{wid}_{n}"),
                 ("\u2705 Always", f"perm_{wid}_2"),
+                ("\u274c Deny", f"perm_{wid}_{n}"),
             ]])
+            context_str = f"{perm_context}\n\n" if perm_context else ""
             if bash_cmd:
-                msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}"
+                msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{context_str}```\n{bash_cmd[:2000]}\n```\n{opts_text}"
                 telegram.tg_send(msg, reply_markup=perm_kb)
                 config._save_last_msg(wid, msg)
             else:
                 title = perm_header or "needs permission"
-                header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n"
+                header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
                 if perm_body:
-                    footer = f"\n{opts_text}"
-                    telegram._send_long_message(header_str, perm_body + footer, wid, reply_markup=perm_kb)
+                    telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text)
                 else:
                     msg = f"{header_str}{opts_text}"
                     telegram.tg_send(msg, reply_markup=perm_kb)

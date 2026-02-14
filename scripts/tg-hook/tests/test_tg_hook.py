@@ -229,7 +229,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No, and tell Claude what to do differently (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
 
         self.assertIn("update", header)
         self.assertIn("`scripts/test_file.py`", header)
@@ -248,7 +248,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
 
         self.assertEqual(len(options), 3)
 
@@ -263,7 +263,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
 
         self.assertIn("fetch", header)
         self.assertIn("`https://example.com`", header)
@@ -272,7 +272,7 @@ class TestExtractPanePermission(unittest.TestCase):
     @patch("subprocess.run")
     def test_no_options(self, mock_run):
         mock_run.return_value = self._mock_pane("some random content\nno options here")
-        header, content, options = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
         self.assertEqual(options, [])
 
     @patch("subprocess.run")
@@ -289,7 +289,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 2. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
 
         self.assertNotIn("Edit file", content)
         self.assertNotIn("hook.py", content)  # standalone filename filtered
@@ -324,13 +324,52 @@ class TestExtractPanePermission(unittest.TestCase):
             return self._mock_pane(long_content)
 
         mock_run.side_effect = side_effect
-        header, body, options = tg._extract_pane_permission("test_pane")
+        header, body, options, ctx = tg._extract_pane_permission("test_pane")
 
         # Should have expanded — verify it captured the deeper content
         self.assertIn("more plan details", body)
         self.assertEqual(len(options), 2)
         # Verify subprocess.run was called multiple times (progressive)
         self.assertGreater(mock_run.call_count, 1)
+
+    @patch("subprocess.run")
+    def test_context_from_response_bullet(self, mock_run):
+        """Response bullet above tool bullet is captured as context."""
+        pane_content = textwrap.dedent("""\
+            ● I'll update the function to use snake_case.
+              Here's the change:
+            ● Update(scripts/test_file.py)
+              ⎿  Edit file
+                 scripts/test_file.py
+              1 +new_line = True
+              ❯ 1. Yes
+                2. Yes, and don't ask again for this file
+                3. No, and tell Claude what to do differently (esc)
+        """)
+        mock_run.return_value = self._mock_pane(pane_content)
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+
+        self.assertIn("update", header)
+        self.assertIn("+new_line = True", content)
+        self.assertIn("update the function to use snake_case", ctx)
+        self.assertIn("Here's the change:", ctx)
+
+    @patch("subprocess.run")
+    def test_no_response_bullet_empty_context(self, mock_run):
+        """No response bullet above tool bullet → empty context."""
+        pane_content = textwrap.dedent("""\
+            ● Update(scripts/test_file.py)
+              ⎿  Edit file
+                 scripts/test_file.py
+              1 +new_line = True
+              ❯ 1. Yes
+                2. No (esc)
+        """)
+        mock_run.return_value = self._mock_pane(pane_content)
+        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+
+        self.assertIn("update", header)
+        self.assertEqual(ctx, "")
 
 
 class TestRouteToPane(unittest.TestCase):
@@ -497,7 +536,7 @@ class TestProcessSignals(unittest.TestCase):
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.tmux, "get_pane_project", return_value="test_proj")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to update `test.py`", "+new=True", ["1. Yes", "2. No"]))
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to update `test.py`", "+new=True", ["1. Yes", "2. No"], ""))
     @patch.object(tg.state, "save_active_prompt")
     def test_permission_signal_non_bash(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="", message="Claude needs permission to use Update")
@@ -512,7 +551,7 @@ class TestProcessSignals(unittest.TestCase):
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.tmux, "get_pane_project", return_value="test_proj")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("", "", ["1. Yes", "2. No"]))
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("", "", ["1. Yes", "2. No"], ""))
     @patch.object(tg.state, "save_active_prompt")
     def test_permission_signal_bash(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="rm /tmp/test_file.txt", message="Claude needs permission")
@@ -527,7 +566,7 @@ class TestProcessSignals(unittest.TestCase):
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to fetch `https://example.com`", "", ["1. Yes", "2. No"]))
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to fetch `https://example.com`", "", ["1. Yes", "2. No"], ""))
     @patch.object(tg.state, "save_active_prompt")
     def test_permission_no_content(self, mock_save, mock_extract, mock_proj, mock_send):
         """WebFetch with no content body should not have empty pre block."""
@@ -2029,7 +2068,7 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch.object(tg.content, "_extract_pane_permission",
-                  return_value=("wants to update `t.py`", "+new=True", ["1. Yes", "2. No"]))
+                  return_value=("wants to update `t.py`", "+new=True", ["1. Yes", "2. No"], ""))
     @patch.object(tg.state, "save_active_prompt")
     def test_permission_has_keyboard(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="", message="needs permission")
@@ -2089,7 +2128,7 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
     @patch.object(tg.telegram, "_send_long_message")
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch.object(tg.content, "_extract_pane_permission",
-                  return_value=("wants to update `t.py`", "big plan\ncontent here", ["1. Yes", "2. No"]))
+                  return_value=("wants to update `t.py`", "big plan\ncontent here", ["1. Yes", "2. No"], ""))
     @patch.object(tg.state, "save_active_prompt")
     def test_permission_non_bash_uses_send_long_message(self, mock_save, mock_extract, mock_proj, mock_long, mock_send):
         """Non-bash permission with body uses _send_long_message for chunking."""
@@ -2099,7 +2138,7 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         args, kwargs = mock_long.call_args
         self.assertIn("wants to update", args[0])  # header
         self.assertIn("big plan", args[1])  # body includes content
-        self.assertIn("1. Yes", args[1])  # body includes options as footer
+        self.assertIn("1. Yes", kwargs.get("footer", ""))  # options in footer
         self.assertIsNotNone(kwargs.get("reply_markup"))
         # tg_send should NOT be called directly for non-bash with body
         mock_send.assert_not_called()

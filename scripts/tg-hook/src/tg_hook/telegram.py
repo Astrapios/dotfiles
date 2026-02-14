@@ -33,18 +33,20 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None) -> i
 
 
 def _send_long_message(header: str, body: str, wid: str = "",
-                       reply_markup: dict | None = None):
+                       reply_markup: dict | None = None, footer: str = ""):
     """Send a header + body as one or more Telegram messages, chunking if needed.
 
-    Body is wrapped in ``` code blocks. If the total exceeds TG_MAX, body is
-    split across multiple messages at line boundaries.
-    reply_markup is attached to the last chunk only so buttons appear at the bottom.
+    Body is wrapped in ``` code blocks. Footer is appended after the closing ```.
+    If the total exceeds TG_MAX, body is split across multiple messages at line
+    boundaries. reply_markup is attached to the last chunk only so buttons appear
+    at the bottom.
     """
-    overhead = len(header) + len("```\n") + len("\n```") + 50
+    footer_str = f"\n{footer}" if footer else ""
+    overhead = len(header) + len("```\n") + len("\n```") + len(footer_str) + 50
     chunk_size = config.TG_MAX - overhead
 
     if len(body) <= chunk_size:
-        msg = f"{header}```\n{body}\n```"
+        msg = f"{header}```\n{body}\n```{footer_str}"
         tg_send(msg, reply_markup=reply_markup)
         config._save_last_msg(wid, msg)
         return
@@ -69,8 +71,10 @@ def _send_long_message(header: str, body: str, wid: str = "",
             label = f"{header}(1/{total})\n"
         else:
             label = f"(cont. {i+1}/{total})\n"
-        msg = f"{label}```\n{chunk}\n```"
-        kb = reply_markup if i == total - 1 else None
+        is_last = i == total - 1
+        suffix = footer_str if is_last else ""
+        msg = f"{label}```\n{chunk}\n```{suffix}"
+        kb = reply_markup if is_last else None
         tg_send(msg, reply_markup=kb)
     if chunks:
         config._save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")

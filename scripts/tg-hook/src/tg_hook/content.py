@@ -5,9 +5,10 @@ import re
 from tg_hook import tmux
 
 
-def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
+def _extract_pane_permission(pane: str) -> tuple[str, str, list[str], str]:
     """Extract content and options from a permission dialog in a tmux pane.
-    Returns (header, content between last dot and options, list of options).
+    Returns (header, content between last dot and options, list of options, context).
+    Context is Claude's response text (● bullet that isn't a tool call) above the tool bullet.
     Uses progressive capture (30→80→200 lines) to ensure plan content is fully captured."""
     # Progressive capture: try increasing sizes
     lines = []
@@ -17,7 +18,7 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
     for num_lines in (30, 80, 200):
         raw = tmux._capture_pane(pane, num_lines)
         if not raw:
-            return "", "", []
+            return "", "", [], ""
         lines = raw.splitlines()
 
         # Find options from last 8 lines only
@@ -34,17 +35,37 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
                 first_opt_idx = i
                 break
 
-        # Find last ● above the options
+        # Find last ● above the options (tool bullet)
         start = 0
         for i in range(first_opt_idx - 1, -1, -1):
             if lines[i].strip().startswith("●"):
                 start = i
                 break
 
-        # If ● is in the first 3 lines, we likely need more context
-        if start <= 2 and num_lines < 200:
+        # Find response bullet above the tool bullet
+        ctx_start = start
+        for i in range(start - 1, -1, -1):
+            s = lines[i].strip()
+            if s.startswith("●") and not re.match(r'^● \w+\(', s):
+                ctx_start = i
+                break
+
+        # If tool ● or response ● is in the first 3 lines, we likely need more context
+        if min(start, ctx_start) <= 2 and num_lines < 200:
             continue
         break
+
+    # Extract response context (between response bullet and tool bullet)
+    context_lines = []
+    for line in lines[ctx_start:start]:
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("●"):
+            context_lines.append(s[1:].strip())
+        else:
+            context_lines.append(s)
+    context = "\n".join(context_lines).strip()
 
     # Extract tool + file from ● header (e.g. "● Update(scripts/tg-hook)")
     header = ""
@@ -82,7 +103,7 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
         else:
             cleaned.append(line.strip())
     body = "\n".join(cleaned).strip()
-    return header, body, options
+    return header, body, options, context
 
 
 def _filter_noise(raw: str) -> list[str]:
