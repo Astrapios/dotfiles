@@ -199,6 +199,32 @@ def _remove_inline_keyboard(message_id: int, chat_id: str = CHAT_ID):
         pass
 
 
+def _set_bot_commands():
+    """Register bot commands with Telegram so they appear in the / picker."""
+    commands = [
+        {"command": "status", "description": "Show last response or pane status"},
+        {"command": "sessions", "description": "List active Claude sessions"},
+        {"command": "help", "description": "Show available commands"},
+        {"command": "focus", "description": "Monitor a session in real-time"},
+        {"command": "unfocus", "description": "Stop real-time monitoring"},
+        {"command": "interrupt", "description": "Interrupt current task (Esc)"},
+        {"command": "last", "description": "Re-send last message for a session"},
+        {"command": "new", "description": "Start new Claude session"},
+        {"command": "stop", "description": "Pause the listener"},
+        {"command": "start", "description": "Resume the listener"},
+        {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
+        {"command": "quit", "description": "Shut down the listener"},
+    ]
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT}/setMyCommands",
+            json={"commands": commands},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
 def tg_wait_reply(after_message_id: int, timeout: int = 300) -> str:
     """Poll for a reply after a given message_id. Returns reply text."""
     send_time = int(time.time()) - 5
@@ -448,6 +474,18 @@ def _sessions_keyboard(sessions: dict) -> dict | None:
     for idx in sorted(sessions, key=int):
         _, project = sessions[idx]
         buttons.append((f"w{idx} {project}"[:20], f"sess_{idx}"))
+    rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
+    return _build_inline_keyboard(rows)
+
+
+def _command_sessions_keyboard(cmd: str, sessions: dict) -> dict | None:
+    """Build inline keyboard to pick a session for a command (focus, interrupt, kill)."""
+    if not sessions:
+        return None
+    buttons = []
+    for idx in sorted(sessions, key=int):
+        _, project = sessions[idx]
+        buttons.append((f"w{idx} {project}"[:20], f"cmd_{cmd}_{idx}"))
     rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
     return _build_inline_keyboard(rows)
 
@@ -969,7 +1007,10 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             elif remaining_qs is not None:
                 # Last question answered — prompt user to confirm submission
                 msg = f"❓{tag} Submit answers? (y/n)"
-                tg_send(msg)
+                yn_kb = _build_inline_keyboard([
+                    [("\u2705 Yes", f"perm_{wid}_1"), ("\u274c No", f"perm_{wid}_2")],
+                ])
+                tg_send(msg, reply_markup=yn_kb)
                 _save_last_msg(wid, msg)
                 save_active_prompt(wid, prompt_pane, total=2,
                                    shortcuts={"y": 1, "yes": 1,
@@ -1136,7 +1177,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         return "pause", sessions, last_win_idx
 
     if text.lower() == "/quit":
-        tg_send("⚠️ Shut down listener? Reply `y` to confirm.")
+        quit_kb = _build_inline_keyboard([
+            [("\u2705 Yes", "quit_y"), ("\u274c No", "quit_n")],
+        ])
+        tg_send("⚠️ Shut down listener? Reply `y` to confirm.", reply_markup=quit_kb)
         return "quit_pending", sessions, last_win_idx
 
     if text.lower() == "/help":
@@ -1185,10 +1229,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             return None, sessions, last_win_idx
         elif len(sessions) == 1:
             targets = list(sessions.items())
-        elif last_win_idx and last_win_idx in sessions:
-            targets = [(last_win_idx, sessions[last_win_idx])]
+        elif len(sessions) > 1:
+            # Multiple sessions — show session picker
+            kb = _command_sessions_keyboard("status", sessions)
+            tg_send("📋 Status for which session?", reply_markup=kb)
+            return None, sessions, last_win_idx
         else:
-            targets = list(sessions.items())
+            tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.")
+            return None, sessions, last_win_idx
         explicit_lines = status_m.group(2) is not None
         for win_idx, (pane, project) in targets:
             pw = _get_pane_width(pane)
@@ -1213,6 +1261,16 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
             content = content or "(empty)"
             header = f"📋 `w{win_idx}` — `{project}`:\n\n"
             _send_long_message(header, content, win_idx)
+        return None, sessions, last_win_idx
+
+    # /focus (bare — show session picker)
+    if text.lower().strip() == "/focus":
+        sessions = scan_claude_sessions()
+        kb = _command_sessions_keyboard("focus", sessions)
+        if kb:
+            tg_send("🔍 Focus on which session?", reply_markup=kb)
+        else:
+            tg_send("⚠️ No Claude sessions found.")
         return None, sessions, last_win_idx
 
     # /focus wN
@@ -1265,7 +1323,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
     # /interrupt [wN]
     int_m = re.match(r"^/interrupt(?:\s+w?(\d+))?$", text.lower())
     if int_m:
-        idx = int_m.group(1) or last_win_idx
+        idx = int_m.group(1)
         if idx and idx in sessions:
             pane, project = sessions[idx]
             p = shlex.quote(pane)
@@ -1275,8 +1333,30 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
         elif idx:
             tg_send(f"⚠️ No session `w{idx}`.\n{format_sessions_message(sessions)}",
                     reply_markup=_sessions_keyboard(sessions))
+        elif len(sessions) == 1:
+            idx = next(iter(sessions))
+            pane, project = sessions[idx]
+            p = shlex.quote(pane)
+            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+            tg_send(f"⏹ Interrupted `w{idx}` (`{project}`).")
+            return None, sessions, idx
         else:
-            tg_send("⚠️ No window specified. Use `/interrupt wN`.")
+            sessions = scan_claude_sessions()
+            kb = _command_sessions_keyboard("interrupt", sessions)
+            if kb:
+                tg_send("⏹ Interrupt which session?", reply_markup=kb)
+            else:
+                tg_send("⚠️ No Claude sessions found.")
+        return None, sessions, last_win_idx
+
+    # /kill (bare — show session picker)
+    if text.lower().strip() == "/kill":
+        sessions = scan_claude_sessions()
+        kb = _command_sessions_keyboard("kill", sessions)
+        if kb:
+            tg_send("🛑 Kill which session?", reply_markup=kb)
+        else:
+            tg_send("⚠️ No Claude sessions found.")
         return None, sessions, last_win_idx
 
     # /kill wN
@@ -1309,13 +1389,24 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
     # /last [wN]
     last_m = re.match(r"^/last(?:\s+w?(\d+))?$", text.lower())
     if last_m:
-        idx = last_m.group(1) or last_win_idx
+        idx = last_m.group(1)
         if idx and idx in _last_messages:
             tg_send(_last_messages[idx])
         elif idx:
             tg_send(f"⚠️ No saved message for `w{idx}`.")
+        elif len(_last_messages) == 1:
+            tg_send(list(_last_messages.values())[0])
+        elif _last_messages:
+            # Multiple sessions have saved messages — show picker
+            # Only show sessions that have saved messages
+            has_msgs = {k: sessions[k] for k in _last_messages if k in sessions}
+            kb = _command_sessions_keyboard("last", has_msgs) if has_msgs else None
+            if kb:
+                tg_send("📋 Last message for which session?", reply_markup=kb)
+            else:
+                tg_send("⚠️ No saved messages.")
         else:
-            tg_send("⚠️ No window specified. Use `/last wN`.")
+            tg_send("⚠️ No saved messages yet.")
         return None, sessions, last_win_idx
 
     # Parse wN prefix
@@ -1357,8 +1448,11 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
 
 
 def _handle_callback(callback: dict, sessions: dict,
-                     last_win_idx: str | None) -> tuple[dict, str | None]:
-    """Handle an inline keyboard callback. Returns (sessions, last_win_idx)."""
+                     last_win_idx: str | None) -> tuple[dict, str | None, str | None]:
+    """Handle an inline keyboard callback. Returns (sessions, last_win_idx, action).
+
+    action is "quit" when quit_y is pressed, None otherwise.
+    """
     cb_id = callback["id"]
     cb_data = callback.get("data", "")
     msg_id = callback.get("message_id", 0)
@@ -1367,6 +1461,14 @@ def _handle_callback(callback: dict, sessions: dict,
     _answer_callback_query(cb_id)
     if msg_id:
         _remove_inline_keyboard(msg_id)
+
+    # Quit callbacks
+    if cb_data == "quit_y":
+        tg_send("👋 Bye.")
+        return sessions, last_win_idx, "quit"
+    if cb_data == "quit_n":
+        tg_send("Cancelled.")
+        return sessions, last_win_idx, None
 
     # Permission callback: perm_{wid}_{n}
     m = re.match(r"^perm_(w\d+)_(\d+)$", cb_data)
@@ -1388,7 +1490,7 @@ def _handle_callback(callback: dict, sessions: dict,
             _log("callback", f"perm {wid} option {n}")
         else:
             _answer_callback_query(cb_id, "Prompt expired")
-        return sessions, last_win_idx
+        return sessions, last_win_idx, None
 
     # Question callback: q_{wid}_{n}
     m = re.match(r"^q_(w\d+)_(\d+)$", cb_data)
@@ -1400,16 +1502,16 @@ def _handle_callback(callback: dict, sessions: dict,
             confirm = route_to_pane(pane, win_idx, n_str)
             tg_send(confirm)
             last_win_idx = win_idx
-        return sessions, last_win_idx
+        return sessions, last_win_idx, None
 
-    # Command callbacks: cmd_status_{wid}, cmd_focus_{wid}
-    m = re.match(r"^cmd_(status|focus)_(w?)(\d+)$", cb_data)
+    # Command callbacks: cmd_{action}_{wid}
+    m = re.match(r"^cmd_(status|focus|interrupt|kill|last)_(w?)(\d+)$", cb_data)
     if m:
         cmd, _, idx = m.group(1), m.group(2), m.group(3)
         text = f"/{cmd} w{idx}"
         _, sessions, last_win_idx = _handle_command(
             text, sessions, last_win_idx, "")
-        return sessions, last_win_idx
+        return sessions, last_win_idx, None
 
     # Session select: sess_{wid}
     m = re.match(r"^sess_(\d+)$", cb_data)
@@ -1419,10 +1521,10 @@ def _handle_callback(callback: dict, sessions: dict,
         text = f"/status w{idx}"
         _, sessions, last_win_idx = _handle_command(
             text, sessions, last_win_idx, "")
-        return sessions, last_win_idx
+        return sessions, last_win_idx, None
 
     _log("callback", f"unknown callback_data: {cb_data}")
-    return sessions, last_win_idx
+    return sessions, last_win_idx, None
 
 
 def cmd_listen():
@@ -1469,6 +1571,7 @@ def cmd_listen():
 
     CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/unfocus` | `/new [dir]` | `/interrupt [wN]` | `/kill wN` | `/stop` pause | `/quit` exit"
 
+    _set_bot_commands()
     help_msg = format_sessions_message(sessions) + "\n\n" + CMD_HELP
     tg_send(help_msg, reply_markup=_sessions_keyboard(sessions))
     _log("listen", f"Found {len(sessions)} Claude session(s).")
@@ -1614,8 +1717,13 @@ def cmd_listen():
             # Handle inline keyboard callbacks
             callback = chat_msg.get("callback")
             if callback:
-                sessions, last_win_idx = _handle_callback(
+                sessions, last_win_idx, cb_action = _handle_callback(
                     callback, sessions, last_win_idx)
+                if cb_action == "quit":
+                    return
+                # Reset quit_pending when quit buttons are used
+                if quit_pending and callback.get("data", "").startswith("quit_"):
+                    quit_pending = False
                 continue
 
             text = chat_msg["text"]

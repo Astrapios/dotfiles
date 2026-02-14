@@ -1232,21 +1232,37 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("No session", msg)
 
     @patch.object(tg, "tg_send", return_value=1)
-    def test_interrupt_no_window_specified(self, mock_send):
+    @patch.object(tg, "scan_claude_sessions")
+    def test_interrupt_no_window_shows_picker(self, mock_scan, mock_send):
+        mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
             "/interrupt", self.sessions, None, self.cmd_help)
         msg = mock_send.call_args[0][0]
-        self.assertIn("No window specified", msg)
+        self.assertIn("Interrupt which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
 
     @patch.object(tg, "tg_send", return_value=1)
-    def test_interrupt_defaults_to_last_win(self, mock_send):
-        with patch("subprocess.run"):
-            action, _, last = tg._handle_command(
-                "/interrupt", self.sessions, "5", self.cmd_help)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_interrupt_no_arg_multi_sessions_shows_picker(self, mock_scan, mock_send):
+        """Bare /interrupt with multiple sessions shows picker, ignores last_win."""
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command(
+            "/interrupt", self.sessions, "5", self.cmd_help)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Interrupt which", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_interrupt_no_arg_single_session_auto_targets(self, mock_run, mock_send):
+        """Bare /interrupt with single session auto-interrupts it."""
+        single = {"5": ("0:5.0", "other")}
+        action, _, last = tg._handle_command(
+            "/interrupt", single, None, self.cmd_help)
         self.assertEqual(last, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted", msg)
-        self.assertIn("`w5`", msg)
 
     @patch.object(tg, "tg_send", return_value=1)
     @patch("subprocess.run")
@@ -1719,13 +1735,14 @@ class TestHandleCallback(unittest.TestCase):
     def test_perm_allow(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
-        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_select.assert_called_once_with("0:4.0", 1)
         mock_answer.assert_called_once_with("cb1")
         mock_remove.assert_called_once_with(42)
         msg = mock_send.call_args[0][0]
         self.assertIn("Allowed", msg)
         self.assertIn("`w4`", msg)
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
@@ -1735,10 +1752,11 @@ class TestHandleCallback(unittest.TestCase):
     def test_perm_deny(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_3", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_select.assert_called_once_with("0:4.0", 3)
         msg = mock_send.call_args[0][0]
         self.assertIn("Denied", msg)
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
@@ -1748,10 +1766,11 @@ class TestHandleCallback(unittest.TestCase):
     def test_perm_always(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_2", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_select.assert_called_once_with("0:4.0", 2)
         msg = mock_send.call_args[0][0]
         self.assertIn("Always allowed", msg)
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
@@ -1759,10 +1778,11 @@ class TestHandleCallback(unittest.TestCase):
     def test_perm_expired(self, mock_load, mock_answer, mock_remove):
         mock_load.return_value = None  # prompt file gone
         callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         # Should call answer twice: once in main flow, once with "Prompt expired"
         self.assertEqual(mock_answer.call_count, 2)
         mock_answer.assert_any_call("cb1", "Prompt expired")
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
@@ -1770,40 +1790,45 @@ class TestHandleCallback(unittest.TestCase):
     @patch.object(tg, "route_to_pane", return_value="📨 Selected option 1")
     def test_question_select(self, mock_route, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "q_w4_1", "message_id": 42}
-        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_route.assert_called_once_with("0:4.0", "4", "1")
         self.assertEqual(last, "4")
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
     @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_status(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_status_w4", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/status w4", self.sessions, None, "")
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
     @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_focus(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_focus_w4", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/focus w4", self.sessions, None, "")
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
     @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_sess_select(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "sess_4", "message_id": 42}
-        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/status w4", self.sessions, "4", "")
+        self.assertIsNone(action)
 
     @patch.object(tg, "_remove_inline_keyboard")
     @patch.object(tg, "_answer_callback_query")
     def test_unknown_callback(self, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "unknown_xyz", "message_id": 42}
-        sessions, last = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         self.assertEqual(sessions, self.sessions)
+        self.assertIsNone(action)
 
 
 class TestSessionsKeyboard(unittest.TestCase):
@@ -2022,6 +2047,273 @@ class TestAnyActivePrompt(unittest.TestCase):
         with open(path, "w") as f:
             json.dump({"cmd": "echo"}, f)
         self.assertFalse(tg._any_active_prompt())
+
+
+class TestSetBotCommands(unittest.TestCase):
+    """Test _set_bot_commands helper."""
+
+    @patch("requests.post")
+    def test_registers_commands(self, mock_post):
+        mock_post.return_value = MagicMock(status_code=200)
+        tg._set_bot_commands()
+        mock_post.assert_called_once()
+        url = mock_post.call_args[0][0]
+        self.assertIn("setMyCommands", url)
+        commands = mock_post.call_args[1]["json"]["commands"]
+        names = [c["command"] for c in commands]
+        self.assertIn("status", names)
+        self.assertIn("sessions", names)
+        self.assertIn("help", names)
+        self.assertIn("quit", names)
+        self.assertEqual(len(commands), 12)
+
+    @patch("requests.post", side_effect=Exception("network error"))
+    def test_survives_exception(self, mock_post):
+        """Should not raise on failure."""
+        tg._set_bot_commands()  # no exception
+
+
+
+class TestSubmitYNButtons(unittest.TestCase):
+    """Test that 'Submit answers?' includes Y/N inline keyboard."""
+
+    @patch("subprocess.run")
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "save_active_prompt")
+    def test_submit_prompt_has_yn_keyboard(self, mock_save, mock_send, mock_run):
+        """Last question answered — submit prompt includes inline Y/N buttons."""
+        prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
+                  "free_text_at": 2, "remaining_qs": [],
+                  "project": "myproj"}
+        with patch.object(tg, "load_active_prompt", return_value=prompt):
+            tg.route_to_pane("0:4.0", "4", "1")
+        # Find the tg_send call with "Submit answers?"
+        submit_call = None
+        for c in mock_send.call_args_list:
+            if "Submit answers?" in c[0][0]:
+                submit_call = c
+                break
+        self.assertIsNotNone(submit_call, "Submit answers? message not found")
+        kb = submit_call[1].get("reply_markup")
+        self.assertIsNotNone(kb, "No reply_markup on submit prompt")
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(len(buttons), 2)
+        self.assertIn("Yes", buttons[0]["text"])
+        self.assertIn("No", buttons[1]["text"])
+        self.assertEqual(buttons[0]["callback_data"], "perm_w4_1")
+        self.assertEqual(buttons[1]["callback_data"], "perm_w4_2")
+
+
+class TestQuitYNButtons(unittest.TestCase):
+    """Test /quit sends Y/N inline keyboard and callbacks dispatch correctly."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_quit_command_has_yn_keyboard(self, mock_send):
+        action, _, _ = tg._handle_command("/quit", self.sessions, "4", "")
+        self.assertEqual(action, "quit_pending")
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(len(buttons), 2)
+        self.assertEqual(buttons[0]["callback_data"], "quit_y")
+        self.assertEqual(buttons[1]["callback_data"], "quit_n")
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_quit_y_returns_quit_action(self, mock_send, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "quit_y", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, "4")
+        self.assertEqual(action, "quit")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Bye", msg)
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_quit_n_returns_none_action(self, mock_send, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "quit_n", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, "4")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Cancelled", msg)
+
+
+class TestCommandSessionsKeyboard(unittest.TestCase):
+    """Test _command_sessions_keyboard helper."""
+
+    def test_empty_sessions(self):
+        self.assertIsNone(tg._command_sessions_keyboard("focus", {}))
+
+    def test_builds_buttons_with_cmd_prefix(self):
+        sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        kb = tg._command_sessions_keyboard("focus", sessions)
+        self.assertIsNotNone(kb)
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(buttons[0]["callback_data"], "cmd_focus_4")
+        self.assertEqual(buttons[1]["callback_data"], "cmd_focus_5")
+
+    def test_kill_command(self):
+        sessions = {"2": ("0:2.0", "proj")}
+        kb = tg._command_sessions_keyboard("kill", sessions)
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(buttons[0]["callback_data"], "cmd_kill_2")
+
+
+class TestBareCommandSessionPicker(unittest.TestCase):
+    """Test bare /focus, /kill, /interrupt show session picker."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_bare_status_multiple_no_last_shows_picker(self, mock_send):
+        """Bare /status with multiple sessions and no last_win shows picker."""
+        action, _, _ = tg._handle_command("/status", self.sessions, None, "")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Status for which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_status_4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_bare_focus_shows_picker(self, mock_scan, mock_send):
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command("/focus", self.sessions, "4", "")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Focus on which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_focus_4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_bare_focus_no_sessions(self, mock_scan, mock_send):
+        mock_scan.return_value = {}
+        action, _, _ = tg._handle_command("/focus", {}, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No Claude sessions", msg)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_bare_kill_shows_picker(self, mock_scan, mock_send):
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command("/kill", self.sessions, "4", "")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Kill which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_kill_4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_bare_interrupt_no_last_shows_picker(self, mock_scan, mock_send):
+        """Interrupt without args and no last_win shows session picker."""
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command("/interrupt", self.sessions, None, "")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Interrupt which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_interrupt_4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg, "scan_claude_sessions")
+    def test_interrupt_with_last_win_still_shows_picker(self, mock_scan, mock_send):
+        """Bare /interrupt with multiple sessions shows picker even with last_win."""
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command(
+            "/interrupt", self.sessions, "4", "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Interrupt which", msg)
+
+
+class TestBareLastSessionPicker(unittest.TestCase):
+    """Test bare /last shows session picker."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self._orig = dict(tg._last_messages)
+
+    def tearDown(self):
+        tg._last_messages.clear()
+        tg._last_messages.update(self._orig)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_bare_last_multiple_shows_picker(self, mock_send):
+        tg._last_messages["4"] = "msg4"
+        tg._last_messages["5"] = "msg5"
+        action, _, _ = tg._handle_command("/last", self.sessions, "4", "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Last message for which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        self.assertIsNotNone(kb)
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_last_4", buttons)
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_bare_last_single_auto_sends(self, mock_send):
+        tg._last_messages["4"] = "the message"
+        action, _, _ = tg._handle_command("/last", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertEqual(msg, "the message")
+
+    @patch.object(tg, "tg_send", return_value=1)
+    def test_bare_last_none_saved(self, mock_send):
+        tg._last_messages.clear()
+        action, _, _ = tg._handle_command("/last", self.sessions, None, "")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No saved messages", msg)
+
+
+class TestCallbackCommandExpanded(unittest.TestCase):
+    """Test that callback handler dispatches interrupt, kill, and last commands."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_interrupt_callback(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_interrupt_4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/interrupt w4", self.sessions, None, "")
+        self.assertIsNone(action)
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_kill_callback(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_kill_4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/kill w4", self.sessions, None, "")
+        self.assertIsNone(action)
+
+    @patch.object(tg, "_remove_inline_keyboard")
+    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_last_callback(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_last_4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/last w4", self.sessions, None, "")
+        self.assertIsNone(action)
 
 
 if __name__ == "__main__":
