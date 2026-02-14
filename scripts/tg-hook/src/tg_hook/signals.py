@@ -94,20 +94,26 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                 if m_opt:
                     max_opt = max(max_opt, int(m_opt.group(1)))
             opts_text = "\n".join(options)
-            if bash_cmd:
-                msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}"
-            else:
-                title = perm_header or "needs permission"
-                body = f"\n\n```\n{perm_body[:2000]}\n```" if perm_body else ""
-                msg = f"🔧{tag} Claude Code (`{project}`) {title}:{body}\n{opts_text}"
             n = max_opt or 3
             perm_kb = telegram._build_inline_keyboard([[
                 ("\u2705 Allow", f"perm_{wid}_1"),
                 ("\u274c Deny", f"perm_{wid}_{n}"),
                 ("\u2705 Always", f"perm_{wid}_2"),
             ]])
-            telegram.tg_send(msg, reply_markup=perm_kb)
-            config._save_last_msg(wid, msg)
+            if bash_cmd:
+                msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n```\n{bash_cmd[:2000]}\n```\n{opts_text}"
+                telegram.tg_send(msg, reply_markup=perm_kb)
+                config._save_last_msg(wid, msg)
+            else:
+                title = perm_header or "needs permission"
+                header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n"
+                if perm_body:
+                    footer = f"\n{opts_text}"
+                    telegram._send_long_message(header_str, perm_body + footer, wid, reply_markup=perm_kb)
+                else:
+                    msg = f"{header_str}{opts_text}"
+                    telegram.tg_send(msg, reply_markup=perm_kb)
+                    config._save_last_msg(wid, msg)
             state.save_active_prompt(wid, pane, total=n,
                                      shortcuts={"y": 1, "yes": 1, "allow": 1,
                                                 "n": n, "no": n, "deny": n})

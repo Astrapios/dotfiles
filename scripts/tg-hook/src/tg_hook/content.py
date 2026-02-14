@@ -7,32 +7,44 @@ from tg_hook import tmux
 
 def _extract_pane_permission(pane: str) -> tuple[str, str, list[str]]:
     """Extract content and options from a permission dialog in a tmux pane.
-    Returns (header, content between last dot and options, list of options)."""
-    raw = tmux._capture_pane(pane)
-    if not raw:
-        return "", "", []
-    lines = raw.splitlines()
-
-    # Find options from last 8 lines only
+    Returns (header, content between last dot and options, list of options).
+    Uses progressive capture (30→80→200 lines) to ensure plan content is fully captured."""
+    # Progressive capture: try increasing sizes
+    lines = []
     options = []
-    for line in lines[-8:]:
-        m = re.match(r'^\s*[❯>]?\s*(\d+\.\s+.+)', line)
-        if m:
-            options.append(m.group(1).strip())
-
-    # Find the first option line index in full list
-    first_opt_idx = len(lines)
-    for i in range(len(lines) - 8, len(lines)):
-        if i >= 0 and re.match(r'^\s*[❯>]?\s*\d+\.\s+', lines[i]):
-            first_opt_idx = i
-            break
-
-    # Find last ● above the options
+    first_opt_idx = 0
     start = 0
-    for i in range(first_opt_idx - 1, -1, -1):
-        if lines[i].strip().startswith("●"):
-            start = i
-            break
+    for num_lines in (30, 80, 200):
+        raw = tmux._capture_pane(pane, num_lines)
+        if not raw:
+            return "", "", []
+        lines = raw.splitlines()
+
+        # Find options from last 8 lines only
+        options = []
+        for line in lines[-8:]:
+            m = re.match(r'^\s*[❯>]?\s*(\d+\.\s+.+)', line)
+            if m:
+                options.append(m.group(1).strip())
+
+        # Find the first option line index in full list
+        first_opt_idx = len(lines)
+        for i in range(len(lines) - 8, len(lines)):
+            if i >= 0 and re.match(r'^\s*[❯>]?\s*\d+\.\s+', lines[i]):
+                first_opt_idx = i
+                break
+
+        # Find last ● above the options
+        start = 0
+        for i in range(first_opt_idx - 1, -1, -1):
+            if lines[i].strip().startswith("●"):
+                start = i
+                break
+
+        # If ● is in the first 3 lines, we likely need more context
+        if start <= 2 and num_lines < 200:
+            continue
+        break
 
     # Extract tool + file from ● header (e.g. "● Update(scripts/tg-hook)")
     header = ""

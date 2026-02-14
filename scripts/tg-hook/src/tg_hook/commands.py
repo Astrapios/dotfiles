@@ -19,12 +19,15 @@ def _any_active_prompt() -> bool:
 
 
 def _resolve_alias(text: str, has_active_prompt: bool) -> str:
-    """Resolve short aliases. Suppressed when a prompt is active."""
-    if has_active_prompt:
-        return text
+    """Resolve short aliases. Only ambiguous ones (?, uf) suppressed during prompts.
+    Digit-containing aliases (s4, f4, df4, i4) always resolve — they're unambiguous."""
     stripped = text.strip()
+    # Simple aliases — ambiguous during prompts (could be prompt responses)
     if stripped in _ALIASES:
+        if has_active_prompt:
+            return text
         return _ALIASES[stripped]
+    # Digit-containing aliases always resolve (unambiguous)
     m = re.match(r"^s(\d+)?(?:\s+(\d+))?$", stripped)
     if m:
         parts = ["/status"]

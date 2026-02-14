@@ -297,6 +297,41 @@ class TestExtractPanePermission(unittest.TestCase):
         self.assertNotIn("Do you want", content)
         self.assertIn("+new = True", content)
 
+    @patch("subprocess.run")
+    def test_progressive_capture_expands(self, mock_run):
+        """When ● is near the top of captured window, capture expands for more context."""
+        # Short capture (30 lines): ● at line 0, plan content truncated
+        short_content = textwrap.dedent("""\
+            ● ExitPlanMode()
+              ⎿  Plan summary here
+              ❯ 1. Yes
+                2. No (esc)
+        """)
+        # Long capture (80+ lines): ● further down, with plan content above
+        plan_lines = "\n".join(f"  plan line {i}" for i in range(15))
+        long_content = plan_lines + "\n" + textwrap.dedent("""\
+            ● ExitPlanMode()
+              ⎿  Full plan content here
+              more plan details
+              ❯ 1. Yes
+                2. No (esc)
+        """)
+
+        def side_effect(cmd, **kwargs):
+            num_lines = int(cmd[6].lstrip("-"))
+            if num_lines <= 30:
+                return self._mock_pane(short_content)
+            return self._mock_pane(long_content)
+
+        mock_run.side_effect = side_effect
+        header, body, options = tg._extract_pane_permission("test_pane")
+
+        # Should have expanded — verify it captured the deeper content
+        self.assertIn("more plan details", body)
+        self.assertEqual(len(options), 2)
+        # Verify subprocess.run was called multiple times (progressive)
+        self.assertGreater(mock_run.call_count, 1)
+
 
 class TestRouteToPane(unittest.TestCase):
     """Test route_to_pane logic with mocked tmux."""
@@ -1658,11 +1693,19 @@ class TestResolveAlias(unittest.TestCase):
     def test_passthrough_slash_command(self):
         self.assertEqual(tg._resolve_alias("/status", False), "/status")
 
-    def test_suppressed_with_active_prompt(self):
-        """Aliases suppressed when a prompt is active."""
-        self.assertEqual(tg._resolve_alias("s", True), "s")
-        self.assertEqual(tg._resolve_alias("f4", True), "f4")
+    def test_ambiguous_suppressed_with_active_prompt(self):
+        """Only ambiguous aliases (?, uf) suppressed when prompt is active."""
         self.assertEqual(tg._resolve_alias("?", True), "?")
+        self.assertEqual(tg._resolve_alias("uf", True), "uf")
+
+    def test_digit_aliases_resolve_with_active_prompt(self):
+        """Digit-containing aliases always resolve, even with active prompt."""
+        self.assertEqual(tg._resolve_alias("s", True), "/status")
+        self.assertEqual(tg._resolve_alias("s4", True), "/status w4")
+        self.assertEqual(tg._resolve_alias("s4 10", True), "/status w4 10")
+        self.assertEqual(tg._resolve_alias("f4", True), "/focus w4")
+        self.assertEqual(tg._resolve_alias("df4", True), "/deepfocus w4")
+        self.assertEqual(tg._resolve_alias("i4", True), "/interrupt w4")
 
     def test_digits_not_aliased(self):
         """Pure digit replies must not be aliased."""
@@ -2041,6 +2084,25 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         tg.process_signals()
         _, kwargs = mock_send.call_args
         self.assertIsNone(kwargs.get("reply_markup"))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("wants to update `t.py`", "big plan\ncontent here", ["1. Yes", "2. No"]))
+    @patch.object(tg.state, "save_active_prompt")
+    def test_permission_non_bash_uses_send_long_message(self, mock_save, mock_extract, mock_proj, mock_long, mock_send):
+        """Non-bash permission with body uses _send_long_message for chunking."""
+        self._write_signal("permission", cmd="", message="needs permission")
+        tg.process_signals()
+        mock_long.assert_called_once()
+        args, kwargs = mock_long.call_args
+        self.assertIn("wants to update", args[0])  # header
+        self.assertIn("big plan", args[1])  # body includes content
+        self.assertIn("1. Yes", args[1])  # body includes options as footer
+        self.assertIsNotNone(kwargs.get("reply_markup"))
+        # tg_send should NOT be called directly for non-bash with body
+        mock_send.assert_not_called()
 
 
 class TestAnyActivePrompt(unittest.TestCase):
@@ -2437,8 +2499,9 @@ class TestDeepFocusAlias(unittest.TestCase):
     def test_df10_resolves(self):
         self.assertEqual(tg._resolve_alias("df10", False), "/deepfocus w10")
 
-    def test_suppressed_with_active_prompt(self):
-        self.assertEqual(tg._resolve_alias("df4", True), "df4")
+    def test_resolves_with_active_prompt(self):
+        """Digit-containing alias df4 resolves even with active prompt."""
+        self.assertEqual(tg._resolve_alias("df4", True), "/deepfocus w4")
 
 
 class TestDeepFocusCommand(unittest.TestCase):
