@@ -1139,10 +1139,16 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             _advance_question()
             return f"📨 Answered in {label}:\n`{reply[:500]}`"
 
-        # Prompt with no free text and no matching shortcut/number — default to option 1
-        _select_option(prompt_pane, 1)
+        # Prompt with no free text and no matching shortcut/number
+        # Navigate to last option, type text directly to activate input, Enter
+        pp = shlex.quote(prompt_pane)
+        nav = " ".join(["Down"] * (total - 1)) if total > 1 else ""
+        cmd = (f"tmux send-keys -t {pp} {nav} && sleep 0.2 && "
+               f"tmux send-keys -t {pp} -l {shlex.quote(reply)} && sleep 0.1 && "
+               f"tmux send-keys -t {pp} Enter")
+        subprocess.run(["bash", "-c", cmd], timeout=10)
         _advance_question()
-        return f"📨 Selected option 1 in {label}"
+        return f"📨 Replied in {label}:\n`{reply[:500]}`"
 
     # Normal message: type text + Enter
     p = shlex.quote(pane)

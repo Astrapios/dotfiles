@@ -398,13 +398,19 @@ class TestRouteToPane(unittest.TestCase):
         self.assertIn("Selected option 4", result)  # n+2 = 4
 
     @patch("subprocess.run")
-    def test_unknown_text_defaults_to_option_1(self, mock_run):
-        """Prompt with no free_text and no matching shortcut defaults to option 1."""
+    def test_unknown_text_navigates_and_types(self, mock_run):
+        """Prompt with no free_text: navigate to last option, type text, Enter."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
         with patch.object(tg, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "whatever")
-        self.assertIn("Selected option 1", result)
+            result = tg.route_to_pane(self.pane, self.win_idx, "change step 3")
+        self.assertIn("Replied", result)
+        self.assertIn("`change step 3`", result)
+        cmd_str = mock_run.call_args[0][0][2]
+        # Navigate to last option, type text, Enter
+        self.assertEqual(cmd_str.count("Down"), 2)  # total=3, so 2 Downs
+        self.assertIn("change step 3", cmd_str)
+        self.assertEqual(cmd_str.count("Enter"), 1)  # submit only
 
     @patch("subprocess.run")
     def test_message_underscore_safe(self, mock_run):
