@@ -39,7 +39,7 @@ ln -sf $SCRIPT_PATH/code-server/keybindings.json "$CODE_SERVER_USER_DIR/keybindi
 
 # Claude Code / Telegram hooks
 echo Installing Claude Code hooks...
-mkdir -p ~/bin ~/.claude ~/.config
+mkdir -p ~/.claude ~/.config
 
 # Pixi + global python with requests
 if ! command -v pixi &> /dev/null; then
@@ -48,11 +48,6 @@ if ! command -v pixi &> /dev/null; then
 fi
 echo "  installing tg-hook..."
 (cd $SCRIPT_PATH/scripts/tg-hook && pixi install)
-cat > ~/bin/tg-hook << WRAPPER
-#!/bin/sh
-exec $SCRIPT_PATH/scripts/tg-hook/.pixi/envs/default/bin/tg-hook "\$@"
-WRAPPER
-chmod +x ~/bin/tg-hook
 
 # Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
