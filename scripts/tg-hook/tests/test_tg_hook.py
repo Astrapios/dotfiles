@@ -1260,12 +1260,11 @@ class TestHandleCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.cmd_help = "help text"
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_help_command(self, mock_send):
         action, sessions, last = tg._handle_command(
-            "/help", self.sessions, "4", self.cmd_help)
+            "/help", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Commands", msg)
@@ -1279,13 +1278,13 @@ class TestHandleCommand(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_stop_command(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/stop", self.sessions, "4", self.cmd_help)
+            "/stop", self.sessions, "4")
         self.assertEqual(action, "pause")
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_quit_command(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/quit", self.sessions, "4", self.cmd_help)
+            "/quit", self.sessions, "4")
         self.assertEqual(action, "quit_pending")
         msg = mock_send.call_args[0][0]
         self.assertIn("Shut down", msg)
@@ -1295,7 +1294,7 @@ class TestHandleCommand(unittest.TestCase):
     def test_sessions_command(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
-            "/sessions", self.sessions, "4", self.cmd_help)
+            "/sessions", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Active Claude sessions", msg)
@@ -1304,7 +1303,7 @@ class TestHandleCommand(unittest.TestCase):
     @patch("subprocess.run")
     def test_interrupt_command(self, mock_run, mock_send):
         action, _, last = tg._handle_command(
-            "/interrupt w4", self.sessions, "4", self.cmd_help)
+            "/interrupt w4", self.sessions, "4")
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
@@ -1316,7 +1315,7 @@ class TestHandleCommand(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_interrupt_no_session(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/interrupt w99", self.sessions, "4", self.cmd_help)
+            "/interrupt w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
@@ -1325,7 +1324,7 @@ class TestHandleCommand(unittest.TestCase):
     def test_interrupt_no_window_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
-            "/interrupt", self.sessions, None, self.cmd_help)
+            "/interrupt", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
         _, kwargs = mock_send.call_args
@@ -1338,7 +1337,7 @@ class TestHandleCommand(unittest.TestCase):
         """Bare /interrupt with multiple sessions shows picker, ignores last_win."""
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
-            "/interrupt", self.sessions, "5", self.cmd_help)
+            "/interrupt", self.sessions, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
 
@@ -1348,7 +1347,7 @@ class TestHandleCommand(unittest.TestCase):
         """Bare /interrupt with single session auto-interrupts it."""
         single = {"5": ("0:5.0", "other")}
         action, _, last = tg._handle_command(
-            "/interrupt", single, None, self.cmd_help)
+            "/interrupt", single, None)
         self.assertEqual(last, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted", msg)
@@ -1361,7 +1360,7 @@ class TestHandleCommand(unittest.TestCase):
         mock_scan.return_value = {"4": ("0:4.0", "myproj")}  # w5 gone
         with patch("time.sleep"):
             action, sessions, _ = tg._handle_command(
-                "/kill w5", self.sessions, "4", self.cmd_help)
+                "/kill w5", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Killed", msg)
@@ -1377,14 +1376,14 @@ class TestHandleCommand(unittest.TestCase):
         mock_scan.return_value = self.sessions  # w5 still there
         with patch("time.sleep"):
             action, _, _ = tg._handle_command(
-                "/kill w5", self.sessions, "4", self.cmd_help)
+                "/kill w5", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("still running", msg)
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_kill_nonexistent_session(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/kill w99", self.sessions, "4", self.cmd_help)
+            "/kill w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
@@ -1396,7 +1395,7 @@ class TestHandleCommand(unittest.TestCase):
         mock_run.return_value = MagicMock(stdout="6\n")
         mock_scan.return_value = {**self.sessions, "6": ("0:6.0", "claude-0213-1500")}
         action, sessions, last = tg._handle_command(
-            "/new", self.sessions, "4", self.cmd_help)
+            "/new", self.sessions, "4")
         self.assertIsNone(action)
         self.assertEqual(last, "6")
         msg = mock_send.call_args[0][0]
@@ -1414,7 +1413,7 @@ class TestHandleCommand(unittest.TestCase):
         mock_run.return_value = MagicMock(stdout="7\n")
         mock_scan.return_value = {**self.sessions, "7": ("0:7.0", "mydir")}
         action, _, last = tg._handle_command(
-            "/new ~/mydir", self.sessions, "4", self.cmd_help)
+            "/new ~/mydir", self.sessions, "4")
         self.assertEqual(last, "7")
         msg = mock_send.call_args[0][0]
         self.assertIn("Started Claude", msg)
@@ -1423,7 +1422,7 @@ class TestHandleCommand(unittest.TestCase):
     @patch("subprocess.run", side_effect=Exception("tmux error"))
     def test_new_command_failure(self, mock_run, mock_send):
         action, _, _ = tg._handle_command(
-            "/new", self.sessions, "4", self.cmd_help)
+            "/new", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Failed to start", msg)
 
@@ -1431,14 +1430,14 @@ class TestHandleCommand(unittest.TestCase):
     def test_last_command(self, mock_send):
         tg._last_messages["4"] = "previous message"
         action, _, _ = tg._handle_command(
-            "/last w4", self.sessions, "4", self.cmd_help)
+            "/last w4", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "previous message")
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_last_command_no_saved(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/last w99", self.sessions, "4", self.cmd_help)
+            "/last w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved message", msg)
 
@@ -1446,7 +1445,7 @@ class TestHandleCommand(unittest.TestCase):
     @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
     def test_wn_prefix_routing(self, mock_route, mock_send):
         action, _, last = tg._handle_command(
-            "w4 hello", self.sessions, None, self.cmd_help)
+            "w4 hello", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
@@ -1457,7 +1456,7 @@ class TestHandleCommand(unittest.TestCase):
         """Single session — routes without prefix."""
         sessions = {"4": ("0:4.0", "myproj")}
         action, _, last = tg._handle_command(
-            "hello", sessions, None, self.cmd_help)
+            "hello", sessions, None)
         self.assertEqual(last, "4")
         mock_route.assert_called_once()
 
@@ -1465,7 +1464,7 @@ class TestHandleCommand(unittest.TestCase):
     def test_no_prefix_multiple_sessions_no_last(self, mock_send):
         """Multiple sessions, no last — asks user to specify."""
         action, _, _ = tg._handle_command(
-            "hello", self.sessions, None, self.cmd_help)
+            "hello", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Multiple sessions", msg)
 
@@ -1474,21 +1473,21 @@ class TestHandleCommand(unittest.TestCase):
     def test_no_prefix_uses_last_win(self, mock_route, mock_send):
         """Multiple sessions but last_win_idx set — routes to it."""
         action, _, last = tg._handle_command(
-            "hello", self.sessions, "5", self.cmd_help)
+            "hello", self.sessions, "5")
         self.assertEqual(last, "5")
         mock_route.assert_called_once_with("0:5.0", "5", "hello")
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_no_sessions(self, mock_send):
         action, _, _ = tg._handle_command(
-            "hello", {}, None, self.cmd_help)
+            "hello", {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude sessions", msg)
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_wn_nonexistent_session(self, mock_send):
         action, _, _ = tg._handle_command(
-            "w99 hello", self.sessions, "4", self.cmd_help)
+            "w99 hello", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude session at `w99`", msg)
 
@@ -1907,7 +1906,7 @@ class TestHandleCallback(unittest.TestCase):
     def test_cmd_status(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_status_w4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/status w4", self.sessions, None, "")
+        mock_cmd.assert_called_once_with("/status w4", self.sessions, None)
         self.assertIsNone(action)
 
     @patch.object(tg.telegram, "_remove_inline_keyboard")
@@ -1916,7 +1915,7 @@ class TestHandleCallback(unittest.TestCase):
     def test_cmd_focus(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_focus_w4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/focus w4", self.sessions, None, "")
+        mock_cmd.assert_called_once_with("/focus w4", self.sessions, None)
         self.assertIsNone(action)
 
     @patch.object(tg.telegram, "_remove_inline_keyboard")
@@ -1925,7 +1924,7 @@ class TestHandleCallback(unittest.TestCase):
     def test_sess_select(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "sess_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/status w4", self.sessions, "4", "")
+        mock_cmd.assert_called_once_with("/status w4", self.sessions, "4")
         self.assertIsNone(action)
 
     @patch.object(tg.telegram, "_remove_inline_keyboard")
@@ -1964,6 +1963,30 @@ class TestSessionsKeyboard(unittest.TestCase):
         self.assertEqual(all_buttons[0]["callback_data"], "sess_2")
         self.assertEqual(all_buttons[1]["callback_data"], "sess_5")
         self.assertEqual(all_buttons[2]["callback_data"], "sess_8")
+
+
+class TestBuildReplyKeyboard(unittest.TestCase):
+    """Test _build_reply_keyboard helper."""
+
+    def test_has_keyboard_key(self):
+        result = tg.telegram._build_reply_keyboard()
+        self.assertIn("keyboard", result)
+        self.assertIsInstance(result["keyboard"], list)
+
+    def test_resize_keyboard_true(self):
+        result = tg.telegram._build_reply_keyboard()
+        self.assertTrue(result.get("resize_keyboard"))
+
+    def test_is_persistent(self):
+        result = tg.telegram._build_reply_keyboard()
+        self.assertTrue(result.get("is_persistent"))
+
+    def test_buttons_are_text_dicts(self):
+        result = tg.telegram._build_reply_keyboard()
+        for row in result["keyboard"]:
+            for btn in row:
+                self.assertIn("text", btn)
+                self.assertTrue(btn["text"].startswith("/"))
 
 
 class TestTgSendWithKeyboard(unittest.TestCase):
@@ -2138,7 +2161,7 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         args, kwargs = mock_long.call_args
         self.assertIn("wants to update", args[0])  # header
         self.assertIn("big plan", args[1])  # body includes content
-        self.assertIn("1. Yes", kwargs.get("footer", ""))  # options in footer
+        self.assertIn("1. Yes", kwargs.get("footer"))  # options in footer
         self.assertIsNotNone(kwargs.get("reply_markup"))
         # tg_send should NOT be called directly for non-bash with body
         mock_send.assert_not_called()
@@ -2239,7 +2262,7 @@ class TestQuitYNButtons(unittest.TestCase):
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_quit_command_has_yn_keyboard(self, mock_send):
-        action, _, _ = tg._handle_command("/quit", self.sessions, "4", "")
+        action, _, _ = tg._handle_command("/quit", self.sessions, "4")
         self.assertEqual(action, "quit_pending")
         _, kwargs = mock_send.call_args
         kb = kwargs.get("reply_markup")
@@ -2300,7 +2323,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_status_multiple_no_last_shows_picker(self, mock_send):
         """Bare /status with multiple sessions and no last_win shows picker."""
-        action, _, _ = tg._handle_command("/status", self.sessions, None, "")
+        action, _, _ = tg._handle_command("/status", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Status for which", msg)
@@ -2314,7 +2337,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_focus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/focus", self.sessions, "4", "")
+        action, _, _ = tg._handle_command("/focus", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Focus on which", msg)
@@ -2328,7 +2351,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_focus_no_sessions(self, mock_scan, mock_send):
         mock_scan.return_value = {}
-        action, _, _ = tg._handle_command("/focus", {}, None, "")
+        action, _, _ = tg._handle_command("/focus", {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude sessions", msg)
 
@@ -2336,7 +2359,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_kill_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/kill", self.sessions, "4", "")
+        action, _, _ = tg._handle_command("/kill", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Kill which", msg)
@@ -2350,7 +2373,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     def test_bare_interrupt_no_last_shows_picker(self, mock_scan, mock_send):
         """Interrupt without args and no last_win shows session picker."""
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/interrupt", self.sessions, None, "")
+        action, _, _ = tg._handle_command("/interrupt", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
@@ -2365,7 +2388,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         """Bare /interrupt with multiple sessions shows picker even with last_win."""
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
-            "/interrupt", self.sessions, "4", "")
+            "/interrupt", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
 
@@ -2385,7 +2408,7 @@ class TestBareLastSessionPicker(unittest.TestCase):
     def test_bare_last_multiple_shows_picker(self, mock_send):
         tg._last_messages["4"] = "msg4"
         tg._last_messages["5"] = "msg5"
-        action, _, _ = tg._handle_command("/last", self.sessions, "4", "")
+        action, _, _ = tg._handle_command("/last", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Last message for which", msg)
         _, kwargs = mock_send.call_args
@@ -2397,14 +2420,14 @@ class TestBareLastSessionPicker(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_last_single_auto_sends(self, mock_send):
         tg._last_messages["4"] = "the message"
-        action, _, _ = tg._handle_command("/last", self.sessions, None, "")
+        action, _, _ = tg._handle_command("/last", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "the message")
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_last_none_saved(self, mock_send):
         tg._last_messages.clear()
-        action, _, _ = tg._handle_command("/last", self.sessions, None, "")
+        action, _, _ = tg._handle_command("/last", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved messages", msg)
 
@@ -2421,7 +2444,7 @@ class TestCallbackCommandExpanded(unittest.TestCase):
     def test_cmd_interrupt_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_interrupt_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/interrupt w4", self.sessions, None, "")
+        mock_cmd.assert_called_once_with("/interrupt w4", self.sessions, None)
         self.assertIsNone(action)
 
     @patch.object(tg.telegram, "_remove_inline_keyboard")
@@ -2430,7 +2453,7 @@ class TestCallbackCommandExpanded(unittest.TestCase):
     def test_cmd_kill_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_kill_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/kill w4", self.sessions, None, "")
+        mock_cmd.assert_called_once_with("/kill w4", self.sessions, None)
         self.assertIsNone(action)
 
     @patch.object(tg.telegram, "_remove_inline_keyboard")
@@ -2439,7 +2462,7 @@ class TestCallbackCommandExpanded(unittest.TestCase):
     def test_cmd_last_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_last_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/last w4", self.sessions, None, "")
+        mock_cmd.assert_called_once_with("/last w4", self.sessions, None)
         self.assertIsNone(action)
 
 
@@ -2562,7 +2585,7 @@ class TestDeepFocusCommand(unittest.TestCase):
     @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_deepfocus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/deepfocus", self.sessions, "4", "")
+        action, _, _ = tg._handle_command("/deepfocus", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Deep focus on which", msg)
         _, kwargs = mock_send.call_args
@@ -2576,7 +2599,7 @@ class TestDeepFocusCommand(unittest.TestCase):
     def test_deepfocus_wn(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="some content\n")
         action, _, last = tg._handle_command(
-            "/deepfocus w4", self.sessions, None, "")
+            "/deepfocus w4", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
@@ -2594,14 +2617,14 @@ class TestDeepFocusCommand(unittest.TestCase):
         """Deepfocus clears any existing focus state (mutual exclusion)."""
         mock_run.return_value = MagicMock(stdout="content\n")
         tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/deepfocus w4", self.sessions, None, "")
+        tg._handle_command("/deepfocus w4", self.sessions, None)
         self.assertIsNone(tg._load_focus_state())
         self.assertIsNotNone(tg._load_deepfocus_state())
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_deepfocus_no_session(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/deepfocus w99", self.sessions, None, "")
+            "/deepfocus w99", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
@@ -2626,7 +2649,7 @@ class TestFocusClearsDeepfocus(unittest.TestCase):
     def test_focus_clears_deepfocus(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
         tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/focus w4", self.sessions, None, "")
+        tg._handle_command("/focus w4", self.sessions, None)
         self.assertIsNone(tg._load_deepfocus_state())
         self.assertIsNotNone(tg._load_focus_state())
 
@@ -2650,7 +2673,7 @@ class TestUnfocusClearsBoth(unittest.TestCase):
     def test_unfocus_clears_both(self, mock_send):
         tg._save_focus_state("4", "0:4.0", "myproj")
         tg._save_deepfocus_state("5", "0:5.0", "other")
-        tg._handle_command("/unfocus", self.sessions, None, "")
+        tg._handle_command("/unfocus", self.sessions, None)
         self.assertIsNone(tg._load_focus_state())
         self.assertIsNone(tg._load_deepfocus_state())
         msg = mock_send.call_args[0][0]
@@ -2674,7 +2697,7 @@ class TestNameCommand(unittest.TestCase):
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_name_set(self, mock_send):
-        tg._handle_command("/name w4 auth-refactor", self.sessions, None, "")
+        tg._handle_command("/name w4 auth-refactor", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("named `auth-refactor`", msg)
         names = tg._load_session_names()
@@ -2683,7 +2706,7 @@ class TestNameCommand(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_name_clear(self, mock_send):
         tg._save_session_name("4", "old-name")
-        tg._handle_command("/name w4", self.sessions, None, "")
+        tg._handle_command("/name w4", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("name cleared", msg)
         names = tg._load_session_names()
@@ -2708,8 +2731,7 @@ class TestFormatSessionsWithNames(unittest.TestCase):
         tg._save_session_name("4", "auth")
         sessions = {"4": ("0:4.0", "myproj")}
         msg = tg.format_sessions_message(sessions)
-        self.assertIn("[`auth`]", msg)
-        self.assertIn("`w4`", msg)
+        self.assertIn("`w4 [auth]`", msg)
         self.assertIn("`myproj`", msg)
 
     def test_without_name(self):
@@ -2723,7 +2745,7 @@ class TestFormatSessionsWithNames(unittest.TestCase):
         tg._save_session_name("4", "my_auth")
         sessions = {"4": ("0:4.0", "proj")}
         msg = tg.format_sessions_message(sessions)
-        self.assertIn("[`my_auth`]", msg)
+        self.assertIn("`w4 [my_auth]`", msg)
         # Remove code blocks and check no bare underscores
         stripped = re.sub(r'```.*?```', '', msg, flags=re.DOTALL)
         stripped = re.sub(r'`[^`]+`', '', stripped)
@@ -2742,7 +2764,7 @@ class TestDeepFocusCallback(unittest.TestCase):
     def test_cmd_deepfocus_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_deepfocus_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
-        mock_cmd.assert_called_once_with("/deepfocus w4", self.sessions, None, "")
+        mock_cmd.assert_called_once_with("/deepfocus w4", self.sessions, None)
         self.assertIsNone(action)
 
 
@@ -2827,7 +2849,7 @@ class TestHelpIncludesNewCommands(unittest.TestCase):
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_help_has_deepfocus(self, mock_send):
-        tg._handle_command("/help", self.sessions, "4", "")
+        tg._handle_command("/help", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("/deepfocus", msg)
         self.assertIn("/name", msg)
@@ -2903,7 +2925,7 @@ class TestNameBasedCommands(unittest.TestCase):
     def test_focus_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
         action, _, last = tg._handle_command(
-            "/focus auth", self.sessions, None, "")
+            "/focus auth", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
@@ -2914,7 +2936,7 @@ class TestNameBasedCommands(unittest.TestCase):
     def test_deepfocus_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
         action, _, last = tg._handle_command(
-            "/deepfocus auth", self.sessions, None, "")
+            "/deepfocus auth", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
@@ -2924,7 +2946,7 @@ class TestNameBasedCommands(unittest.TestCase):
     @patch("subprocess.run")
     def test_interrupt_by_name(self, mock_run, mock_send):
         action, _, last = tg._handle_command(
-            "/interrupt auth", self.sessions, None, "")
+            "/interrupt auth", self.sessions, None)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted `w4 [auth]`", msg)
@@ -2936,7 +2958,7 @@ class TestNameBasedCommands(unittest.TestCase):
         mock_scan.return_value = {"5": ("0:5.0", "other")}  # w4 gone
         with patch("time.sleep"):
             action, _, _ = tg._handle_command(
-                "/kill auth", self.sessions, None, "")
+                "/kill auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Killed", msg)
 
@@ -2944,7 +2966,7 @@ class TestNameBasedCommands(unittest.TestCase):
     def test_last_by_name(self, mock_send):
         tg._last_messages["4"] = "previous msg"
         action, _, _ = tg._handle_command(
-            "/last auth", self.sessions, None, "")
+            "/last auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "previous msg")
         tg._last_messages.pop("4", None)
@@ -2954,7 +2976,7 @@ class TestNameBasedCommands(unittest.TestCase):
     def test_status_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="● Answer\n  42\n❯ prompt")
         action, _, _ = tg._handle_command(
-            "/status auth", self.sessions, None, "")
+            "/status auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("`w4 [auth]`", msg)
 
@@ -2962,7 +2984,7 @@ class TestNameBasedCommands(unittest.TestCase):
     def test_name_rename_by_name(self, mock_send):
         """Rename a session using its current name."""
         action, _, _ = tg._handle_command(
-            "/name auth newname", self.sessions, None, "")
+            "/name auth newname", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("named `newname`", msg)
         names = tg._load_session_names()
@@ -2971,7 +2993,7 @@ class TestNameBasedCommands(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_unknown_name_error(self, mock_send):
         action, _, _ = tg._handle_command(
-            "/focus nonexistent", self.sessions, None, "")
+            "/focus nonexistent", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
         self.assertIn("nonexistent", msg)
@@ -2998,7 +3020,7 @@ class TestNamePrefixRouting(unittest.TestCase):
     def test_name_prefix_routes(self, mock_route, mock_send):
         """'auth fix the bug' routes to session named 'auth'."""
         action, _, last = tg._handle_command(
-            "auth fix the bug", self.sessions, None, "")
+            "auth fix the bug", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "fix the bug")
@@ -3007,7 +3029,7 @@ class TestNamePrefixRouting(unittest.TestCase):
     def test_unknown_word_falls_through(self, mock_send):
         """Unknown first word with multiple sessions asks to specify."""
         action, _, _ = tg._handle_command(
-            "randomword hello", self.sessions, None, "")
+            "randomword hello", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Multiple sessions", msg)
 
@@ -3016,7 +3038,7 @@ class TestNamePrefixRouting(unittest.TestCase):
     def test_wn_prefix_still_works(self, mock_route, mock_send):
         """w4 hello still works (backward compat)."""
         action, _, last = tg._handle_command(
-            "w4 hello", self.sessions, None, "")
+            "w4 hello", self.sessions, None)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
 
@@ -3025,7 +3047,7 @@ class TestNamePrefixRouting(unittest.TestCase):
     def test_name_case_insensitive(self, mock_route, mock_send):
         """Name prefix is case-insensitive."""
         action, _, last = tg._handle_command(
-            "Auth fix it", self.sessions, None, "")
+            "Auth fix it", self.sessions, None)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "fix it")
 
@@ -3035,7 +3057,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         """Single word that isn't a name doesn't trigger name routing."""
         sessions = {"4": ("0:4.0", "myproj")}
         action, _, _ = tg._handle_command(
-            "hello", sessions, None, "")
+            "hello", sessions, None)
         # Should route to single session as no-prefix fallback
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
 

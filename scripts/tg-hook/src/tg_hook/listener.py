@@ -15,6 +15,7 @@ from tg_hook import config, telegram, tmux, state, content, commands, signals
 # Track file mtimes for auto-reload
 _pkg_dir = pathlib.Path(__file__).parent
 _file_mtimes: dict[pathlib.Path, float] = {}
+_reload_after: float | None = None
 
 
 def _init_file_mtimes():
@@ -78,11 +79,9 @@ def cmd_listen():
     except Exception:
         pass
 
-    CMD_HELP = "`/help` | `/sessions` | `/status [wN]` | `/last [wN]` | `/focus wN` | `/deepfocus wN` | `/unfocus` | `/name wN [label]` | `/new [dir]` | `/interrupt [wN]` | `/kill wN` | `/stop` pause | `/quit` exit"
-
     telegram._set_bot_commands()
-    help_msg = tmux.format_sessions_message(sessions) + "\n\n" + CMD_HELP
-    telegram.tg_send(help_msg, reply_markup=tmux._sessions_keyboard(sessions))
+    telegram.tg_send(tmux.format_sessions_message(sessions),
+                     reply_markup=telegram._build_reply_keyboard())
     config._log("listen", f"Found {len(sessions)} Claude session(s).")
     config._log("listen", "Press Ctrl+C to stop")
 
@@ -91,12 +90,19 @@ def cmd_listen():
     _init_file_mtimes()
 
     while True:
-        # Auto-reload on file change
+        # Auto-reload on file change (debounced — wait for files to stabilize)
+        global _reload_after
         try:
             if _check_file_changes():
-                config._log("listen", "Code changed, reloading...")
+                _init_file_mtimes()
+                _reload_after = time.time() + 2.0
+                config._log("listen", "Code change detected, reloading in 2s...")
+            elif _reload_after and time.time() >= _reload_after:
+                _reload_after = None
+                config._log("listen", "Reloading...")
                 telegram.tg_send("🔄 Reloading...")
-                os.execv(sys.executable, [sys.executable, "-m", "tg_hook.cli", "listen"])
+                _restart_cmd = "import sys; sys.argv=['tg-hook','listen']; from tg_hook.cli import main; main()"
+                os.execv(sys.executable, [sys.executable, "-c", _restart_cmd])
         except OSError:
             pass
 
@@ -127,9 +133,8 @@ def cmd_listen():
                     deepfocus_pending = []
                     deepfocus_last_new_ts = 0
                     deepfocus_first_new_ts = 0
-                    help_msg = tmux.format_sessions_message(sessions) + "\n\n" + CMD_HELP
-                    telegram.tg_send("▶️ Resumed.\n\n" + help_msg,
-                                     reply_markup=tmux._sessions_keyboard(sessions))
+                    telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions),
+                                     reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
                 elif text.lower() == "/quit":
                     telegram.tg_send("👋 Bye.")
@@ -320,7 +325,7 @@ def cmd_listen():
             text = commands._resolve_alias(text, commands._any_active_prompt())
             prev_sessions = sessions
             action, sessions, last_win_idx = commands._handle_command(
-                text, sessions, last_win_idx, CMD_HELP
+                text, sessions, last_win_idx
             )
             if sessions is not prev_sessions:
                 last_scan = time.time()

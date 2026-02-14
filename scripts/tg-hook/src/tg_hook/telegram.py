@@ -107,6 +107,14 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
     return r.json()["result"]["message_id"]
 
 
+def _build_reply_keyboard() -> dict:
+    """Build a persistent ReplyKeyboardMarkup with common commands."""
+    return {"keyboard": [
+        [{"text": "/status"}, {"text": "/sessions"}, {"text": "/last"}],
+        [{"text": "/focus"}, {"text": "/interrupt"}, {"text": "/help"}],
+    ], "resize_keyboard": True, "is_persistent": True}
+
+
 def _build_inline_keyboard(rows: list[list[tuple[str, str]]]) -> dict:
     """Build InlineKeyboardMarkup from rows of (label, callback_data) tuples."""
     return {"inline_keyboard": [

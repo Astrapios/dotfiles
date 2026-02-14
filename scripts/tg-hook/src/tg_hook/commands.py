@@ -48,8 +48,7 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     return text
 
 
-def _handle_command(text: str, sessions: dict, last_win_idx: str | None,
-                    cmd_help: str) -> tuple[str | None, dict, str | None]:
+def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tuple[str | None, dict, str | None]:
     """Handle a command in active mode. Returns (action, sessions, last_win_idx).
     action is 'pause', 'quit', or None (continue processing)."""
 
@@ -444,7 +443,7 @@ def _handle_callback(callback: dict, sessions: dict,
         cmd, _, idx = m.group(1), m.group(2), m.group(3)
         cmd_text = f"/{cmd} w{idx}"
         _, sessions, last_win_idx = _handle_command(
-            cmd_text, sessions, last_win_idx, "")
+            cmd_text, sessions, last_win_idx)
         return sessions, last_win_idx, None
 
     # Session select: sess_{wid}
@@ -454,7 +453,7 @@ def _handle_callback(callback: dict, sessions: dict,
         last_win_idx = idx
         cmd_text = f"/status w{idx}"
         _, sessions, last_win_idx = _handle_command(
-            cmd_text, sessions, last_win_idx, "")
+            cmd_text, sessions, last_win_idx)
         return sessions, last_win_idx, None
 
     config._log("callback", f"unknown callback_data: {cb_data}")

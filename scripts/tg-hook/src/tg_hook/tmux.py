@@ -113,7 +113,7 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]]) -> str:
     for idx in sorted(sessions, key=int):
         target, project = sessions[idx]
         name = names.get(idx, "")
-        label = f"`w{idx}` [`{name}`]" if name else f"`w{idx}`"
+        label = f"`w{idx} [{name}]`" if name else f"`w{idx}`"
         lines.append(f"  {label} — `{project}` (`{target}`)")
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)
