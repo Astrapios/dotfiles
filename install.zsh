@@ -46,11 +46,15 @@ if ! command -v pixi &> /dev/null; then
     echo "  installing pixi..."
     curl -fsSL https://pixi.sh/install.sh | bash
 fi
-echo "  installing global python environment..."
-pixi global install -e py --expose python python --with requests --force-reinstall
+echo "  installing tg-hook..."
+(cd $SCRIPT_PATH/scripts/tg-hook && pixi install)
+cat > ~/bin/tg-hook << WRAPPER
+#!/bin/sh
+exec $SCRIPT_PATH/scripts/tg-hook/.pixi/envs/default/bin/tg-hook "\$@"
+WRAPPER
+chmod +x ~/bin/tg-hook
 
-# Hook script + Claude settings symlinks
-ln -sf $SCRIPT_PATH/scripts/tg-hook/tg_hook.py ~/bin/tg-hook
+# Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md
 

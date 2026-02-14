@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tg-hook"
+version = "0.1.0"
+description = "Telegram bridge for Claude Code hooks"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.28"]
+
+[project.scripts]
+tg-hook = "tg_hook.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tg_hook"]

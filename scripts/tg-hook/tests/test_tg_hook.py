@@ -8,7 +8,7 @@ import textwrap
 import unittest
 from unittest.mock import MagicMock, patch, call
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import tg_hook as tg
 
 
@@ -17,7 +17,7 @@ class TestMarkdownSafety(unittest.TestCase):
 
     def _send_and_capture(self, send_fn):
         """Call send_fn, return the text that would be sent to Telegram."""
-        with patch.object(tg, "tg_send") as mock_send:
+        with patch.object(tg.telegram, "tg_send") as mock_send:
             mock_send.return_value = 1
             send_fn(mock_send)
             return mock_send.call_args[0][0]
@@ -306,18 +306,18 @@ class TestRouteToPane(unittest.TestCase):
         self.win_idx = "4"
         self.signal_dir = "/tmp/tg_hook_test_route"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("subprocess.run")
     def test_normal_message(self, mock_run):
         """No active prompt — sends text + Enter."""
-        with patch.object(tg, "load_active_prompt", return_value=None):
+        with patch.object(tg.state, "load_active_prompt", return_value=None):
             result = tg.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Sent to", result)
         self.assertIn("`w4`", result)
@@ -331,7 +331,7 @@ class TestRouteToPane(unittest.TestCase):
         """Permission prompt — 'y' sends Enter (option 1)."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "yes": 1, "allow": 1, "n": 3, "no": 3, "deny": 3}}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "y")
         self.assertIn("Selected option 1", result)
         cmd_str = mock_run.call_args[0][0][2]  # bash -c "..."
@@ -343,7 +343,7 @@ class TestRouteToPane(unittest.TestCase):
         """Permission prompt — 'n' navigates to last option."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "yes": 1, "allow": 1, "n": 3, "no": 3, "deny": 3}}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "n")
         self.assertIn("Selected option 3", result)
         cmd_str = mock_run.call_args[0][0][2]
@@ -354,7 +354,7 @@ class TestRouteToPane(unittest.TestCase):
         """Digit reply navigates with Down keys."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "2")
         self.assertIn("Selected option 2", result)
         cmd_str = mock_run.call_args[0][0][2]
@@ -366,7 +366,7 @@ class TestRouteToPane(unittest.TestCase):
     def test_question_free_text(self, mock_run):
         """Free text on question prompt — navigate to Type something, type, Enter."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "my custom answer")
         self.assertIn("Answered", result)
         self.assertIn("`my custom answer`", result)
@@ -385,7 +385,7 @@ class TestRouteToPane(unittest.TestCase):
     def test_question_numbered(self, mock_run):
         """Digit reply on question selects that option."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "1")
         self.assertIn("Selected option 1", result)
 
@@ -393,7 +393,7 @@ class TestRouteToPane(unittest.TestCase):
     def test_question_extra_options(self, mock_run):
         """Question allows selecting n+1 (Type answer) and n+2 (Chat)."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "4")
         self.assertIn("Selected option 4", result)  # n+2 = 4
 
@@ -402,7 +402,7 @@ class TestRouteToPane(unittest.TestCase):
         """Prompt with no free_text: navigate to last option, type text, Enter."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "change step 3")
         self.assertIn("Replied", result)
         self.assertIn("`change step 3`", result)
@@ -415,7 +415,7 @@ class TestRouteToPane(unittest.TestCase):
     @patch("subprocess.run")
     def test_message_underscore_safe(self, mock_run):
         """Route confirmation with underscored text is Markdown-safe."""
-        with patch.object(tg, "load_active_prompt", return_value=None):
+        with patch.object(tg.state, "load_active_prompt", return_value=None):
             result = tg.route_to_pane(self.pane, self.win_idx, "fix my_var_name")
         # Text should be in backticks
         self.assertIn("`fix my_var_name`", result)
@@ -427,11 +427,11 @@ class TestProcessSignals(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_signals"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -442,8 +442,8 @@ class TestProcessSignals(unittest.TestCase):
             json.dump(signal, f)
         return fname
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="test_project")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="test_project")
     @patch("subprocess.run")
     @patch("time.sleep")
     def test_stop_signal(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -460,10 +460,10 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("`test_project`", msg)
         self.assertIn("```", msg)  # content in pre block
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="test_proj")
-    @patch.object(tg, "_extract_pane_permission", return_value=("wants to update `test.py`", "+new=True", ["1. Yes", "2. No"]))
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="test_proj")
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to update `test.py`", "+new=True", ["1. Yes", "2. No"]))
+    @patch.object(tg.state, "save_active_prompt")
     def test_permission_signal_non_bash(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="", message="Claude needs permission to use Update")
 
@@ -475,10 +475,10 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("```", msg)
         self.assertIn("1. Yes", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="test_proj")
-    @patch.object(tg, "_extract_pane_permission", return_value=("", "", ["1. Yes", "2. No"]))
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="test_proj")
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("", "", ["1. Yes", "2. No"]))
+    @patch.object(tg.state, "save_active_prompt")
     def test_permission_signal_bash(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="rm /tmp/test_file.txt", message="Claude needs permission")
 
@@ -490,10 +490,10 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("rm /tmp/test_file.txt", msg)
         self.assertIn("```", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
-    @patch.object(tg, "_extract_pane_permission", return_value=("wants to fetch `https://example.com`", "", ["1. Yes", "2. No"]))
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to fetch `https://example.com`", "", ["1. Yes", "2. No"]))
+    @patch.object(tg.state, "save_active_prompt")
     def test_permission_no_content(self, mock_save, mock_extract, mock_proj, mock_send):
         """WebFetch with no content body should not have empty pre block."""
         self._write_signal("permission", cmd="", message="Claude needs permission")
@@ -505,9 +505,9 @@ class TestProcessSignals(unittest.TestCase):
         self.assertNotIn("```\n\n```", msg)  # no empty pre block
         self.assertIn("1. Yes", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.state, "save_active_prompt")
     def test_question_signal(self, mock_save, mock_proj, mock_send):
         questions = [{"question": "Pick one?", "options": [
             {"label": "A", "description": "first"},
@@ -533,7 +533,7 @@ class TestProcessSignals(unittest.TestCase):
         with open(state_path, "w") as f:
             json.dump({"type": "test"}, f)
 
-        with patch.object(tg, "tg_send"):
+        with patch.object(tg.telegram, "tg_send"):
             tg.process_signals()
 
         # State file should still exist (not deleted)
@@ -542,8 +542,8 @@ class TestProcessSignals(unittest.TestCase):
     def test_cleans_processed_signals(self):
         """Processed signal files should be deleted."""
         self._write_signal("stop")
-        with patch.object(tg, "tg_send", return_value=1), \
-             patch.object(tg, "get_pane_project", return_value="p"), \
+        with patch.object(tg.telegram, "tg_send", return_value=1), \
+             patch.object(tg.tmux, "get_pane_project", return_value="p"), \
              patch("subprocess.run", return_value=MagicMock(stdout="")), \
              patch("time.sleep"):
             tg.process_signals()
@@ -558,18 +558,18 @@ class TestCmdHook(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_signals_hook"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
-        self._orig_enabled = tg.TG_HOOKS_ENABLED
-        tg.TG_HOOKS_ENABLED = True
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        self._orig_enabled = tg.config.TG_HOOKS_ENABLED
+        tg.config.TG_HOOKS_ENABLED = True
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
-        tg.TG_HOOKS_ENABLED = self._orig_enabled
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "get_window_id", return_value="w4")
+    @patch.object(tg.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_bash_pretooluse_saves_cmd(self, mock_stdin, mock_wid):
         data = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
@@ -584,7 +584,7 @@ class TestCmdHook(unittest.TestCase):
         with open(cmd_file) as f:
             self.assertEqual(json.load(f)["cmd"], "echo hello")
 
-    @patch.object(tg, "get_window_id", return_value="w4")
+    @patch.object(tg.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_permission_reads_bash_cmd_only_for_bash(self, mock_stdin, mock_wid):
         """Permission notification only reads _bash_cmd if message mentions bash."""
@@ -915,15 +915,15 @@ class TestCleanupStalePrompts(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_cleanup"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "_pane_has_prompt", return_value=False)
+    @patch.object(tg.state, "_pane_has_prompt", return_value=False)
     def test_removes_stale_prompt(self, mock_has):
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
@@ -931,7 +931,7 @@ class TestCleanupStalePrompts(unittest.TestCase):
         tg._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(path))
 
-    @patch.object(tg, "_pane_has_prompt", return_value=True)
+    @patch.object(tg.state, "_pane_has_prompt", return_value=True)
     def test_keeps_active_prompt(self, mock_has):
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
@@ -946,7 +946,7 @@ class TestCleanupStalePrompts(unittest.TestCase):
         tg._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(path))
 
-    @patch.object(tg, "_pane_has_prompt", return_value=False)
+    @patch.object(tg.state, "_pane_has_prompt", return_value=False)
     def test_ignores_non_prompt_state_files(self, mock_has):
         """Should not touch _bash_cmd or _focus files."""
         bash_path = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
@@ -970,7 +970,7 @@ class TestCleanupStalePrompts(unittest.TestCase):
         # w1 pane has no prompt, w2 pane still has prompt
         def side_effect(pane):
             return pane == "0:2.0"
-        with patch.object(tg, "_pane_has_prompt", side_effect=side_effect):
+        with patch.object(tg.state, "_pane_has_prompt", side_effect=side_effect):
             tg._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(stale))
         self.assertTrue(os.path.exists(active))
@@ -986,7 +986,7 @@ class TestCleanupStalePrompts(unittest.TestCase):
 
     def test_nonexistent_signal_dir(self):
         """No crash when signal dir doesn't exist."""
-        tg.SIGNAL_DIR = "/tmp/tg_hook_nonexistent_dir_xyz"
+        tg.config.SIGNAL_DIR = "/tmp/tg_hook_nonexistent_dir_xyz"
         tg._cleanup_stale_prompts()  # should not raise
 
 
@@ -996,11 +996,11 @@ class TestFocusState(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_focus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -1031,7 +1031,7 @@ class TestFocusState(unittest.TestCase):
 class TestSendLongMessage(unittest.TestCase):
     """Test _send_long_message chunking logic."""
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_short_message_single_send(self, mock_send):
         """Body that fits in one message — sent as single message."""
         tg._send_long_message("header:\n", "short body", wid="4")
@@ -1040,7 +1040,7 @@ class TestSendLongMessage(unittest.TestCase):
         self.assertIn("header:", msg)
         self.assertIn("```\nshort body\n```", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_long_message_chunked(self, mock_send):
         """Body exceeding TG_MAX is split into multiple messages."""
         # Create body that exceeds chunk_size
@@ -1059,14 +1059,14 @@ class TestSendLongMessage(unittest.TestCase):
         for c in mock_send.call_args_list:
             self.assertIn("```", c[0][0])
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_empty_body(self, mock_send):
         tg._send_long_message("H:\n", "", wid="4")
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("```\n\n```", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_single_long_line_no_break(self, mock_send):
         """Single line with no newlines — can't split at line boundary."""
         body = "x" * 8000
@@ -1075,7 +1075,7 @@ class TestSendLongMessage(unittest.TestCase):
         # Result: single very long message (truncated by tg_send)
         self.assertEqual(mock_send.call_count, 1)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_saves_last_msg(self, mock_send):
         """Verifies _last_messages is updated."""
         tg._send_long_message("H:\n", "body", wid="7")
@@ -1129,11 +1129,11 @@ class TestLoadActivePrompt(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -1188,7 +1188,7 @@ class TestHandleCommand(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
         self.cmd_help = "help text"
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_help_command(self, mock_send):
         action, sessions, last = tg._handle_command(
             "/help", self.sessions, "4", self.cmd_help)
@@ -1202,13 +1202,13 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("/kill", msg)
         self.assertIn("/interrupt", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_stop_command(self, mock_send):
         action, _, _ = tg._handle_command(
             "/stop", self.sessions, "4", self.cmd_help)
         self.assertEqual(action, "pause")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_quit_command(self, mock_send):
         action, _, _ = tg._handle_command(
             "/quit", self.sessions, "4", self.cmd_help)
@@ -1216,8 +1216,8 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Shut down", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_sessions_command(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
@@ -1226,7 +1226,7 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Active Claude sessions", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_command(self, mock_run, mock_send):
         action, _, last = tg._handle_command(
@@ -1239,15 +1239,15 @@ class TestHandleCommand(unittest.TestCase):
         cmd_str = mock_run.call_args[0][0][2]
         self.assertIn("Escape", cmd_str)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_interrupt_no_session(self, mock_send):
         action, _, _ = tg._handle_command(
             "/interrupt w99", self.sessions, "4", self.cmd_help)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_interrupt_no_window_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command(
@@ -1258,8 +1258,8 @@ class TestHandleCommand(unittest.TestCase):
         kb = kwargs.get("reply_markup")
         self.assertIsNotNone(kb)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_interrupt_no_arg_multi_sessions_shows_picker(self, mock_scan, mock_send):
         """Bare /interrupt with multiple sessions shows picker, ignores last_win."""
         mock_scan.return_value = self.sessions
@@ -1268,7 +1268,7 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_no_arg_single_session_auto_targets(self, mock_run, mock_send):
         """Bare /interrupt with single session auto-interrupts it."""
@@ -1279,9 +1279,9 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_kill_command_success(self, mock_scan, mock_run, mock_send):
         """Kill removes session — success message."""
         mock_scan.return_value = {"4": ("0:4.0", "myproj")}  # w5 gone
@@ -1295,9 +1295,9 @@ class TestHandleCommand(unittest.TestCase):
         cmd_str = mock_run.call_args[0][0][2]
         self.assertEqual(cmd_str.count("C-c"), 3)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_kill_command_still_running(self, mock_scan, mock_run, mock_send):
         """Kill doesn't remove session — warning message."""
         mock_scan.return_value = self.sessions  # w5 still there
@@ -1307,16 +1307,16 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("still running", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_kill_nonexistent_session(self, mock_send):
         action, _, _ = tg._handle_command(
             "/kill w99", self.sessions, "4", self.cmd_help)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_new_command_default_dir(self, mock_scan, mock_run, mock_send):
         """New session with default directory."""
         mock_run.return_value = MagicMock(stdout="6\n")
@@ -1332,9 +1332,9 @@ class TestHandleCommand(unittest.TestCase):
         cmd_arg = mock_run.call_args[0][0]
         self.assertIn("new-window", cmd_arg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_new_command_custom_dir(self, mock_scan, mock_run, mock_send):
         """New session with user-specified directory."""
         mock_run.return_value = MagicMock(stdout="7\n")
@@ -1345,7 +1345,7 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Started Claude", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run", side_effect=Exception("tmux error"))
     def test_new_command_failure(self, mock_run, mock_send):
         action, _, _ = tg._handle_command(
@@ -1353,7 +1353,7 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Failed to start", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_last_command(self, mock_send):
         tg._last_messages["4"] = "previous message"
         action, _, _ = tg._handle_command(
@@ -1361,15 +1361,15 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "previous message")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_last_command_no_saved(self, mock_send):
         action, _, _ = tg._handle_command(
             "/last w99", self.sessions, "4", self.cmd_help)
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved message", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
     def test_wn_prefix_routing(self, mock_route, mock_send):
         action, _, last = tg._handle_command(
             "w4 hello", self.sessions, None, self.cmd_help)
@@ -1377,8 +1377,8 @@ class TestHandleCommand(unittest.TestCase):
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
     def test_no_prefix_single_session(self, mock_route, mock_send):
         """Single session — routes without prefix."""
         sessions = {"4": ("0:4.0", "myproj")}
@@ -1387,7 +1387,7 @@ class TestHandleCommand(unittest.TestCase):
         self.assertEqual(last, "4")
         mock_route.assert_called_once()
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_no_prefix_multiple_sessions_no_last(self, mock_send):
         """Multiple sessions, no last — asks user to specify."""
         action, _, _ = tg._handle_command(
@@ -1395,8 +1395,8 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Multiple sessions", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
     def test_no_prefix_uses_last_win(self, mock_route, mock_send):
         """Multiple sessions but last_win_idx set — routes to it."""
         action, _, last = tg._handle_command(
@@ -1404,14 +1404,14 @@ class TestHandleCommand(unittest.TestCase):
         self.assertEqual(last, "5")
         mock_route.assert_called_once_with("0:5.0", "5", "hello")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_no_sessions(self, mock_send):
         action, _, _ = tg._handle_command(
             "hello", {}, None, self.cmd_help)
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude sessions", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_wn_nonexistent_session(self, mock_send):
         action, _, _ = tg._handle_command(
             "w99 hello", self.sessions, "4", self.cmd_help)
@@ -1451,20 +1451,20 @@ class TestCmdHookEdgeCases(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_hook_edge"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
-        self._orig_enabled = tg.TG_HOOKS_ENABLED
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        self._orig_enabled = tg.config.TG_HOOKS_ENABLED
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
-        tg.TG_HOOKS_ENABLED = self._orig_enabled
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("sys.stdin")
     def test_hooks_disabled_consumes_stdin(self, mock_stdin):
         """With CLAUDE_TG_HOOKS != '1', stdin is consumed but no signal written."""
-        tg.TG_HOOKS_ENABLED = False
+        tg.config.TG_HOOKS_ENABLED = False
         mock_stdin.read.return_value = '{"hook_event_name": "Stop"}'
         tg.cmd_hook()
         mock_stdin.read.assert_called_once()
@@ -1474,14 +1474,14 @@ class TestCmdHookEdgeCases(unittest.TestCase):
     @patch("sys.stdin")
     def test_empty_stdin(self, mock_stdin):
         """Empty stdin — no crash, no signal."""
-        tg.TG_HOOKS_ENABLED = True
+        tg.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = ""
         tg.cmd_hook()  # should not raise
 
     @patch("sys.stdin")
     def test_invalid_json(self, mock_stdin):
         """Invalid JSON — no crash, no signal."""
-        tg.TG_HOOKS_ENABLED = True
+        tg.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = "not json{{"
         tg.cmd_hook()  # should not raise
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
@@ -1490,7 +1490,7 @@ class TestCmdHookEdgeCases(unittest.TestCase):
     @patch("sys.stdin")
     def test_unknown_event_ignored(self, mock_stdin):
         """Unknown hook_event_name — no signal written."""
-        tg.TG_HOOKS_ENABLED = True
+        tg.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = json.dumps({
             "hook_event_name": "UnknownEvent", "cwd": "/tmp"
         })
@@ -1501,7 +1501,7 @@ class TestCmdHookEdgeCases(unittest.TestCase):
     @patch("sys.stdin")
     def test_needs_attention_suppressed(self, mock_stdin):
         """AskUserQuestion 'needs your attention' notification is suppressed."""
-        tg.TG_HOOKS_ENABLED = True
+        tg.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = json.dumps({
             "hook_event_name": "Notification",
             "notification_type": "permission_prompt",
@@ -1512,11 +1512,11 @@ class TestCmdHookEdgeCases(unittest.TestCase):
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(signals, [])
 
-    @patch.object(tg, "get_window_id", return_value="w4")
+    @patch.object(tg.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_question_signal_written(self, mock_stdin, mock_wid):
         """AskUserQuestion PreToolUse creates question signal."""
-        tg.TG_HOOKS_ENABLED = True
+        tg.config.TG_HOOKS_ENABLED = True
         questions = [{"question": "Pick?", "options": [{"label": "A"}]}]
         mock_stdin.read.return_value = json.dumps({
             "hook_event_name": "PreToolUse",
@@ -1566,7 +1566,7 @@ class TestMultiQuestionFlow(unittest.TestCase):
         self.win_idx = "4"
 
     @patch("subprocess.run")
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_first_question_saves_remaining(self, mock_send, mock_run):
         """Answering first question sends second question to Telegram."""
         remaining = [{"question": "Q2?", "options": [
@@ -1575,7 +1575,7 @@ class TestMultiQuestionFlow(unittest.TestCase):
         prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
                   "free_text_at": 2, "remaining_qs": remaining,
                   "project": "myproj"}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "1")
         self.assertIn("Selected option 1", result)
         # Should have sent the second question
@@ -1584,14 +1584,14 @@ class TestMultiQuestionFlow(unittest.TestCase):
         self.assertIn("X", msg)
 
     @patch("subprocess.run")
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.state, "save_active_prompt")
     def test_last_question_prompts_submit(self, mock_save, mock_send, mock_run):
         """Answering last question prompts 'Submit answers?'."""
         prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
                   "free_text_at": 2, "remaining_qs": [],
                   "project": "myproj"}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "1")
         msg = mock_send.call_args[0][0]
         self.assertIn("Submit answers?", msg)
@@ -1743,19 +1743,19 @@ class TestHandleCallback(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
         self.signal_dir = "/tmp/tg_hook_test_callback"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "_select_option")
-    @patch.object(tg, "load_active_prompt")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.state, "load_active_prompt")
     def test_perm_allow(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
@@ -1768,11 +1768,11 @@ class TestHandleCallback(unittest.TestCase):
         self.assertIn("`w4`", msg)
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "_select_option")
-    @patch.object(tg, "load_active_prompt")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.state, "load_active_prompt")
     def test_perm_deny(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_3", "message_id": 42}
@@ -1782,11 +1782,11 @@ class TestHandleCallback(unittest.TestCase):
         self.assertIn("Denied", msg)
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "_select_option")
-    @patch.object(tg, "load_active_prompt")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.state, "load_active_prompt")
     def test_perm_always(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_2", "message_id": 42}
@@ -1796,9 +1796,9 @@ class TestHandleCallback(unittest.TestCase):
         self.assertIn("Always allowed", msg)
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "load_active_prompt")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.state, "load_active_prompt")
     def test_perm_expired(self, mock_load, mock_answer, mock_remove):
         mock_load.return_value = None  # prompt file gone
         callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
@@ -1808,10 +1808,10 @@ class TestHandleCallback(unittest.TestCase):
         mock_answer.assert_any_call("cb1", "Prompt expired")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Selected option 1")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Selected option 1")
     def test_question_select(self, mock_route, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "q_w4_1", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
@@ -1819,35 +1819,35 @@ class TestHandleCallback(unittest.TestCase):
         self.assertEqual(last, "4")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_status(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_status_w4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/status w4", self.sessions, None, "")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_focus(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_focus_w4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/focus w4", self.sessions, None, "")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_sess_select(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "sess_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/status w4", self.sessions, "4", "")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
     def test_unknown_callback(self, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "unknown_xyz", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
@@ -1939,7 +1939,7 @@ class TestTgSendWithKeyboard(unittest.TestCase):
 class TestSendLongMessageWithKeyboard(unittest.TestCase):
     """Test _send_long_message with reply_markup parameter."""
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_short_message_gets_keyboard(self, mock_send):
         kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
         tg._send_long_message("H:\n", "short body", wid="4", reply_markup=kb)
@@ -1947,7 +1947,7 @@ class TestSendLongMessageWithKeyboard(unittest.TestCase):
         _, kwargs = mock_send.call_args
         self.assertEqual(kwargs.get("reply_markup"), kb)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_chunked_keyboard_on_last_only(self, mock_send):
         """Multi-chunk: keyboard attached to last chunk only."""
         kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
@@ -1969,11 +1969,11 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_signals_kb"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -1983,11 +1983,11 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
-    @patch.object(tg, "_extract_pane_permission",
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.content, "_extract_pane_permission",
                   return_value=("wants to update `t.py`", "+new=True", ["1. Yes", "2. No"]))
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.state, "save_active_prompt")
     def test_permission_has_keyboard(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="", message="needs permission")
         tg.process_signals()
@@ -1998,8 +1998,8 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.assertIn("perm_w4_1", buttons)
         self.assertIn("perm_w4_2", buttons)  # Always allow
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_has_keyboard(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -2012,9 +2012,9 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.assertIn("cmd_status_w4", buttons)
         self.assertIn("cmd_focus_w4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.state, "save_active_prompt")
     def test_question_has_keyboard(self, mock_save, mock_proj, mock_send):
         questions = [{"question": "Pick?", "options": [
             {"label": "Alpha", "description": "a"},
@@ -2031,9 +2031,9 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.assertEqual(buttons[1]["text"], "Beta")
         self.assertEqual(buttons[1]["callback_data"], "q_w4_2")
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.state, "save_active_prompt")
     def test_question_no_options_no_keyboard(self, mock_save, mock_proj, mock_send):
         """Question with no options should not have keyboard."""
         questions = [{"question": "What?", "options": []}]
@@ -2049,11 +2049,11 @@ class TestAnyActivePrompt(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_any_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2104,14 +2104,14 @@ class TestSubmitYNButtons(unittest.TestCase):
     """Test that 'Submit answers?' includes Y/N inline keyboard."""
 
     @patch("subprocess.run")
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "save_active_prompt")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.state, "save_active_prompt")
     def test_submit_prompt_has_yn_keyboard(self, mock_save, mock_send, mock_run):
         """Last question answered — submit prompt includes inline Y/N buttons."""
         prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
                   "free_text_at": 2, "remaining_qs": [],
                   "project": "myproj"}
-        with patch.object(tg, "load_active_prompt", return_value=prompt):
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             tg.route_to_pane("0:4.0", "4", "1")
         # Find the tg_send call with "Submit answers?"
         submit_call = None
@@ -2136,7 +2136,7 @@ class TestQuitYNButtons(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_quit_command_has_yn_keyboard(self, mock_send):
         action, _, _ = tg._handle_command("/quit", self.sessions, "4", "")
         self.assertEqual(action, "quit_pending")
@@ -2148,9 +2148,9 @@ class TestQuitYNButtons(unittest.TestCase):
         self.assertEqual(buttons[0]["callback_data"], "quit_y")
         self.assertEqual(buttons[1]["callback_data"], "quit_n")
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_quit_y_returns_quit_action(self, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "quit_y", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, "4")
@@ -2158,9 +2158,9 @@ class TestQuitYNButtons(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Bye", msg)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_quit_n_returns_none_action(self, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "quit_n", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, "4")
@@ -2196,7 +2196,7 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_status_multiple_no_last_shows_picker(self, mock_send):
         """Bare /status with multiple sessions and no last_win shows picker."""
         action, _, _ = tg._handle_command("/status", self.sessions, None, "")
@@ -2209,8 +2209,8 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_status_4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_focus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command("/focus", self.sessions, "4", "")
@@ -2223,16 +2223,16 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_focus_4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_focus_no_sessions(self, mock_scan, mock_send):
         mock_scan.return_value = {}
         action, _, _ = tg._handle_command("/focus", {}, None, "")
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude sessions", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_kill_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command("/kill", self.sessions, "4", "")
@@ -2244,8 +2244,8 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_kill_4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_interrupt_no_last_shows_picker(self, mock_scan, mock_send):
         """Interrupt without args and no last_win shows session picker."""
         mock_scan.return_value = self.sessions
@@ -2258,8 +2258,8 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_interrupt_4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_interrupt_with_last_win_still_shows_picker(self, mock_scan, mock_send):
         """Bare /interrupt with multiple sessions shows picker even with last_win."""
         mock_scan.return_value = self.sessions
@@ -2280,7 +2280,7 @@ class TestBareLastSessionPicker(unittest.TestCase):
         tg._last_messages.clear()
         tg._last_messages.update(self._orig)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_last_multiple_shows_picker(self, mock_send):
         tg._last_messages["4"] = "msg4"
         tg._last_messages["5"] = "msg5"
@@ -2293,14 +2293,14 @@ class TestBareLastSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_last_4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_last_single_auto_sends(self, mock_send):
         tg._last_messages["4"] = "the message"
         action, _, _ = tg._handle_command("/last", self.sessions, None, "")
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "the message")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_bare_last_none_saved(self, mock_send):
         tg._last_messages.clear()
         action, _, _ = tg._handle_command("/last", self.sessions, None, "")
@@ -2314,27 +2314,27 @@ class TestCallbackCommandExpanded(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_interrupt_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_interrupt_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/interrupt w4", self.sessions, None, "")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_kill_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_kill_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/kill w4", self.sessions, None, "")
         self.assertIsNone(action)
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_last_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_last_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
@@ -2348,11 +2348,11 @@ class TestDeepFocusState(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_deepfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2386,11 +2386,11 @@ class TestSessionNames(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_names"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2448,16 +2448,16 @@ class TestDeepFocusCommand(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
         self.signal_dir = "/tmp/tg_hook_test_dfcmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_bare_deepfocus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command("/deepfocus", self.sessions, "4", "")
@@ -2469,7 +2469,7 @@ class TestDeepFocusCommand(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_deepfocus_4", buttons)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_wn(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="some content\n")
@@ -2486,7 +2486,7 @@ class TestDeepFocusCommand(unittest.TestCase):
         # Should have cleared regular focus
         self.assertIsNone(tg._load_focus_state())
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_clears_focus(self, mock_run, mock_send):
         """Deepfocus clears any existing focus state (mutual exclusion)."""
@@ -2496,7 +2496,7 @@ class TestDeepFocusCommand(unittest.TestCase):
         self.assertIsNone(tg._load_focus_state())
         self.assertIsNotNone(tg._load_deepfocus_state())
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_deepfocus_no_session(self, mock_send):
         action, _, _ = tg._handle_command(
             "/deepfocus w99", self.sessions, None, "")
@@ -2511,15 +2511,15 @@ class TestFocusClearsDeepfocus(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj")}
         self.signal_dir = "/tmp/tg_hook_test_focus_df"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_focus_clears_deepfocus(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
@@ -2536,15 +2536,15 @@ class TestUnfocusClearsBoth(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj")}
         self.signal_dir = "/tmp/tg_hook_test_unfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_unfocus_clears_both(self, mock_send):
         tg._save_focus_state("4", "0:4.0", "myproj")
         tg._save_deepfocus_state("5", "0:5.0", "other")
@@ -2562,15 +2562,15 @@ class TestNameCommand(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj")}
         self.signal_dir = "/tmp/tg_hook_test_namecmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_name_set(self, mock_send):
         tg._handle_command("/name w4 auth-refactor", self.sessions, None, "")
         msg = mock_send.call_args[0][0]
@@ -2578,7 +2578,7 @@ class TestNameCommand(unittest.TestCase):
         names = tg._load_session_names()
         self.assertEqual(names["4"], "auth-refactor")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_name_clear(self, mock_send):
         tg._save_session_name("4", "old-name")
         tg._handle_command("/name w4", self.sessions, None, "")
@@ -2594,11 +2594,11 @@ class TestFormatSessionsWithNames(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_fmtnames"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2634,9 +2634,9 @@ class TestDeepFocusCallback(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg, "_remove_inline_keyboard")
-    @patch.object(tg, "_answer_callback_query")
-    @patch.object(tg, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_deepfocus_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_deepfocus_4", "message_id": 42}
         sessions, last, action = tg._handle_callback(callback, self.sessions, None)
@@ -2650,11 +2650,11 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_sig_wids"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2664,8 +2664,8 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_suppressed_by_focus_set(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -2674,8 +2674,8 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         tg.process_signals(focused_wids={"4"})
         mock_send.assert_not_called()
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_not_suppressed_different_wid(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -2691,11 +2691,11 @@ class TestProcessSignalsWithNames(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_sig_names"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2705,8 +2705,8 @@ class TestProcessSignalsWithNames(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_includes_name(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -2723,7 +2723,7 @@ class TestHelpIncludesNewCommands(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_help_has_deepfocus(self, mock_send):
         tg._handle_command("/help", self.sessions, "4", "")
         msg = mock_send.call_args[0][0]
@@ -2738,12 +2738,12 @@ class TestResolveName(unittest.TestCase):
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_resolve"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2787,16 +2787,16 @@ class TestNameBasedCommands(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
         self.signal_dir = "/tmp/tg_hook_test_namecmds"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
         tg._save_session_name("4", "auth")
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_focus_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
@@ -2807,7 +2807,7 @@ class TestNameBasedCommands(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Focusing on `w4 [auth]`", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
@@ -2818,7 +2818,7 @@ class TestNameBasedCommands(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Deep focus on `w4 [auth]`", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_by_name(self, mock_run, mock_send):
         action, _, last = tg._handle_command(
@@ -2827,9 +2827,9 @@ class TestNameBasedCommands(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted `w4 [auth]`", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg, "scan_claude_sessions")
+    @patch.object(tg.tmux, "scan_claude_sessions")
     def test_kill_by_name(self, mock_scan, mock_run, mock_send):
         mock_scan.return_value = {"5": ("0:5.0", "other")}  # w4 gone
         with patch("time.sleep"):
@@ -2838,7 +2838,7 @@ class TestNameBasedCommands(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Killed", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_last_by_name(self, mock_send):
         tg._last_messages["4"] = "previous msg"
         action, _, _ = tg._handle_command(
@@ -2847,7 +2847,7 @@ class TestNameBasedCommands(unittest.TestCase):
         self.assertEqual(msg, "previous msg")
         tg._last_messages.pop("4", None)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_status_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="● Answer\n  42\n❯ prompt")
@@ -2856,7 +2856,7 @@ class TestNameBasedCommands(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("`w4 [auth]`", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_name_rename_by_name(self, mock_send):
         """Rename a session using its current name."""
         action, _, _ = tg._handle_command(
@@ -2866,7 +2866,7 @@ class TestNameBasedCommands(unittest.TestCase):
         names = tg._load_session_names()
         self.assertEqual(names["4"], "newname")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_unknown_name_error(self, mock_send):
         action, _, _ = tg._handle_command(
             "/focus nonexistent", self.sessions, None, "")
@@ -2882,17 +2882,17 @@ class TestNamePrefixRouting(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
         self.signal_dir = "/tmp/tg_hook_test_nameprefix"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.SIGNAL_DIR
-        tg.SIGNAL_DIR = self.signal_dir
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
         tg._save_session_name("4", "auth")
 
     def tearDown(self):
-        tg.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix the bug`")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix the bug`")
     def test_name_prefix_routes(self, mock_route, mock_send):
         """'auth fix the bug' routes to session named 'auth'."""
         action, _, last = tg._handle_command(
@@ -2901,7 +2901,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "fix the bug")
 
-    @patch.object(tg, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_unknown_word_falls_through(self, mock_send):
         """Unknown first word with multiple sessions asks to specify."""
         action, _, _ = tg._handle_command(
@@ -2909,8 +2909,8 @@ class TestNamePrefixRouting(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Multiple sessions", msg)
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
     def test_wn_prefix_still_works(self, mock_route, mock_send):
         """w4 hello still works (backward compat)."""
         action, _, last = tg._handle_command(
@@ -2918,8 +2918,8 @@ class TestNamePrefixRouting(unittest.TestCase):
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
     def test_name_case_insensitive(self, mock_route, mock_send):
         """Name prefix is case-insensitive."""
         action, _, last = tg._handle_command(
@@ -2927,8 +2927,8 @@ class TestNamePrefixRouting(unittest.TestCase):
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "fix it")
 
-    @patch.object(tg, "tg_send", return_value=1)
-    @patch.object(tg, "route_to_pane", return_value="📨 Sent")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
     def test_single_word_no_prefix(self, mock_route, mock_send):
         """Single word that isn't a name doesn't trigger name routing."""
         sessions = {"4": ("0:4.0", "myproj")}
