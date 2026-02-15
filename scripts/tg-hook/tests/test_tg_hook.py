@@ -473,19 +473,19 @@ class TestRouteToPane(unittest.TestCase):
         self.assertIn("Selected option 4", result)  # n+2 = 4
 
     @patch("subprocess.run")
-    def test_unknown_text_navigates_and_types(self, mock_run):
-        """Prompt with no free_text: navigate to last option, type text, Enter."""
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_unknown_text_resaves_prompt_and_falls_through(self, mock_idle, mock_run):
+        """Prompt with no free_text: unrecognized text re-saves prompt, falls through."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
         with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "change step 3")
-        self.assertIn("Replied", result)
-        self.assertIn("`change step 3`", result)
-        cmd_str = mock_run.call_args[0][0][2]
-        # Navigate to last option, type text, Enter
-        self.assertEqual(cmd_str.count("Down"), 2)  # total=3, so 2 Downs
-        self.assertIn("change step 3", cmd_str)
-        self.assertEqual(cmd_str.count("Enter"), 1)  # submit only
+        # Falls through to normal routing (sent as message, not prompt reply)
+        self.assertIn("Sent to", result)
+        # Prompt was re-saved for the next message
+        saved = tg.state.load_active_prompt(f"w{self.win_idx}")
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["total"], 3)
 
     @patch("subprocess.run")
     @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
@@ -3705,7 +3705,6 @@ class TestStopSignalClearsSmartFocus(unittest.TestCase):
         """Stop signal for w4 clears smart focus on w4."""
         tg._save_smartfocus_state("4", "0:4.0", "proj")
         self._write_signal("stop", wid="w4")
-        # Smart focus wid is in focused_wids → stop suppressed, but state cleared
         tg.process_signals(focused_wids={"4"})
         self.assertIsNone(tg._load_smartfocus_state())
 

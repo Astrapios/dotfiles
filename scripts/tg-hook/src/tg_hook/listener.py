@@ -67,7 +67,7 @@ def cmd_listen():
 
     smartfocus_target_wid: str | None = None
     smartfocus_pane_width: int = 0
-    smartfocus_last_hash: int = 0
+    smartfocus_prev_lines: list[str] = []
 
     # Consume existing updates to avoid replaying old messages
     offset = 0
@@ -140,6 +140,7 @@ def cmd_listen():
                     smartfocus_target_wid = None
                     smartfocus_pane_width = 0
                     smartfocus_last_hash = 0
+                    smartfocus_prev_lines = []
                     telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions),
                                      reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
@@ -219,7 +220,7 @@ def cmd_listen():
                 if sfw != smartfocus_target_wid:
                     smartfocus_target_wid = sfw
                     smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
-                    smartfocus_last_hash = 0
+                    smartfocus_prev_lines = []
                 sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
                 if sfw not in sessions:
                     sessions = tmux.scan_claude_sessions()
@@ -227,6 +228,7 @@ def cmd_listen():
                     if sfw not in sessions:
                         state._clear_smartfocus_state()
                         smartfocus_target_wid = None
+                        smartfocus_prev_lines = []
                         smartfocus_state = None
                 if smartfocus_state:
                     for n in (50, 150):
@@ -235,13 +237,18 @@ def cmd_listen():
                             break
                     cleaned = content.clean_pane_content(raw, "stop", smartfocus_pane_width)
                     if cleaned:
-                        h = hash(cleaned)
-                        if h != smartfocus_last_hash and smartfocus_last_hash != 0:
-                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                            telegram._send_long_message(header, cleaned, sfw)
-                        smartfocus_last_hash = h
+                        cur_lines = cleaned.splitlines()
+                        if smartfocus_prev_lines:
+                            new = content._compute_new_lines(smartfocus_prev_lines, cur_lines)
+                            if new:
+                                new_text = "\n".join(new).strip()
+                                if new_text:
+                                    header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                                    telegram._send_long_message(header, new_text, sfw)
+                        smartfocus_prev_lines = cur_lines
         elif smartfocus_target_wid:
             smartfocus_target_wid = None
+            smartfocus_prev_lines = []
 
         # --- Deep focus monitoring (streams all output) ---
         if deepfocus_state:

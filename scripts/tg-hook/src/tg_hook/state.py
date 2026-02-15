@@ -195,6 +195,25 @@ def _clear_smartfocus_state():
         pass
 
 
+def _is_autofocus_enabled() -> bool:
+    """Check if autofocus is enabled (on by default)."""
+    return not os.path.exists(os.path.join(config.SIGNAL_DIR, "_autofocus_off.json"))
+
+
+def _set_autofocus(enabled: bool):
+    """Enable or disable autofocus."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, "_autofocus_off.json")
+    if enabled:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    else:
+        with open(path, "w") as f:
+            json.dump({"ts": time.time()}, f)
+
+
 def _save_session_name(wid: str, name: str):
     """Save a friendly name for a session."""
     os.makedirs(config.SIGNAL_DIR, exist_ok=True)

@@ -106,8 +106,9 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str], str]:
     return header, body, options, context
 
 
-def _filter_noise(raw: str) -> list[str]:
-    """Filter common UI noise from captured pane content."""
+def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
+    """Filter common UI noise from captured pane content.
+    If keep_status=True, preserves thinking/spinner status lines."""
     lines = raw.splitlines()
     while lines and not lines[-1].strip():
         lines.pop()
@@ -120,12 +121,16 @@ def _filter_noise(raw: str) -> list[str]:
             continue
         if s.startswith("Context left until auto-compact:"):
             continue
-        if s in ("⏳ Working...", "* Working..."):
-            continue
-        if re.match(r'^✻ \w+ for ', s):
-            continue
-        if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
-            continue
+        if not keep_status:
+            if s in ("⏳ Working...", "* Working..."):
+                continue
+            if re.match(r'^✻ \w+ for ', s):
+                continue
+            if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
+                continue
+            # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
+            if re.match(r'^[^\w\s●❯] \w+.*…', s):
+                continue
         if re.match(r'^\+\d+ more lines \(', s):
             continue
         if s.startswith('ctrl+') and 'background' in s:
@@ -173,10 +178,31 @@ def clean_pane_content(raw: str, event: str, pane_width: int = 0) -> str:
 
 def clean_pane_status(raw: str, pane_width: int = 0) -> str:
     """Clean captured pane content for /status display."""
-    filtered = _filter_noise(raw)
+    filtered = _filter_noise(raw, keep_status=True)
     if pane_width:
         filtered = tmux._join_wrapped_lines(filtered, pane_width)
     return "\n".join(filtered).strip()
+
+
+def _filter_tool_calls(lines: list[str]) -> list[str]:
+    """Remove tool call bullets and their continuation lines.
+
+    Tool call bullets match '● Word(' (e.g. '● Bash(command)').
+    Everything after a tool bullet until the next text bullet is removed.
+    """
+    filtered = []
+    in_tool = False
+    for line in lines:
+        s = line.strip()
+        if re.match(r'^● \w+\(', s):
+            in_tool = True
+            continue
+        if s.startswith("●"):
+            in_tool = False
+        if in_tool:
+            continue
+        filtered.append(line)
+    return filtered
 
 
 def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:

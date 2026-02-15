@@ -8,7 +8,7 @@ import time
 from tg_hook import config, telegram, tmux, state, content, routing
 
 
-_ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved"}
+_ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus"}
 
 
 def _any_active_prompt() -> bool:
@@ -66,6 +66,8 @@ def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: s
     """Activate smart focus after a message is sent (not queued/prompt reply)."""
     if not confirm.startswith("📨 Sent to"):
         return
+    if not state._is_autofocus_enabled():
+        return
     # Skip if manual focus or deepfocus already covers this wid
     focus = state._load_focus_state()
     if focus and focus["wid"] == win_idx:
@@ -103,6 +105,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/focus wN` — watch completed responses",
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
+            "`/autofocus` — toggle auto-monitor on send (default: on)",
             "`/name wN [label]` — name a session",
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
             "`/interrupt [wN]` — interrupt current task (Esc)",
@@ -113,7 +116,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Aliases:*",
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
-            "`sv` saved | `?` help",
+            "`af` autofocus | `sv` saved | `?` help",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
             "*Photos:* send a photo to have Claude read it. Add `wN` in caption to target.",
@@ -228,6 +231,28 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         state._clear_deepfocus_state()
         state._clear_smartfocus_state()
         telegram.tg_send("🔍 Focus stopped.")
+        return None, sessions, last_win_idx
+
+    # /autofocus [on|off]
+    af_m = re.match(r"^/autofocus(?:\s+(on|off))?$", text.lower())
+    if af_m:
+        arg = af_m.group(1)
+        if arg == "on":
+            state._set_autofocus(True)
+            telegram.tg_send("👁 Autofocus *on*.")
+        elif arg == "off":
+            state._set_autofocus(False)
+            state._clear_smartfocus_state()
+            telegram.tg_send("👁 Autofocus *off*.")
+        else:
+            # Toggle
+            currently_on = state._is_autofocus_enabled()
+            state._set_autofocus(not currently_on)
+            if currently_on:
+                state._clear_smartfocus_state()
+                telegram.tg_send("👁 Autofocus *off*.")
+            else:
+                telegram.tg_send("👁 Autofocus *on*.")
         return None, sessions, last_win_idx
 
     # /name wN|name [label]

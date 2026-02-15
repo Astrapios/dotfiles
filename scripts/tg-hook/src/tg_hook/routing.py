@@ -38,6 +38,9 @@ def _is_ui_chrome(s: str) -> bool:
     # Thinking/timing indicators: "* Percolating… (1m 14s …)"
     if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
         return True
+    # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
+    if re.match(r'^[^\w\s●❯] \w+.*…', s):
+        return True
     if re.match(r'^\+\d+ more lines \(', s):
         return True
     return False
@@ -147,15 +150,16 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             _advance_question()
             return f"📨 Answered in {label}:\n`{reply[:500]}`"
 
-        # Prompt with no free text and no matching shortcut/number
-        pp = shlex.quote(prompt_pane)
-        nav = " ".join(["Down"] * (total - 1)) if total > 1 else ""
-        cmd = (f"tmux send-keys -t {pp} {nav} && sleep 0.2 && "
-               f"tmux send-keys -t {pp} -l {shlex.quote(reply)} && sleep 0.1 && "
-               f"tmux send-keys -t {pp} Enter")
-        subprocess.run(["bash", "-c", cmd], timeout=10)
-        _advance_question()
-        return f"📨 Replied in {label}:\n`{reply[:500]}`"
+        # Prompt with no free text and no matching shortcut/number —
+        # re-save the prompt and fall through to normal message handling.
+        # This prevents long messages split by Telegram from being misrouted
+        # as permission prompt replies.
+        state.save_active_prompt(wid, prompt_pane, total=total,
+                                 shortcuts=shortcuts,
+                                 free_text_at=free_text_at,
+                                 remaining_qs=remaining_qs,
+                                 project=proj)
+        config._log("route", f"prompt re-saved: reply {reply!r} not valid for prompt")
 
     # Check pane idle state (always authoritative)
     is_idle, typed_text = _pane_idle_state(pane)
