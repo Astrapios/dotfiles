@@ -2600,11 +2600,11 @@ class TestSessionNames(unittest.TestCase):
         names = tg._load_session_names()
         self.assertEqual(names, {"4": "auth"})
 
-    def test_cleared_by_clear_signals_with_state(self):
+    def test_preserved_by_clear_signals_with_state(self):
         tg._save_session_name("4", "auth")
         tg._clear_signals(include_state=True)
         names = tg._load_session_names()
-        self.assertEqual(names, {})
+        self.assertEqual(names, {"4": "auth"})
 
 
 class TestDeepFocusAlias(unittest.TestCase):

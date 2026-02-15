@@ -30,10 +30,14 @@ def write_signal(event: str, data: dict, **extra):
 
 
 def _clear_signals(include_state: bool = False):
-    """Remove signal files. If include_state, also removes _prefixed state files."""
+    """Remove signal files. If include_state, also removes _prefixed state files.
+    Queued messages (_queued_) and session names (_names) are always preserved."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return
+    _persist = ("_queued_", "_names")
     for f in os.listdir(config.SIGNAL_DIR):
+        if f.startswith(_persist):
+            continue
         if not include_state and f.startswith("_"):
             continue
         try:
