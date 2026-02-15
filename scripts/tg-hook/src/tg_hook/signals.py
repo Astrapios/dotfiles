@@ -176,7 +176,11 @@ def process_signals(focused_wids: set[str] | None = None,
                 ]])
                 context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
                 if bash_cmd:
-                    msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{context_str}```\n{bash_cmd[:2000]}\n```\n{opts_text}"
+                    if perm_context:
+                        code_block = f"```\n{perm_context}\n\n{bash_cmd[:2000]}\n```"
+                    else:
+                        code_block = f"```\n{bash_cmd[:2000]}\n```"
+                    msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
                     telegram.tg_send(msg, reply_markup=perm_kb)
                     config._save_last_msg(wid, msg)
                 else:

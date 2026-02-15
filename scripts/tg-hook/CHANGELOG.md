@@ -5,6 +5,10 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.7.4
+
+- Fix broken permission formatting: merge context and bash command into a single code block
+
 ## 0.7.3
 
 - Fix stop message missing content when smartfocus never sent a 👁 update (fast responses)
