@@ -216,7 +216,7 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     if not has_changes:
         return []
     equal_count = sum(j2 - j1 for tag, _, _, j1, j2 in opcodes if tag == "equal")
-    if equal_count < 3:
+    if equal_count == 0:
         return new_lines
     new = []
     for tag, _i1, _i2, j1, j2 in opcodes:

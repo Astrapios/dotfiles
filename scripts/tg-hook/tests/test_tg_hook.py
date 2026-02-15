@@ -1565,11 +1565,25 @@ class TestComputeNewLinesEdgeCases(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_short_content_with_new_line(self):
-        """Short content (<3 lines) with a genuine new line."""
+        """Short content with a genuine new line returns only the insert."""
         old = ["a"]
         new = ["a", "b"]
         result = tg._compute_new_lines(old, new)
-        self.assertEqual(result, ["a", "b"])  # <3 equal, returns all
+        self.assertEqual(result, ["b"])
+
+    def test_short_content_replace_no_duplicate(self):
+        """Short content where one line changes should NOT re-send everything."""
+        old = ["Good question — let me check.", "Searching for 1 pattern…"]
+        new = ["Good question — let me check.", "Searching for 1 pattern, reading 1 file…"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, [])  # replace only, no inserts
+
+    def test_completely_different_content(self):
+        """Zero overlap returns all new content."""
+        old = ["Response A", "Details about A"]
+        new = ["Response B", "Details about B"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, new)
 
     def test_interleaved_inserts(self):
         """New lines inserted between existing lines."""
