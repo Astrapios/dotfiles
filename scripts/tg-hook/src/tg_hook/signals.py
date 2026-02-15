@@ -63,6 +63,9 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
 
         if event == "stop":
             state._clear_busy(wid)
+            sf = state._load_smartfocus_state()
+            if sf and sf["wid"] == w_idx:
+                state._clear_smartfocus_state()
             if focused_wids and w_idx in focused_wids:
                 pass
             else:

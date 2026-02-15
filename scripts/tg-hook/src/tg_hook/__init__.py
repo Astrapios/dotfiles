@@ -50,6 +50,7 @@ from .state import (
     _pane_has_prompt, _cleanup_stale_prompts,
     _save_focus_state, _load_focus_state, _clear_focus_state,
     _save_deepfocus_state, _load_deepfocus_state, _clear_deepfocus_state,
+    _save_smartfocus_state, _load_smartfocus_state, _clear_smartfocus_state,
     _save_session_name, _clear_session_name, _load_session_names,
     _resolve_name, _wid_label,
     _save_queued_msg, _load_queued_msgs, _pop_queued_msgs,
@@ -75,7 +76,7 @@ from .signals import _format_question_msg, process_signals
 # commands
 from .commands import (
     _ALIASES, _any_active_prompt, _resolve_alias,
-    _handle_command, _handle_callback,
+    _maybe_activate_smartfocus, _handle_command, _handle_callback,
 )
 
 # listener

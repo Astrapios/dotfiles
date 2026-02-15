@@ -65,6 +65,10 @@ def cmd_listen():
     deepfocus_last_new_ts: float = 0
     deepfocus_first_new_ts: float = 0
 
+    smartfocus_target_wid: str | None = None
+    smartfocus_pane_width: int = 0
+    smartfocus_last_hash: int = 0
+
     # Consume existing updates to avoid replaying old messages
     offset = 0
     try:
@@ -133,6 +137,9 @@ def cmd_listen():
                     deepfocus_pending = []
                     deepfocus_last_new_ts = 0
                     deepfocus_first_new_ts = 0
+                    smartfocus_target_wid = None
+                    smartfocus_pane_width = 0
+                    smartfocus_last_hash = 0
                     telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions),
                                      reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
@@ -157,11 +164,14 @@ def cmd_listen():
 
         focus_state = state._load_focus_state()
         deepfocus_state = state._load_deepfocus_state()
+        smartfocus_state = state._load_smartfocus_state()
         focused_wids: set[str] = set()
         if focus_state:
             focused_wids.add(focus_state["wid"])
         if deepfocus_state:
             focused_wids.add(deepfocus_state["wid"])
+        if smartfocus_state:
+            focused_wids.add(smartfocus_state["wid"])
 
         signal_wid = signals.process_signals(focused_wids=focused_wids or None)
         if signal_wid:
@@ -197,6 +207,41 @@ def cmd_listen():
                     focus_last_hash = h
         elif focus_target_wid:
             focus_target_wid = None
+
+        # --- Smart focus monitoring (auto-activated on message send) ---
+        if smartfocus_state:
+            sfw = smartfocus_state["wid"]
+            # Skip if manual focus or deepfocus already covers this wid
+            if (focus_state and focus_state["wid"] == sfw) or \
+               (deepfocus_state and deepfocus_state["wid"] == sfw):
+                pass
+            else:
+                if sfw != smartfocus_target_wid:
+                    smartfocus_target_wid = sfw
+                    smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
+                    smartfocus_last_hash = 0
+                sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
+                if sfw not in sessions:
+                    sessions = tmux.scan_claude_sessions()
+                    last_scan = time.time()
+                    if sfw not in sessions:
+                        state._clear_smartfocus_state()
+                        smartfocus_target_wid = None
+                        smartfocus_state = None
+                if smartfocus_state:
+                    for n in (50, 150):
+                        raw = tmux._capture_pane(sfp, n)
+                        if content._has_response_start(raw):
+                            break
+                    cleaned = content.clean_pane_content(raw, "stop", smartfocus_pane_width)
+                    if cleaned:
+                        h = hash(cleaned)
+                        if h != smartfocus_last_hash and smartfocus_last_hash != 0:
+                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                            telegram._send_long_message(header, cleaned, sfw)
+                        smartfocus_last_hash = h
+        elif smartfocus_target_wid:
+            smartfocus_target_wid = None
 
         # --- Deep focus monitoring (streams all output) ---
         if deepfocus_state:

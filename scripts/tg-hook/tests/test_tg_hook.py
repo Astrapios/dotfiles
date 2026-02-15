@@ -3570,5 +3570,242 @@ class TestHelpIncludesSaved(unittest.TestCase):
         self.assertIn("sv", msg)
 
 
+class TestSmartFocusState(unittest.TestCase):
+    """Test smart focus state file operations."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_smartfocus"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_save_and_load_roundtrip(self):
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        st = tg._load_smartfocus_state()
+        self.assertEqual(st, {"wid": "4", "pane": "0:4.0", "project": "myproj"})
+
+    def test_load_missing_returns_none(self):
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_clear_removes_file(self):
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        tg._clear_smartfocus_state()
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_survives_clear_signals_without_state(self):
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        tg._clear_signals(include_state=False)
+        self.assertIsNotNone(tg._load_smartfocus_state())
+
+    def test_cleared_by_clear_signals_with_state(self):
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        tg._clear_signals(include_state=True)
+        self.assertIsNone(tg._load_smartfocus_state())
+
+
+class TestSmartFocusActivation(unittest.TestCase):
+    """Test _maybe_activate_smartfocus logic."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_sf_activate"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_normal_send_activates(self):
+        """Message sent successfully → smart focus activates."""
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "📨 Sent to `w4`:\n`fix the bug`")
+        st = tg._load_smartfocus_state()
+        self.assertIsNotNone(st)
+        self.assertEqual(st["wid"], "4")
+
+    def test_queued_does_not_activate(self):
+        """Message queued (busy) → no smart focus."""
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "💾 Saved for `w4` (busy):\n`fix`")
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_prompt_reply_does_not_activate(self):
+        """Prompt reply → no smart focus."""
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "📨 Selected option 1 in `w4`")
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_skips_when_focus_active_same_wid(self):
+        """Manual focus on same wid → skip smart focus."""
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "📨 Sent to `w4`:\n`fix`")
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_skips_when_deepfocus_active_same_wid(self):
+        """Deep focus on same wid → skip smart focus."""
+        tg._save_deepfocus_state("4", "0:4.0", "myproj")
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "📨 Sent to `w4`:\n`fix`")
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_activates_when_focus_on_different_wid(self):
+        """Manual focus on w5, sending to w4 → smart focus activates."""
+        tg._save_focus_state("5", "0:5.0", "other")
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "📨 Sent to `w4`:\n`fix`")
+        st = tg._load_smartfocus_state()
+        self.assertIsNotNone(st)
+        self.assertEqual(st["wid"], "4")
+
+    def test_switching_sessions_overwrites(self):
+        """Sending to w5 after w4 → smart focus moves to w5."""
+        tg._maybe_activate_smartfocus("4", "0:4.0", "projA",
+                                      "📨 Sent to `w4`:\n`fix`")
+        tg._maybe_activate_smartfocus("5", "0:5.0", "projB",
+                                      "📨 Sent to `w5`:\n`test`")
+        st = tg._load_smartfocus_state()
+        self.assertEqual(st["wid"], "5")
+
+
+class TestStopSignalClearsSmartFocus(unittest.TestCase):
+    """Test that stop signal clears smart focus for matching wid."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_sf_stop"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, wid="w4", **extra):
+        signal = {"event": event, "pane": "%20", "wid": wid, "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_matching_wid_cleared(self, mock_sleep, mock_run, mock_proj,
+                                   mock_long, mock_send):
+        """Stop signal for w4 clears smart focus on w4."""
+        tg._save_smartfocus_state("4", "0:4.0", "proj")
+        self._write_signal("stop", wid="w4")
+        # Smart focus wid is in focused_wids → stop suppressed, but state cleared
+        tg.process_signals(focused_wids={"4"})
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_non_matching_wid_preserved(self, mock_sleep, mock_run, mock_proj,
+                                         mock_long, mock_send):
+        """Stop signal for w5 does NOT clear smart focus on w4."""
+        tg._save_smartfocus_state("4", "0:4.0", "proj")
+        self._write_signal("stop", wid="w5")
+        tg.process_signals()
+        st = tg._load_smartfocus_state()
+        self.assertIsNotNone(st)
+        self.assertEqual(st["wid"], "4")
+
+
+class TestUnfocusClearsSmartFocus(unittest.TestCase):
+    """Test that /unfocus clears smart focus."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_sf_unfocus"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_unfocus_clears_smartfocus(self, mock_send):
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        tg._handle_command("/unfocus", self.sessions, None)
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_focus_clears_smartfocus(self, mock_run, mock_send):
+        """Manual /focus clears smart focus."""
+        mock_run.return_value = MagicMock(stdout="content\n")
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        tg._handle_command("/focus w4", self.sessions, None)
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_deepfocus_clears_smartfocus(self, mock_run, mock_send):
+        """Manual /deepfocus clears smart focus."""
+        mock_run.return_value = MagicMock(stdout="content\n")
+        tg._save_smartfocus_state("4", "0:4.0", "myproj")
+        tg._handle_command("/deepfocus w4", self.sessions, None)
+        self.assertIsNone(tg._load_smartfocus_state())
+
+
+class TestSmartFocusIntegration(unittest.TestCase):
+    """Test smart focus wires through _handle_command message routing."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_sf_integration"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix`")
+    def test_wN_prefix_activates_smartfocus(self, mock_route, mock_send):
+        """Sending 'w4 fix' activates smart focus on w4."""
+        tg._handle_command("w4 fix the bug", self.sessions, None)
+        st = tg._load_smartfocus_state()
+        self.assertIsNotNone(st)
+        self.assertEqual(st["wid"], "4")
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="💾 Saved for `w4` (busy):\n`fix`")
+    def test_wN_prefix_queued_no_smartfocus(self, mock_route, mock_send):
+        """Queued message does NOT activate smart focus."""
+        tg._handle_command("w4 fix the bug", self.sessions, None)
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix`")
+    def test_default_session_activates_smartfocus(self, mock_route, mock_send):
+        """Single session message activates smart focus."""
+        single = {"4": ("0:4.0", "myproj")}
+        tg._handle_command("fix the bug", single, None)
+        st = tg._load_smartfocus_state()
+        self.assertIsNotNone(st)
+        self.assertEqual(st["wid"], "4")
+
+
 if __name__ == "__main__":
     unittest.main()

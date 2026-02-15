@@ -168,6 +168,33 @@ def _clear_deepfocus_state():
         pass
 
 
+def _save_smartfocus_state(wid: str, pane: str, project: str):
+    """Save smart focus target (auto-activated on message send)."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, "_smartfocus.json")
+    with open(path, "w") as f:
+        json.dump({"wid": wid, "pane": pane, "project": project}, f)
+
+
+def _load_smartfocus_state() -> dict | None:
+    """Load smart focus state. Returns None if missing."""
+    path = os.path.join(config.SIGNAL_DIR, "_smartfocus.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _clear_smartfocus_state():
+    """Remove smart focus state file."""
+    path = os.path.join(config.SIGNAL_DIR, "_smartfocus.json")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _save_session_name(wid: str, name: str):
     """Save a friendly name for a session."""
     os.makedirs(config.SIGNAL_DIR, exist_ok=True)

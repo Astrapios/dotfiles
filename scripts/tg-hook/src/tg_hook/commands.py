@@ -62,6 +62,20 @@ def _interrupt_session(idx: str, sessions: dict):
     telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
 
 
+def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: str):
+    """Activate smart focus after a message is sent (not queued/prompt reply)."""
+    if not confirm.startswith("📨 Sent to"):
+        return
+    # Skip if manual focus or deepfocus already covers this wid
+    focus = state._load_focus_state()
+    if focus and focus["wid"] == win_idx:
+        return
+    deepfocus = state._load_deepfocus_state()
+    if deepfocus and deepfocus["wid"] == win_idx:
+        return
+    state._save_smartfocus_state(win_idx, pane, project)
+
+
 def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tuple[str | None, dict, str | None]:
     """Handle a command in active mode. Returns (action, sessions, last_win_idx).
     action is 'pause', 'quit', or None (continue processing)."""
@@ -169,6 +183,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             pane, project = sessions[idx]
             state._save_deepfocus_state(idx, pane, project)
             state._clear_focus_state()
+            state._clear_smartfocus_state()
             pw = tmux._get_pane_width(pane)
             df_content = content.clean_pane_status(tmux._capture_pane(pane, 20), pw) or "(empty)"
             telegram.tg_send(f"🔬 Deep focus on {state._wid_label(idx)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{df_content[-3000:]}\n```")
@@ -197,6 +212,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             pane, project = sessions[idx]
             state._save_focus_state(idx, pane, project)
             state._clear_deepfocus_state()
+            state._clear_smartfocus_state()
             pw = tmux._get_pane_width(pane)
             fc_content = content.clean_pane_status(tmux._capture_pane(pane, 20), pw) or "(empty)"
             telegram.tg_send(f"🔍 Focusing on {state._wid_label(idx)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{fc_content[-3000:]}\n```")
@@ -210,6 +226,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if text.lower() == "/unfocus":
         state._clear_focus_state()
         state._clear_deepfocus_state()
+        state._clear_smartfocus_state()
         telegram.tg_send("🔍 Focus stopped.")
         return None, sessions, last_win_idx
 
@@ -393,6 +410,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             confirm = routing.route_to_pane(pane, win_idx, prompt)
             telegram.tg_send(confirm)
             config._log(f"w{win_idx}", confirm[:100])
+            _maybe_activate_smartfocus(win_idx, pane, project, confirm)
             return None, sessions, win_idx
         else:
             telegram.tg_send(f"⚠️ No Claude session at `w{win_idx}`.\n{tmux.format_sessions_message(sessions)}",
@@ -408,6 +426,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             confirm = routing.route_to_pane(pane, name_idx, words[1].strip())
             telegram.tg_send(confirm)
             config._log(f"w{name_idx}", confirm[:100])
+            _maybe_activate_smartfocus(name_idx, pane, project, confirm)
             return None, sessions, name_idx
 
     # No prefix — route to last used or only session
@@ -422,6 +441,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         confirm = routing.route_to_pane(pane, target_idx, text)
         telegram.tg_send(confirm)
         config._log(f"w{target_idx}", confirm[:100])
+        _maybe_activate_smartfocus(target_idx, pane, project, confirm)
         return None, sessions, target_idx
     elif len(sessions) == 0:
         telegram.tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.")
@@ -513,9 +533,10 @@ def _handle_callback(callback: dict, sessions: dict,
             msgs = state._pop_queued_msgs(wid)
             if msgs and win_idx in sessions:
                 combined = "\n".join(m["text"] for m in msgs)
-                pane = sessions[win_idx][0]
+                pane, project = sessions[win_idx]
                 confirm = routing.route_to_pane(pane, win_idx, combined)
                 telegram.tg_send(confirm)
+                _maybe_activate_smartfocus(win_idx, pane, project, confirm)
                 last_win_idx = win_idx
             elif msgs:
                 telegram.tg_send(f"⚠️ Session `w{win_idx}` no longer active.")
