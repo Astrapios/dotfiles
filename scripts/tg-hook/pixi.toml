@@ -1,6 +1,6 @@
 [workspace]
 name = "tg-hook"
-version = "0.1.0"
+version = "0.2.0"
 description = "Telegram bridge for Claude Code hooks"
 channels = ["conda-forge"]
 platforms = ["linux-64"]
