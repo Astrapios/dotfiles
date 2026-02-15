@@ -11,6 +11,11 @@ import requests
 
 from tg_hook import config, telegram, tmux, state, content, commands, signals, routing
 
+# Notification category constants (see state._NOTIFICATION_CATEGORIES)
+_CAT_ERROR = 4
+_CAT_INTERRUPT = 5
+_CAT_MONITOR = 6
+_CAT_CONFIRM = 7
 
 # Track file mtimes for auto-reload
 _pkg_dir = pathlib.Path(__file__).parent
@@ -110,7 +115,7 @@ def cmd_listen():
             elif _reload_after and time.time() >= _reload_after:
                 _reload_after = None
                 config._log("listen", "Reloading...")
-                telegram.tg_send("🔄 Reloading...")
+                telegram.tg_send("🔄 Reloading...", silent=state._is_silent(_CAT_CONFIRM))
                 _restart_cmd = "import sys; sys.argv=['tg-hook','listen']; from tg_hook.cli import main; main()"
                 os.execv(sys.executable, [sys.executable, "-c", _restart_cmd])
         except OSError:
@@ -190,7 +195,8 @@ def cmd_listen():
                     continue
                 if content._detect_interrupted(raw):
                     label = state._wid_label(idx)
-                    telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.")
+                    telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
+                                     silent=state._is_silent(_CAT_INTERRUPT))
                     interrupted_notified.add(wid)
             # Clear for gone sessions
             interrupted_notified -= interrupted_notified - {f"w{i}" for i in sessions}
@@ -240,7 +246,7 @@ def cmd_listen():
                     h = hash(cleaned)
                     if h != focus_last_hash and focus_last_hash != 0:
                         header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
-                        telegram._send_long_message(header, cleaned, fw)
+                        telegram._send_long_message(header, cleaned, fw, silent=state._is_silent(_CAT_MONITOR))
                     focus_last_hash = h
         elif focus_target_wid:
             focus_target_wid = None
@@ -281,9 +287,11 @@ def cmd_listen():
                                 new_text = "\n".join(new).strip()
                                 if new_text:
                                     header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                                    telegram._send_long_message(header, new_text, sfw)
+                                    telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                                     smartfocus_has_sent = True
-                        smartfocus_prev_lines = cur_lines
+                                    smartfocus_prev_lines = cur_lines
+                        else:
+                            smartfocus_prev_lines = cur_lines
         elif smartfocus_target_wid:
             smartfocus_target_wid = None
             smartfocus_prev_lines = []
@@ -339,7 +347,7 @@ def cmd_listen():
                 chunk = "\n".join(deepfocus_pending).strip()
                 if chunk:
                     msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
-                    telegram.tg_send(msg)
+                    telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
                     config._save_last_msg(dfw, msg)
                 deepfocus_pending = []
                 deepfocus_last_new_ts = 0
@@ -402,14 +410,16 @@ def cmd_listen():
                         # Busy check — queue if session is working
                         if state._is_busy(wid):
                             state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`")
+                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`",
+                                             silent=state._is_silent(_CAT_CONFIRM))
                             last_win_idx = target_idx
                             continue
 
                         is_idle, typed_text = routing._pane_idle_state(pane)
                         if not is_idle:
                             state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`")
+                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`",
+                                             silent=state._is_silent(_CAT_CONFIRM))
                             last_win_idx = target_idx
                             continue
 
@@ -425,14 +435,14 @@ def cmd_listen():
                         subprocess.run(["bash", "-c", cmd], timeout=10)
                         state._mark_busy(wid)
                         confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{path}`"
-                        telegram.tg_send(confirm)
+                        telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
                         commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
                         last_win_idx = target_idx
                     else:
                         telegram.tg_send(f"📷 Photo saved to `{path}` — no target session.\n{tmux.format_sessions_message(sessions)}",
                                          reply_markup=tmux._sessions_keyboard(sessions))
                 else:
-                    telegram.tg_send("⚠️ Failed to download photo.")
+                    telegram.tg_send("⚠️ Failed to download photo.", silent=state._is_silent(_CAT_ERROR))
                 continue
 
             # Handle quit confirmation

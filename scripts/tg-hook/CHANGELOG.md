@@ -5,6 +5,17 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.8.0
+
+- Add notification control: `/notification` command to configure which message categories buzz your phone
+- Default: only permission (🔧) and stop (✅) messages are loud; all others are silent
+- Categories: 1=permission, 2=stop, 3=question/plan, 4=error, 5=interrupt, 6=monitor, 7=confirm
+- Use `noti 123` to set loud categories, `noti all` / `noti off` for all loud/silent
+- Config persists in `~/.config/tg_hook_notifications.json`
+- Alias: `noti` → `/notification`
+- Fix smartfocus stop message missing content: only update prev\_lines after sending 👁 update, so stop message correctly diffs against last-sent content
+- Fix stop message repeating next-task content: discard pane capture when no ❯ boundary found and pane is already busy with next task
+
 ## 0.7.5
 
 - Fix broken permission formatting: escape triple backticks in body content to prevent code block breakout

@@ -120,7 +120,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
                 rest = remaining_qs[1:]
                 n_opts = len(next_q.get("options", []))
                 msg = signals._format_question_msg(tag, proj, next_q)
-                telegram.tg_send(msg)
+                telegram.tg_send(msg, silent=state._is_silent(3))
                 config._save_last_msg(wid, msg)
                 state.save_active_prompt(wid, prompt_pane, total=n_opts + 2,
                                          free_text_at=n_opts,
@@ -131,7 +131,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
                 yn_kb = telegram._build_inline_keyboard([
                     [("\u2705 Yes", f"perm_{wid}_1"), ("\u274c No", f"perm_{wid}_2")],
                 ])
-                telegram.tg_send(msg, reply_markup=yn_kb)
+                telegram.tg_send(msg, reply_markup=yn_kb, silent=state._is_silent(3))
                 config._save_last_msg(wid, msg)
                 state.save_active_prompt(wid, prompt_pane, total=2,
                                          shortcuts={"y": 1, "yes": 1,

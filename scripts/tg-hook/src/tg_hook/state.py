@@ -473,6 +473,44 @@ def _clear_all_transient_state():
     _clear_smartfocus_state()
 
 
+NOTIFICATION_CONFIG_PATH = os.path.expanduser("~/.config/tg_hook_notifications.json")
+
+# Category definitions:
+# 1=permission, 2=stop, 3=question/plan, 4=error, 5=interrupt, 6=monitor, 7=confirm
+_NOTIFICATION_CATEGORIES = {
+    1: ("permission", "\U0001f527"),
+    2: ("stop", "\u2705"),
+    3: ("question", "\u2753"),
+    4: ("error", "\u26a0\ufe0f"),
+    5: ("interrupt", "\u23f9"),
+    6: ("monitor", "\U0001f50d"),
+    7: ("confirm", "\U0001f4e8"),
+}
+_DEFAULT_LOUD = {1, 2}
+
+
+def _load_notification_config() -> set[int]:
+    """Load loud notification categories. Returns default {1, 2} on failure."""
+    try:
+        with open(NOTIFICATION_CONFIG_PATH) as f:
+            data = json.load(f)
+        return set(data.get("loud", list(_DEFAULT_LOUD)))
+    except (OSError, json.JSONDecodeError):
+        return set(_DEFAULT_LOUD)
+
+
+def _save_notification_config(loud: set[int]):
+    """Persist loud notification categories."""
+    os.makedirs(os.path.dirname(NOTIFICATION_CONFIG_PATH), exist_ok=True)
+    with open(NOTIFICATION_CONFIG_PATH, "w") as f:
+        json.dump({"loud": sorted(loud)}, f)
+
+
+def _is_silent(category: int) -> bool:
+    """Check if a category should be sent silently (not in loud set)."""
+    return category not in _load_notification_config()
+
+
 def _clear_god_mode():
     """Disable god mode entirely."""
     for path in (config.GOD_MODE_PATH,

@@ -132,6 +132,7 @@ Once the listener is running, send these from Telegram:
 | `/saved [wN]` | Review queued messages |
 | `/last [wN]` | Re-send last Telegram message |
 | `/kill wN` | Exit a Claude session (Ctrl+C) |
+| `/notification [digits\|all\|off]` | Control which alerts buzz your phone |
 | `/stop` / `/start` | Pause / resume the listener |
 | `/quit` | Shut down the listener |
 
@@ -149,6 +150,7 @@ Once the listener is running, send these from Telegram:
 | `goff` | `/god off` |
 | `uf` | `/unfocus` |
 | `af` | `/autofocus` |
+| `noti` / `noti 123` | `/notification` / `/notification 123` |
 | `sv` | `/saved` |
 | `?` | `/help` |
 
@@ -178,6 +180,32 @@ When active, permissions are auto-accepted and you see compact receipts instead 
 ```
 
 God mode also enables "accept edits on" mode (Shift+Tab cycling) to reduce edit permission prompts.
+
+## Notification control
+
+By default, only permission (🔧) and stop (✅) messages buzz your phone. All other messages (monitoring updates, confirmations, errors) arrive silently.
+
+```
+/notification           Show current config and categories
+/notification 12        Set loud categories (1=permission, 2=stop)
+/notification 1234      Add question and error alerts
+/notification all       All categories loud
+/notification off       Everything silent
+```
+
+Categories:
+
+| # | Type | Default |
+|---|------|---------|
+| 1 | 🔧 Permission requests | loud |
+| 2 | ✅ Task completion | loud |
+| 3 | ❓ Questions / plan mode | silent |
+| 4 | ⚠️ Errors | silent |
+| 5 | ⏹ Interrupted sessions | silent |
+| 6 | 🔍 Focus/monitoring updates | silent |
+| 7 | 📨 Confirmations (sent, saved, reload) | silent |
+
+Config persists in `~/.config/tg_hook_notifications.json`.
 
 ## Tests
 

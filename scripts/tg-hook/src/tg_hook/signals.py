@@ -6,6 +6,12 @@ import time
 
 from tg_hook import config, telegram, tmux, content, state, routing
 
+# Notification category constants (see state._NOTIFICATION_CATEGORIES)
+_CAT_PERMISSION = 1
+_CAT_STOP = 2
+_CAT_QUESTION = 3
+_CAT_CONFIRM = 7
+
 
 def _format_question_msg(tag: str, project: str, question: dict) -> str:
     """Format a single AskUserQuestion question for Telegram."""
@@ -89,30 +95,39 @@ def process_signals(focused_wids: set[str] | None = None,
                     if content._has_response_start(raw):
                         break
                 cleaned = content.clean_pane_content(raw, "stop", pw) if raw else ""
+                # Guard: if no ❯ boundary in capture and pane is busy,
+                # the capture contains next-task content — discard it
+                if cleaned and raw:
+                    has_boundary = any(l.strip().startswith("❯") for l in raw.splitlines())
+                    if not has_boundary:
+                        idle, _ = routing._pane_idle_state(pane)
+                        if not idle:
+                            cleaned = ""
                 if cleaned and smartfocus_prev:
                     cur_lines = cleaned.splitlines()
                     new = content._compute_new_lines(smartfocus_prev, cur_lines)
+                    _stop_silent = state._is_silent(_CAT_STOP)
                     if new:
                         # New lines since last 👁 update — send tail
                         tail_text = "\n".join(new).strip()
                         if tail_text:
                             header = f"✅{tag} (`{project}`) finished:\n\n"
-                            telegram._send_long_message(header, tail_text, wid, reply_markup=stop_kb)
+                            telegram._send_long_message(header, tail_text, wid, reply_markup=stop_kb, silent=_stop_silent)
                         else:
-                            telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
+                            telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
                     elif smartfocus_has_sent:
                         # No new lines but 👁 already delivered content
-                        telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
+                        telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
                     else:
                         # No new lines AND never sent any 👁 — send full response
                         header = f"✅{tag} (`{project}`) finished:\n\n"
-                        telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
+                        telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=_stop_silent)
                 elif cleaned:
                     # No prev_lines (very fast response) — send full content
                     header = f"✅{tag} (`{project}`) finished:\n\n"
-                    telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
+                    telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
                 else:
-                    telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
+                    telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
             else:
                 raw = ""
                 if pane:
@@ -126,7 +141,7 @@ def process_signals(focused_wids: set[str] | None = None,
                     pw = 0
                 cleaned = content.clean_pane_content(raw, "stop", pw) if raw else "(could not capture pane)"
                 header = f"✅{tag} Claude Code (`{project}`) finished:\n\n"
-                telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
+                telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
 
             # Check for queued messages (always, regardless of focus)
             queued = state._load_queued_msgs(wid)
@@ -142,6 +157,7 @@ def process_signals(focused_wids: set[str] | None = None,
                 telegram.tg_send(
                     f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
                     reply_markup=saved_kb,
+                    silent=state._is_silent(_CAT_CONFIRM),
                 )
 
             # God mode: ensure accept-edits is on when session becomes idle
@@ -157,7 +173,8 @@ def process_signals(focused_wids: set[str] | None = None,
             is_plan_perm = "plan" in signal.get("message", "").lower()
             if w_idx and state._is_god_mode_for(w_idx) and not is_plan_perm:
                 desc = bash_cmd[:200] if bash_cmd else (perm_header or "permission")
-                telegram.tg_send(f"\U0001f531{tag} Auto-allowed (`{project}`): `{desc}`")
+                telegram.tg_send(f"\U0001f531{tag} Auto-allowed (`{project}`): `{desc}`",
+                                 silent=state._is_silent(_CAT_CONFIRM))
                 routing._select_option(pane, 1)
             else:
                 if options and not any(o.startswith("1.") for o in options):
@@ -181,16 +198,16 @@ def process_signals(focused_wids: set[str] | None = None,
                     else:
                         code_block = f"```\n{bash_cmd[:2000]}\n```"
                     msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
-                    telegram.tg_send(msg, reply_markup=perm_kb)
+                    telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                     config._save_last_msg(wid, msg)
                 else:
                     title = perm_header or "needs permission"
                     header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
                     if perm_body:
-                        telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text)
+                        telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
                     else:
                         msg = f"{header_str}{opts_text}"
-                        telegram.tg_send(msg, reply_markup=perm_kb)
+                        telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                         config._save_last_msg(wid, msg)
                 state.save_active_prompt(wid, pane, total=n,
                                          shortcuts={"y": 1, "yes": 1, "allow": 1,
@@ -230,7 +247,7 @@ def process_signals(focused_wids: set[str] | None = None,
             ])
             free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
             msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
-            telegram.tg_send(msg, reply_markup=plan_kb)
+            telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
             config._save_last_msg(wid, msg)
             state.save_active_prompt(wid, pane, total=total,
                                      free_text_at=free_text_at,
@@ -247,7 +264,7 @@ def process_signals(focused_wids: set[str] | None = None,
                              for i, opt in enumerate(opts, 1)]
                 q_rows = [q_buttons[i:i+3] for i in range(0, len(q_buttons), 3)]
                 q_kb = telegram._build_inline_keyboard(q_rows) if q_buttons else None
-                telegram.tg_send(msg, reply_markup=q_kb)
+                telegram.tg_send(msg, reply_markup=q_kb, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
                 first_opts = len(questions[0].get("options", []))
                 remaining = questions[1:] if len(questions) > 1 else None
@@ -257,7 +274,7 @@ def process_signals(focused_wids: set[str] | None = None,
                                          project=project)
             else:
                 msg = f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)"
-                telegram.tg_send(msg)
+                telegram.tg_send(msg, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
 
         try:

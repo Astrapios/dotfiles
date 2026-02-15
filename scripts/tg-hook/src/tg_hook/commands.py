@@ -7,9 +7,13 @@ import time
 
 from tg_hook import config, telegram, tmux, state, content, routing
 
+# Notification category constants (see state._NOTIFICATION_CATEGORIES)
+_CAT_ERROR = 4
+_CAT_CONFIRM = 7
 
 _ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus",
-                            "ga": "/god all", "goff": "/god off", "c": "/clear"}
+                            "ga": "/god all", "goff": "/god off", "c": "/clear",
+                            "noti": "/notification"}
 
 
 def _any_active_prompt() -> bool:
@@ -52,6 +56,10 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^c(\d+)$", stripped)
     if m:
         return f"/clear w{m.group(1)}"
+    # noti <args> → /notification <args>
+    m = re.match(r"^noti\s+(.+)$", stripped)
+    if m:
+        return f"/notification {m.group(1)}"
     return text
 
 
@@ -133,6 +141,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/autofocus` — toggle auto-monitor on send (default: on)",
             "`/clear [wN]` — reset transient state (prompts, busy, focus)",
             "`/god [wN|all|off]` — auto-accept permissions",
+            "`/notification [12..7|all|off]` — control which alerts buzz",
             "`/name wN [label]` — name a session",
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
             "`/interrupt [wN]` — interrupt current task (Esc)",
@@ -146,6 +155,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`af` autofocus | `sv` saved | `?` help",
             "`c` clear | `c4` clear w4",
             "`g4` god w4 | `ga` god all | `goff` god off",
+            "`noti` notification | `noti 123` set loud",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
             "*Photos:* send a photo to have Claude read it. Add `wN` in caption to target.",
@@ -302,6 +312,36 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("👁 Autofocus *off*.")
             else:
                 telegram.tg_send("👁 Autofocus *on*.")
+        return None, sessions, last_win_idx
+
+    # /notification [digits|all|off]
+    noti_m = re.match(r"^/notification(?:\s+(.+))?$", text, re.IGNORECASE)
+    if noti_m:
+        arg = noti_m.group(1).strip() if noti_m.group(1) else None
+        loud = state._load_notification_config()
+        if arg is None:
+            # Show current config
+            lines = ["🔔 *Notification categories:*\n"]
+            for num, (label, emoji) in sorted(state._NOTIFICATION_CATEGORIES.items()):
+                marker = "🔊" if num in loud else "🔇"
+                lines.append(f"  {num}. {emoji} {label} {marker}")
+            lines.append(f"\nLoud: `{''.join(str(n) for n in sorted(loud))}`" if loud else "\nLoud: _(none)_")
+            lines.append("\n`/notification 12` set loud | `all` | `off`")
+            telegram.tg_send("\n".join(lines))
+        elif arg.lower() == "all":
+            loud = set(state._NOTIFICATION_CATEGORIES.keys())
+            state._save_notification_config(loud)
+            telegram.tg_send(f"🔔 All notifications *loud*.")
+        elif arg.lower() == "off":
+            state._save_notification_config(set())
+            telegram.tg_send(f"🔔 All notifications *silent*.")
+        elif re.match(r"^\d+$", arg):
+            loud = {int(c) for c in arg if c.isdigit() and int(c) in state._NOTIFICATION_CATEGORIES}
+            state._save_notification_config(loud)
+            labels = ", ".join(state._NOTIFICATION_CATEGORIES[n][0] for n in sorted(loud) if n in state._NOTIFICATION_CATEGORIES)
+            telegram.tg_send(f"🔔 Loud: {labels or '_(none)_'}")
+        else:
+            telegram.tg_send("⚠️ Usage: `/notification [digits|all|off]`")
         return None, sessions, last_win_idx
 
     # /god [w4|all|off|off w4]
@@ -546,13 +586,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if win_idx in sessions:
             pane, project = sessions[win_idx]
             confirm = routing.route_to_pane(pane, win_idx, prompt)
-            telegram.tg_send(confirm)
+            telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(f"w{win_idx}", confirm[:100])
             _maybe_activate_smartfocus(win_idx, pane, project, confirm)
             return None, sessions, win_idx
         else:
             telegram.tg_send(f"⚠️ No Claude session at `w{win_idx}`.\n{tmux.format_sessions_message(sessions)}",
-                             reply_markup=tmux._sessions_keyboard(sessions))
+                             reply_markup=tmux._sessions_keyboard(sessions),
+                             silent=state._is_silent(_CAT_ERROR))
             return None, sessions, last_win_idx
 
     # Name prefix: first word matches a known session name
@@ -562,7 +603,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if name_idx is not None:
             pane, project = sessions[name_idx]
             confirm = routing.route_to_pane(pane, name_idx, words[1].strip())
-            telegram.tg_send(confirm)
+            telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(f"w{name_idx}", confirm[:100])
             _maybe_activate_smartfocus(name_idx, pane, project, confirm)
             return None, sessions, name_idx
@@ -577,15 +618,17 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if target_idx:
         pane, project = sessions[target_idx]
         confirm = routing.route_to_pane(pane, target_idx, text)
-        telegram.tg_send(confirm)
+        telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
         config._log(f"w{target_idx}", confirm[:100])
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)
         return None, sessions, target_idx
     elif len(sessions) == 0:
-        telegram.tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.")
+        telegram.tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.",
+                         silent=state._is_silent(_CAT_ERROR))
     else:
         telegram.tg_send(f"⚠️ Multiple sessions — prefix with `wN`.\n{tmux.format_sessions_message(sessions)}",
-                         reply_markup=tmux._sessions_keyboard(sessions))
+                         reply_markup=tmux._sessions_keyboard(sessions),
+                         silent=state._is_silent(_CAT_ERROR))
 
     return None, sessions, last_win_idx
 
@@ -625,7 +668,8 @@ def _handle_callback(callback: dict, sessions: dict,
             else:
                 label = f"Selected option {n}"
             w_idx = wid.lstrip("w")
-            telegram.tg_send(f"{label} in {state._wid_label(w_idx)}")
+            telegram.tg_send(f"{label} in {state._wid_label(w_idx)}",
+                             silent=state._is_silent(_CAT_CONFIRM))
             config._log("callback", f"perm {wid} option {n}")
         else:
             telegram._answer_callback_query(cb_id, "Prompt expired")
@@ -639,7 +683,7 @@ def _handle_callback(callback: dict, sessions: dict,
         if win_idx in sessions:
             pane = sessions[win_idx][0]
             confirm = routing.route_to_pane(pane, win_idx, n_str)
-            telegram.tg_send(confirm)
+            telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             last_win_idx = win_idx
         return sessions, last_win_idx, None
 
@@ -673,16 +717,18 @@ def _handle_callback(callback: dict, sessions: dict,
                 combined = "\n".join(m["text"] for m in msgs)
                 pane, project = sessions[win_idx]
                 confirm = routing.route_to_pane(pane, win_idx, combined)
-                telegram.tg_send(confirm)
+                telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
                 _maybe_activate_smartfocus(win_idx, pane, project, confirm)
                 last_win_idx = win_idx
             elif msgs:
-                telegram.tg_send(f"⚠️ Session `w{win_idx}` no longer active.")
+                telegram.tg_send(f"⚠️ Session `w{win_idx}` no longer active.",
+                                 silent=state._is_silent(_CAT_ERROR))
             else:
                 telegram.tg_send("No saved messages to send.")
         else:  # discard
             state._pop_queued_msgs(wid)
-            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(win_idx)}.")
+            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(win_idx)}.",
+                             silent=state._is_silent(_CAT_CONFIRM))
         return sessions, last_win_idx, None
 
     config._log("callback", f"unknown callback_data: {cb_data}")

@@ -2403,7 +2403,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("autofocus", names)
         self.assertIn("saved", names)
         self.assertIn("clear", names)
-        self.assertEqual(len(commands), 17)
+        self.assertIn("notification", names)
+        self.assertEqual(len(commands), 18)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -6263,6 +6264,210 @@ class TestPhotoAutofocus(unittest.TestCase):
         tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "💾 Photo saved for `w4` (busy):\n`/tmp/photo.jpg`")
         self.assertIsNone(tg._load_smartfocus_state())
+
+
+class TestNotificationConfig(unittest.TestCase):
+    """Test notification config persistence and _is_silent."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_noti"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        self._orig_noti_path = tg.state.NOTIFICATION_CONFIG_PATH
+        tg.state.NOTIFICATION_CONFIG_PATH = os.path.join(self.signal_dir, "_noti.json")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.state.NOTIFICATION_CONFIG_PATH = self._orig_noti_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_default_loud_set(self):
+        """Default loud categories are 1 (permission) and 2 (stop)."""
+        loud = tg._load_notification_config()
+        self.assertEqual(loud, {1, 2})
+
+    def test_is_silent_default(self):
+        """Permission/stop are loud by default, others are silent."""
+        self.assertFalse(tg._is_silent(1))  # permission = loud
+        self.assertFalse(tg._is_silent(2))  # stop = loud
+        self.assertTrue(tg._is_silent(3))   # question = silent
+        self.assertTrue(tg._is_silent(4))   # error = silent
+        self.assertTrue(tg._is_silent(5))   # interrupt = silent
+        self.assertTrue(tg._is_silent(6))   # monitor = silent
+        self.assertTrue(tg._is_silent(7))   # confirm = silent
+
+    def test_save_and_load(self):
+        """Save/load round-trips correctly."""
+        tg._save_notification_config({1, 3, 5})
+        loud = tg._load_notification_config()
+        self.assertEqual(loud, {1, 3, 5})
+
+    def test_save_empty(self):
+        """Save empty set (all silent)."""
+        tg._save_notification_config(set())
+        self.assertEqual(tg._load_notification_config(), set())
+        self.assertTrue(tg._is_silent(1))
+        self.assertTrue(tg._is_silent(2))
+
+    def test_save_all(self):
+        """Save all categories as loud."""
+        all_cats = set(tg.state._NOTIFICATION_CATEGORIES.keys())
+        tg._save_notification_config(all_cats)
+        for cat in all_cats:
+            self.assertFalse(tg._is_silent(cat))
+
+    def test_corrupt_file_returns_default(self):
+        """Corrupt JSON returns default."""
+        with open(tg.state.NOTIFICATION_CONFIG_PATH, "w") as f:
+            f.write("not json")
+        self.assertEqual(tg._load_notification_config(), {1, 2})
+
+
+class TestNotificationCommand(unittest.TestCase):
+    """Test /notification command handler."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_noti_cmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        self._orig_noti_path = tg.state.NOTIFICATION_CONFIG_PATH
+        tg.state.NOTIFICATION_CONFIG_PATH = os.path.join(self.signal_dir, "_noti.json")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.state.NOTIFICATION_CONFIG_PATH = self._orig_noti_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_bare_notification_shows_config(self, mock_send):
+        action, _, _ = tg._handle_command("/notification", self.sessions, "4")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Notification categories", msg)
+        self.assertIn("permission", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_set_digits(self, mock_send):
+        tg._handle_command("/notification 1234", self.sessions, "4")
+        loud = tg._load_notification_config()
+        self.assertEqual(loud, {1, 2, 3, 4})
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_set_all(self, mock_send):
+        tg._handle_command("/notification all", self.sessions, "4")
+        loud = tg._load_notification_config()
+        self.assertEqual(loud, set(tg.state._NOTIFICATION_CATEGORIES.keys()))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_set_off(self, mock_send):
+        tg._handle_command("/notification off", self.sessions, "4")
+        loud = tg._load_notification_config()
+        self.assertEqual(loud, set())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_invalid_arg(self, mock_send):
+        tg._handle_command("/notification foo", self.sessions, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Usage", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_ignores_invalid_digits(self, mock_send):
+        """Digits not in category map (0, 8, 9) are ignored."""
+        tg._handle_command("/notification 089", self.sessions, "4")
+        loud = tg._load_notification_config()
+        self.assertEqual(loud, set())  # 0, 8, 9 not in categories
+
+
+class TestNotificationAlias(unittest.TestCase):
+    """Test noti alias resolves to /notification."""
+
+    def test_bare_noti(self):
+        result = tg._resolve_alias("noti", False)
+        self.assertEqual(result, "/notification")
+
+    def test_noti_with_args(self):
+        result = tg._resolve_alias("noti 123", False)
+        self.assertEqual(result, "/notification 123")
+
+    def test_noti_all(self):
+        result = tg._resolve_alias("noti all", False)
+        self.assertEqual(result, "/notification all")
+
+    def test_noti_off(self):
+        result = tg._resolve_alias("noti off", False)
+        self.assertEqual(result, "/notification off")
+
+    def test_noti_suppressed_during_prompt(self):
+        """Bare noti is suppressed during active prompt (ambiguous)."""
+        result = tg._resolve_alias("noti", True)
+        self.assertEqual(result, "noti")
+
+    def test_noti_with_args_during_prompt(self):
+        """noti with args always resolves (unambiguous)."""
+        result = tg._resolve_alias("noti 12", True)
+        self.assertEqual(result, "/notification 12")
+
+
+class TestSilentParameter(unittest.TestCase):
+    """Test that tg_send passes disable_notification when silent=True."""
+
+    @patch("requests.post")
+    def test_tg_send_silent(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"result": {"message_id": 1}},
+        )
+        tg.tg_send("test", silent=True)
+        payload = mock_post.call_args[1]["json"]
+        self.assertTrue(payload.get("disable_notification"))
+
+    @patch("requests.post")
+    def test_tg_send_not_silent(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"result": {"message_id": 1}},
+        )
+        tg.tg_send("test", silent=False)
+        payload = mock_post.call_args[1]["json"]
+        self.assertNotIn("disable_notification", payload)
+
+    @patch("requests.post")
+    def test_tg_send_silent_fallback(self, mock_post):
+        """Silent flag preserved in Markdown fallback (plain text)."""
+        # First call returns 400 (Markdown fail), second succeeds
+        mock_post.side_effect = [
+            MagicMock(status_code=400),
+            MagicMock(
+                status_code=200,
+                json=lambda: {"result": {"message_id": 1}},
+                raise_for_status=lambda: None,
+            ),
+        ]
+        tg.tg_send("test", silent=True)
+        payload = mock_post.call_args_list[1][1]["json"]
+        self.assertTrue(payload.get("disable_notification"))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_send_long_message_passes_silent(self, mock_send):
+        tg._send_long_message("Header\n", "body text", "w4", silent=True)
+        _, kwargs = mock_send.call_args
+        self.assertTrue(kwargs.get("silent"))
+
+
+class TestHelpIncludesNotification(unittest.TestCase):
+    """Test /help mentions /notification."""
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_help_includes_notification(self, mock_send):
+        tg._handle_command("/help", {"4": ("0:4.0", "myproj")}, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("/notification", msg)
+        self.assertIn("noti", msg)
 
 
 if __name__ == "__main__":

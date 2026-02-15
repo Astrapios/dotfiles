@@ -10,13 +10,16 @@ import requests
 from tg_hook import config
 
 
-def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None) -> int:
+def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
+            silent: bool = False) -> int:
     """Send a message to Telegram. Returns message_id."""
     chat_id = chat_id or config.CHAT_ID
     text = text.strip()[:config.TG_MAX] or "(empty)"
     payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
+    if silent:
+        payload["disable_notification"] = True
     r = requests.post(
         f"https://api.telegram.org/bot{config.BOT}/sendMessage",
         json=payload,
@@ -26,6 +29,8 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None) -> i
         payload_plain: dict = {"chat_id": chat_id, "text": text}
         if reply_markup is not None:
             payload_plain["reply_markup"] = reply_markup
+        if silent:
+            payload_plain["disable_notification"] = True
         r = requests.post(
             f"https://api.telegram.org/bot{config.BOT}/sendMessage",
             json=payload_plain,
@@ -36,7 +41,8 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None) -> i
 
 
 def _send_long_message(header: str, body: str, wid: str = "",
-                       reply_markup: dict | None = None, footer: str = ""):
+                       reply_markup: dict | None = None, footer: str = "",
+                       silent: bool = False):
     """Send a header + body as one or more Telegram messages, chunking if needed.
 
     Body is wrapped in ``` code blocks. Footer is appended after the closing ```.
@@ -52,7 +58,7 @@ def _send_long_message(header: str, body: str, wid: str = "",
 
     if len(body) <= chunk_size:
         msg = f"{header}```\n{body}\n```{footer_str}"
-        tg_send(msg, reply_markup=reply_markup)
+        tg_send(msg, reply_markup=reply_markup, silent=silent)
         config._save_last_msg(wid, msg)
         return
 
@@ -80,7 +86,7 @@ def _send_long_message(header: str, body: str, wid: str = "",
         suffix = footer_str if is_last else ""
         msg = f"{label}```\n{chunk}\n```{suffix}"
         kb = reply_markup if is_last else None
-        tg_send(msg, reply_markup=kb)
+        tg_send(msg, reply_markup=kb, silent=silent)
     if chunks:
         config._save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")
 
@@ -244,6 +250,7 @@ def _set_bot_commands():
         {"command": "clear", "description": "Reset transient state (prompts, busy, focus)"},
         {"command": "autofocus", "description": "Toggle auto-monitor on message send"},
         {"command": "god", "description": "Auto-accept permissions (god mode)"},
+        {"command": "notification", "description": "Control which alerts buzz your phone"},
         {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},
         {"command": "interrupt", "description": "Interrupt current task (Esc)"},
         {"command": "last", "description": "Re-send last message for a session"},
