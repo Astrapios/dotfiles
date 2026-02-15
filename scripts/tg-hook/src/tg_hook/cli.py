@@ -74,7 +74,9 @@ def cmd_hook():
                     pass
             state.write_signal("permission", data, cmd=bash_cmd, message=msg)
     elif event == "PreToolUse":
-        if tool == "AskUserQuestion":
+        if tool == "EnterPlanMode":
+            state.write_signal("plan", data)
+        elif tool == "AskUserQuestion":
             state.write_signal("question", data, questions=data.get("tool_input", {}).get("questions", []))
         elif tool == "Bash":
             os.makedirs(config.SIGNAL_DIR, exist_ok=True)

@@ -699,6 +699,75 @@ class TestCmdHook(unittest.TestCase):
         self.assertEqual(signal["cmd"], "")
 
 
+class TestCmdHookPlanMode(unittest.TestCase):
+    """Test that EnterPlanMode PreToolUse writes a plan signal."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_plan"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        self._orig_enabled = tg.config.TG_HOOKS_ENABLED
+        tg.config.TG_HOOKS_ENABLED = True
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.TG_HOOKS_ENABLED = self._orig_enabled
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch("sys.stdin")
+    def test_plan_signal_written(self, mock_stdin, mock_wid):
+        data = {"hook_event_name": "PreToolUse", "tool_name": "EnterPlanMode",
+                "tool_input": {}, "cwd": "/tmp/test"}
+        mock_stdin.read.return_value = json.dumps(data)
+        os.environ["TMUX_PANE"] = "%20"
+
+        tg.cmd_hook()
+
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(len(signals), 1)
+        with open(os.path.join(self.signal_dir, signals[0])) as f:
+            signal = json.load(f)
+        self.assertEqual(signal["event"], "plan")
+
+
+class TestPlanSignalBypassesGodMode(unittest.TestCase):
+    """Test that plan signals are always sent to Telegram, never auto-accepted."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_plan_god"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+        tg.state._clear_god_mode()
+
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("wants to enter plan mode", "", ["1. Yes", "2. No"], ""))
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("time.sleep")
+    def test_plan_not_auto_accepted_in_god_mode(self, mock_sleep, mock_send, mock_perm):
+        """Even with god mode on, plan signal sends to Telegram instead of auto-accepting."""
+        tg.state._set_god_mode("all", True)
+        # Write a plan signal
+        tg.state.write_signal("plan", {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "EnterPlanMode",
+            "cwd": "/tmp/test",
+        })
+        tg.signals.process_signals()
+        # Should have sent a Telegram message (not auto-accepted)
+        mock_send.assert_called()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("plan mode", msg)
+
+
 import time  # needed for _write_signal
 
 

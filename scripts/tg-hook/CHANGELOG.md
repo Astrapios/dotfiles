@@ -5,6 +5,11 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.5.0
+
+- Forward plan mode permission to Telegram (never auto-accepted, even in god mode)
+- Add `EnterPlanMode` to PreToolUse hook matchers in `claude_settings.json`
+
 ## 0.4.0
 
 - Detect interrupted sessions (Esc pressed mid-response) and notify via Telegram

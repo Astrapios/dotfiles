@@ -150,6 +150,30 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                                          shortcuts={"y": 1, "yes": 1, "allow": 1,
                                                     "n": n, "no": n, "deny": n})
 
+        elif event == "plan":
+            # PreToolUse fires before the dialog — wait for it to appear
+            time.sleep(2)
+            perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
+            if options and not any(o.startswith("1.") for o in options):
+                options.insert(0, "1. Yes")
+            max_opt = 0
+            for o in options:
+                m_opt = re.match(r'(\d+)', o)
+                if m_opt:
+                    max_opt = max(max_opt, int(m_opt.group(1)))
+            opts_text = "\n".join(options)
+            n = max_opt or 2
+            plan_kb = telegram._build_inline_keyboard([
+                [("\u2705 Approve", f"perm_{wid}_1"),
+                 ("\u274c Deny", f"perm_{wid}_{n}")],
+            ])
+            msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}"
+            telegram.tg_send(msg, reply_markup=plan_kb)
+            config._save_last_msg(wid, msg)
+            state.save_active_prompt(wid, pane, total=n,
+                                     shortcuts={"y": 1, "yes": 1, "approve": 1,
+                                                "n": n, "no": n, "deny": n})
+
         elif event == "question":
             questions = signal.get("questions", [])
             if questions:
