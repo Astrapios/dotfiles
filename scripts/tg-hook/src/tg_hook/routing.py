@@ -171,8 +171,16 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
         busy_ts = state._busy_since(wid)
         recently_sent = busy_ts and (time.time() - busy_ts < 5)
         if is_idle and not recently_sent:
-            # Stop signal was missed (crash, newline issue, etc.) — self-heal
-            state._clear_busy(wid)
+            # Double-check: transient states (auto-reload, brief ❯ flash)
+            # can cause a false positive. Wait and re-check.
+            time.sleep(0.5)
+            is_idle2, typed_text = _pane_idle_state(pane)
+            if is_idle2:
+                # Stop signal was missed (crash, newline issue, etc.) — self-heal
+                state._clear_busy(wid)
+            else:
+                state._save_queued_msg(wid, text)
+                return f"💾 Saved for {label} (busy):\n`{text[:500]}`"
         else:
             state._save_queued_msg(wid, text)
             return f"💾 Saved for {label} (busy):\n`{text[:500]}`"

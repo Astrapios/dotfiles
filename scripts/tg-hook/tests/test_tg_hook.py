@@ -3437,7 +3437,8 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
     @patch("subprocess.run")
     @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
     @patch.object(tg.state, "load_active_prompt", return_value=None)
-    def test_busy_self_heals_when_pane_idle(self, mock_prompt, mock_idle, mock_run):
+    @patch("time.sleep")
+    def test_busy_self_heals_when_pane_idle(self, mock_sleep, mock_prompt, mock_idle, mock_run):
         """If busy file exists but pane is idle and grace period passed, self-heal and send."""
         tg._mark_busy("w4")
         # Pretend busy was set 10s ago (past the 5s grace period)
@@ -3446,6 +3447,8 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
         self.assertIn("Sent to", result)
         # Busy file should be re-set (cleared then re-marked by send)
         self.assertTrue(tg._is_busy("w4"))
+        # Double-check delay should have been called
+        mock_sleep.assert_called_with(0.5)
 
     @patch("subprocess.run")
     @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
@@ -3456,6 +3459,20 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
         # busy_since is just now — within grace period
         result = tg.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Saved", result)
+
+    @patch("subprocess.run")
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch("time.sleep")
+    def test_busy_self_heal_double_check_catches_transient(self, mock_sleep, mock_prompt, mock_run):
+        """If first idle check passes but second fails, queue the message."""
+        tg._mark_busy("w4")
+        # First check: idle (transient). Second check: busy (real state).
+        with patch.object(tg.routing, "_pane_idle_state",
+                          side_effect=[(True, ""), (False, "")]):
+            with patch.object(tg.state, "_busy_since", return_value=time.time() - 10):
+                result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        self.assertIn("Saved", result)
+        mock_sleep.assert_called_once_with(0.5)
 
 
 class TestSavedCommand(unittest.TestCase):
