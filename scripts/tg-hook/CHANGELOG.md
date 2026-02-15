@@ -5,6 +5,10 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.3.1
+
+- Fix idle detection: recognize Claude Code status bar ("esc to interrupt", file change summaries) as UI chrome
+
 ## 0.3.0
 
 - Add `tg_send_document` for sending files as documents (preserves original quality)

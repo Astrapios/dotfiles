@@ -43,6 +43,11 @@ def _is_ui_chrome(s: str) -> bool:
         return True
     if re.match(r'^\+\d+ more lines \(', s):
         return True
+    # Status bar below prompt: "1 file +2 -2 · esc to interrupt"
+    if "esc to interrupt" in s:
+        return True
+    if re.match(r'^\d+ files? [+-]', s):
+        return True
     return False
 
 

@@ -4231,6 +4231,15 @@ class TestIsUiChrome(unittest.TestCase):
     def test_bullet(self):
         self.assertFalse(tg._is_ui_chrome("● Response text"))
 
+    def test_status_bar_esc_to_interrupt(self):
+        self.assertTrue(tg._is_ui_chrome("1 file +2 -2 · esc to interrupt"))
+
+    def test_status_bar_multiple_files(self):
+        self.assertTrue(tg._is_ui_chrome("3 files +50 -10 · esc to interrupt"))
+
+    def test_status_bar_file_count_no_interrupt(self):
+        self.assertTrue(tg._is_ui_chrome("1 file +2 -2"))
+
     def test_short_separator_not_chrome(self):
         """Separators need at least 3 chars."""
         self.assertFalse(tg._is_ui_chrome("──"))
@@ -5256,6 +5265,28 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
         mock_capture.return_value = (
             "❯ \n"
             "+12 more lines (ctrl+e to expand)\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_prompt_above_status_bar(self, mock_capture):
+        """Prompt above separator + status bar (esc to interrupt) is idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "  1 file +2 -2 · esc to interrupt\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_prompt_above_status_bar_no_interrupt(self, mock_capture):
+        """Prompt above separator + file count status bar is idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "  3 files +50 -10\n"
         )
         is_idle, typed = tg._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
