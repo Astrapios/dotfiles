@@ -3061,6 +3061,27 @@ class TestFormatSessionsWithNames(unittest.TestCase):
         stripped = re.sub(r'`[^`]+`', '', stripped)
         self.assertNotIn('_', stripped)
 
+    def test_god_mode_indicator(self):
+        """God mode sessions show 🔱 indicator."""
+        tg._set_god_mode("4", True)
+        sessions = {"4": ("0:4.0", "proj"), "5": ("0:5.0", "other")}
+        msg = tg.format_sessions_message(sessions)
+        # w4 should have god mode indicator
+        for line in msg.splitlines():
+            if "`w4`" in line:
+                self.assertIn("🔱", line)
+            if "`w5`" in line:
+                self.assertNotIn("🔱", line)
+
+    def test_god_mode_all_indicator(self):
+        """God mode 'all' shows indicator on every session."""
+        tg._set_god_mode("all", True)
+        sessions = {"4": ("0:4.0", "proj"), "5": ("0:5.0", "other")}
+        msg = tg.format_sessions_message(sessions)
+        for line in msg.splitlines():
+            if "`w4`" in line or "`w5`" in line:
+                self.assertIn("🔱", line)
+
 
 class TestDeepFocusCallback(unittest.TestCase):
     """Test cmd_deepfocus callback handler."""

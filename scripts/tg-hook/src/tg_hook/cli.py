@@ -54,12 +54,15 @@ def cmd_hook():
     event = data.get("hook_event_name", "")
     tool = data.get("tool_name", "")
 
+    config._log("hook", f"event={event} tool={tool} keys={list(data.keys())}")
+
     if event == "Stop":
         state.write_signal("stop", data)
     elif event == "Notification":
         ntype = data.get("notification_type", "")
+        msg = data.get("message", "")
+        config._log("hook", f"notification type={ntype} msg={msg[:200]}")
         if ntype == "permission_prompt":
-            msg = data.get("message", "")
             if "needs your attention" in msg:
                 return
             wid = tmux.get_window_id() or "unknown"
