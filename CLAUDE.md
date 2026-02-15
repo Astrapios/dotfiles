@@ -47,6 +47,12 @@ A pip-installable Python package bridging Claude Code sessions to Telegram. Stru
 
 **tmux send-keys pattern:** Arrow key commands must be sent in a single `tmux send-keys` call (e.g., `tmux send-keys -t pane Down Down Enter`), with `sleep 0.1` between navigation and action via `bash -c` chaining. Individual subprocess calls are too slow and keys get dropped.
 
+### Versioning
+
+tg-hook uses semver pre-1.0. Bump version in `pyproject.toml` and add a `CHANGELOG.md` entry in the same commit as the change:
+- **MINOR** (0.X.0): new user-facing feature — new CLI command, new Telegram command, new public API function
+- **PATCH** (0.0.X): bug fixes, refactors, test-only or docs-only changes
+
 ### Credentials
 
 Telegram secrets stored in `~/.config/tg_hook.env` (not tracked). Hook activation requires env var `CLAUDE_TG_HOOKS=1` (set in `claude_settings.json`).
