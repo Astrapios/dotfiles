@@ -64,8 +64,15 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
         if event == "stop":
             state._clear_busy(wid)
             sf = state._load_smartfocus_state()
-            if sf and sf["wid"] == w_idx:
+            was_smartfocus = sf and sf["wid"] == w_idx
+            if was_smartfocus:
                 state._clear_smartfocus_state()
+
+            stop_kb = telegram._build_inline_keyboard([[
+                ("\U0001f4cb Status", f"cmd_status_{wid}"),
+                ("\U0001f50d Focus", f"cmd_focus_{wid}"),
+            ]])
+
             if focused_wids and w_idx in focused_wids:
                 pass
             else:
@@ -81,27 +88,23 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                     pw = 0
                 cleaned = content.clean_pane_content(raw, "stop", pw) if raw else "(could not capture pane)"
                 header = f"✅{tag} Claude Code (`{project}`) finished:\n\n"
-                stop_kb = telegram._build_inline_keyboard([[
-                    ("\U0001f4cb Status", f"cmd_status_{wid}"),
-                    ("\U0001f50d Focus", f"cmd_focus_{wid}"),
-                ]])
                 telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
 
-                # Check for queued messages
-                queued = state._load_queued_msgs(wid)
-                if queued:
-                    preview_lines = []
-                    for i, m in enumerate(queued, 1):
-                        preview_lines.append(f"{i}. `{m['text'][:100]}`")
-                    preview = "\n".join(preview_lines)
-                    saved_kb = telegram._build_inline_keyboard([[
-                        ("\u2709\ufe0f Send", f"saved_send_{wid}"),
-                        ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
-                    ]])
-                    telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
-                        reply_markup=saved_kb,
-                    )
+            # Check for queued messages (always, regardless of focus)
+            queued = state._load_queued_msgs(wid)
+            if queued:
+                preview_lines = []
+                for i, m in enumerate(queued, 1):
+                    preview_lines.append(f"{i}. `{m['text'][:100]}`")
+                preview = "\n".join(preview_lines)
+                saved_kb = telegram._build_inline_keyboard([[
+                    ("\u2709\ufe0f Send", f"saved_send_{wid}"),
+                    ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                ]])
+                telegram.tg_send(
+                    f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
+                    reply_markup=saved_kb,
+                )
 
             # God mode: ensure accept-edits is on when session becomes idle
             if pane and w_idx and state._is_god_mode_for(w_idx):
@@ -112,8 +115,9 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
             bash_cmd = signal.get("cmd", "")
             perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
 
-            # God mode: auto-accept and send compact receipt
-            if w_idx and state._is_god_mode_for(w_idx):
+            # God mode: auto-accept and send compact receipt (skip plan approvals)
+            is_plan_perm = "plan" in signal.get("message", "").lower()
+            if w_idx and state._is_god_mode_for(w_idx) and not is_plan_perm:
                 desc = bash_cmd[:200] if bash_cmd else (perm_header or "permission")
                 telegram.tg_send(f"\U0001f531{tag} Auto-allowed (`{project}`): `{desc}`")
                 routing._select_option(pane, 1)
@@ -148,6 +152,7 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                         config._save_last_msg(wid, msg)
                 state.save_active_prompt(wid, pane, total=n,
                                          shortcuts={"y": 1, "yes": 1, "allow": 1,
+                                                    "approve": 1,
                                                     "n": n, "no": n, "deny": n})
 
         elif event == "plan":
@@ -162,17 +167,34 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                 if m_opt:
                     max_opt = max(max_opt, int(m_opt.group(1)))
             opts_text = "\n".join(options)
-            n = max_opt or 2
+            deny_at = max_opt or 2
+
+            # Check if dialog has a free text option ("Type something.")
+            free_text_at = None
+            total = deny_at
+            try:
+                raw = tmux._capture_pane(pane, 10)
+                for line in raw.splitlines():
+                    if re.match(r'^\s*Type (something|your)', line.strip()):
+                        free_text_at = deny_at
+                        total = deny_at + 2  # + "Type something" + "Chat about this"
+                        break
+            except Exception:
+                pass
+
             plan_kb = telegram._build_inline_keyboard([
                 [("\u2705 Approve", f"perm_{wid}_1"),
-                 ("\u274c Deny", f"perm_{wid}_{n}")],
+                 ("\u274c Deny", f"perm_{wid}_{deny_at}")],
             ])
-            msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}"
+            free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
+            msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
             telegram.tg_send(msg, reply_markup=plan_kb)
             config._save_last_msg(wid, msg)
-            state.save_active_prompt(wid, pane, total=n,
+            state.save_active_prompt(wid, pane, total=total,
+                                     free_text_at=free_text_at,
                                      shortcuts={"y": 1, "yes": 1, "approve": 1,
-                                                "n": n, "no": n, "deny": n})
+                                                "n": deny_at, "no": deny_at,
+                                                "deny": deny_at})
 
         elif event == "question":
             questions = signal.get("questions", [])

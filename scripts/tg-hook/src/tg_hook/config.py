@@ -26,6 +26,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "") or _creds.get("TELEGRAM_CHAT_ID
 TG_HOOKS_ENABLED = os.environ.get("CLAUDE_TG_HOOKS", "") == "1"
 TG_MAX = 4096  # Telegram message character limit
 SIGNAL_DIR = "/tmp/tg_hook_signals"
+GOD_MODE_PATH = os.path.expanduser("~/.config/tg_hook_god_mode.json")
 
 
 def _log(tag: str, msg: str):

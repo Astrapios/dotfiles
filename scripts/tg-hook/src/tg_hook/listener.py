@@ -200,8 +200,6 @@ def cmd_listen():
             focused_wids.add(focus_state["wid"])
         if deepfocus_state:
             focused_wids.add(deepfocus_state["wid"])
-        if smartfocus_state:
-            focused_wids.add(smartfocus_state["wid"])
 
         signal_wid = signals.process_signals(focused_wids=focused_wids or None)
         if signal_wid:

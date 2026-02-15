@@ -5,6 +5,24 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.6.0
+
+- Send full stop message ("✅ finished") when autofocus session completes, instead of suppressing
+- Show queued messages after stop signal regardless of focus mode
+- Persistent god mode: stored in `~/.config/` instead of `/tmp` (auto-migrates old state)
+- Detect free text option in plan mode dialogs and support text answers
+- Fix stale prompt cleanup: use idle detection (❯ visible) instead of unreliable `_pane_has_prompt`
+- Return guidance message for unrecognized prompt replies (ExitPlanMode fix from 0.5.3)
+
+## 0.5.2
+
+- Add "approve" shortcut for permission prompts (previously only plan events accepted it)
+- Return guidance message when text reply doesn't match prompt options instead of silently saving
+
+## 0.5.1
+
+- Fix god mode auto-approving ExitPlanMode permission (plan approval now always goes to Telegram)
+
 ## 0.5.0
 
 - Forward plan mode permission to Telegram (never auto-accepted, even in god mode)

@@ -34,7 +34,7 @@ def _clear_signals(include_state: bool = False):
     Queued messages (_queued_) and session names (_names) are always preserved."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return
-    _persist = ("_queued_", "_names", "_god_mode")
+    _persist = ("_queued_", "_names")
     for f in os.listdir(config.SIGNAL_DIR):
         if f.startswith(_persist):
             continue
@@ -94,7 +94,13 @@ def _pane_has_prompt(pane: str) -> bool:
 
 
 def _cleanup_stale_prompts():
-    """Remove active prompt files whose pane no longer shows a dialog."""
+    """Remove active prompt files whose pane is idle (prompt was answered).
+
+    Uses idle detection (❯ prompt visible) instead of _pane_has_prompt,
+    which fails for ExitPlanMode and other non-numbered dialogs.
+    """
+    from tg_hook import routing  # deferred to avoid circular import
+
     if not os.path.isdir(config.SIGNAL_DIR):
         return
     for fname in os.listdir(config.SIGNAL_DIR):
@@ -105,8 +111,10 @@ def _cleanup_stale_prompts():
             with open(path) as f:
                 st = json.load(f)
             pane = st.get("pane", "")
-            if pane and not _pane_has_prompt(pane):
-                os.remove(path)
+            if pane:
+                idle, _ = routing._pane_idle_state(pane)
+                if idle:
+                    os.remove(path)
         except (OSError, json.JSONDecodeError):
             try:
                 os.remove(path)
@@ -376,19 +384,37 @@ def _is_god_mode_for(w_idx: str) -> bool:
 
 def _god_mode_wids() -> list[str]:
     """Return list of god-mode wids (may contain 'all')."""
-    path = os.path.join(config.SIGNAL_DIR, "_god_mode.json")
-    try:
-        with open(path) as f:
-            return json.load(f).get("wids", [])
-    except (OSError, json.JSONDecodeError):
-        return []
+    # Check persistent location first, fall back to legacy /tmp path
+    for path in (config.GOD_MODE_PATH,
+                 os.path.join(config.SIGNAL_DIR, "_god_mode.json")):
+        try:
+            with open(path) as f:
+                wids = json.load(f).get("wids", [])
+            # Migrate legacy file to persistent location
+            if path != config.GOD_MODE_PATH and wids:
+                _set_god_mode(wids[0], True)  # triggers write to persistent path
+                for w in wids[1:]:
+                    _set_god_mode(w, True)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            return wids
+        except (OSError, json.JSONDecodeError):
+            continue
+    return []
 
 
 def _set_god_mode(w_idx: str, enabled: bool):
     """Enable/disable god mode for a specific wid or 'all'."""
-    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
-    path = os.path.join(config.SIGNAL_DIR, "_god_mode.json")
-    wids = _god_mode_wids()
+    path = config.GOD_MODE_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    wids = []
+    try:
+        with open(path) as f:
+            wids = json.load(f).get("wids", [])
+    except (OSError, json.JSONDecodeError):
+        pass
     if enabled:
         if w_idx not in wids:
             wids.append(w_idx)
@@ -406,8 +432,9 @@ def _set_god_mode(w_idx: str, enabled: bool):
 
 def _clear_god_mode():
     """Disable god mode entirely."""
-    path = os.path.join(config.SIGNAL_DIR, "_god_mode.json")
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+    for path in (config.GOD_MODE_PATH,
+                 os.path.join(config.SIGNAL_DIR, "_god_mode.json")):
+        try:
+            os.remove(path)
+        except OSError:
+            pass

@@ -382,10 +382,13 @@ class TestRouteToPane(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_route"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -473,17 +476,16 @@ class TestRouteToPane(unittest.TestCase):
             result = tg.route_to_pane(self.pane, self.win_idx, "4")
         self.assertIn("Selected option 4", result)  # n+2 = 4
 
-    @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    def test_unknown_text_resaves_prompt_and_falls_through(self, mock_idle, mock_run):
-        """Prompt with no free_text: unrecognized text re-saves prompt, falls through."""
+    def test_unknown_text_returns_guidance(self):
+        """Unrecognized text always returns guidance when prompt is active."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
         with patch.object(tg.state, "load_active_prompt", return_value=prompt):
             result = tg.route_to_pane(self.pane, self.win_idx, "change step 3")
-        # Falls through to normal routing (sent as message, not prompt reply)
-        self.assertIn("Sent to", result)
-        # Prompt was re-saved for the next message
+        self.assertIn("⚠️", result)
+        self.assertIn("`n`", result)
+        self.assertIn("`y`", result)
+        # Prompt was re-saved so user can retry
         saved = tg.state.load_active_prompt(f"w{self.win_idx}")
         self.assertIsNotNone(saved)
         self.assertEqual(saved["total"], 3)
@@ -516,10 +518,13 @@ class TestProcessSignals(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_signals"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -646,12 +651,15 @@ class TestCmdHook(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_signals_hook"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         self._orig_enabled = tg.config.TG_HOOKS_ENABLED
         tg.config.TG_HOOKS_ENABLED = True
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         tg.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
@@ -706,12 +714,15 @@ class TestCmdHookPlanMode(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_plan"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         self._orig_enabled = tg.config.TG_HOOKS_ENABLED
         tg.config.TG_HOOKS_ENABLED = True
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         tg.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
@@ -740,10 +751,13 @@ class TestPlanSignalBypassesGodMode(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_plan_god"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
         tg.state._clear_god_mode()
@@ -1109,29 +1123,34 @@ class TestPaneHasPrompt(unittest.TestCase):
 
 
 class TestCleanupStalePrompts(unittest.TestCase):
-    """Test _cleanup_stale_prompts removes prompts whose pane no longer shows dialog."""
+    """Test _cleanup_stale_prompts removes prompts whose pane is idle."""
 
     def setUp(self):
         self.signal_dir = "/tmp/tg_hook_test_cleanup"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.state, "_pane_has_prompt", return_value=False)
-    def test_removes_stale_prompt(self, mock_has):
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_removes_stale_prompt(self, mock_idle):
+        """Pane is idle (❯ visible) — prompt was answered, remove file."""
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             json.dump({"pane": "0:4.0", "total": 3}, f)
         tg._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(path))
 
-    @patch.object(tg.state, "_pane_has_prompt", return_value=True)
-    def test_keeps_active_prompt(self, mock_has):
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(False, ""))
+    def test_keeps_active_prompt(self, mock_idle):
+        """Pane is not idle — prompt may still be active, keep file."""
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             json.dump({"pane": "0:4.0", "total": 3}, f)
@@ -1145,8 +1164,8 @@ class TestCleanupStalePrompts(unittest.TestCase):
         tg._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(path))
 
-    @patch.object(tg.state, "_pane_has_prompt", return_value=False)
-    def test_ignores_non_prompt_state_files(self, mock_has):
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_ignores_non_prompt_state_files(self, mock_idle):
         """Should not touch _bash_cmd or _focus files."""
         bash_path = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
         focus_path = os.path.join(self.signal_dir, "_focus.json")
@@ -1159,17 +1178,17 @@ class TestCleanupStalePrompts(unittest.TestCase):
         self.assertTrue(os.path.exists(focus_path))
 
     def test_mixed_stale_and_active(self):
-        """Multiple prompt files — removes only stale ones."""
+        """Multiple prompt files — removes only idle ones."""
         stale = os.path.join(self.signal_dir, "_active_prompt_w1.json")
         active = os.path.join(self.signal_dir, "_active_prompt_w2.json")
         with open(stale, "w") as f:
             json.dump({"pane": "0:1.0", "total": 3}, f)
         with open(active, "w") as f:
             json.dump({"pane": "0:2.0", "total": 3}, f)
-        # w1 pane has no prompt, w2 pane still has prompt
+        # w1 pane is idle, w2 pane is not idle (prompt still visible)
         def side_effect(pane):
-            return pane == "0:2.0"
-        with patch.object(tg.state, "_pane_has_prompt", side_effect=side_effect):
+            return (True, "") if pane == "0:1.0" else (False, "")
+        with patch.object(tg.routing, "_pane_idle_state", side_effect=side_effect):
             tg._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(stale))
         self.assertTrue(os.path.exists(active))
@@ -1196,10 +1215,13 @@ class TestFocusState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_focus"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -1329,10 +1351,13 @@ class TestLoadActivePrompt(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -1671,11 +1696,14 @@ class TestCmdHookEdgeCases(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_hook_edge"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         self._orig_enabled = tg.config.TG_HOOKS_ENABLED
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         tg.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
@@ -1971,10 +1999,13 @@ class TestHandleCallback(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_callback"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2221,10 +2252,13 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_signals_kb"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2320,10 +2354,13 @@ class TestAnyActivePrompt(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_any_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2619,10 +2656,13 @@ class TestDeepFocusState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_deepfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2657,10 +2697,13 @@ class TestSessionNames(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_names"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2720,10 +2763,13 @@ class TestDeepFocusCommand(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_dfcmd"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2783,10 +2829,13 @@ class TestFocusClearsDeepfocus(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_focus_df"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2808,10 +2857,13 @@ class TestUnfocusClearsBoth(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_unfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2834,10 +2886,13 @@ class TestNameCommand(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_namecmd"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2866,10 +2921,13 @@ class TestFormatSessionsWithNames(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_fmtnames"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2921,10 +2979,13 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sig_wids"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2954,6 +3015,41 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         tg.process_signals(focused_wids={"5"})
         mock_send.assert_called_once()
 
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_smartfocus_stop_sends_full_response(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with active smartfocus sends full response (not suppressed)."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        tg.process_signals()
+        # Full response via _send_long_message
+        mock_long.assert_called_once()
+        header = mock_long.call_args[0][0]
+        self.assertIn("finished", header)
+        # Smartfocus should be cleared
+        self.assertIsNone(tg.state._load_smartfocus_state())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_smartfocus_stop_shows_queued_messages(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with smartfocus still shows queued messages."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        tg.state._save_queued_msg("w4", "fix the bug")
+        self._write_signal("stop")
+        tg.process_signals()
+        calls = [c[0][0] for c in mock_send.call_args_list]
+        self.assertTrue(any("saved message" in c for c in calls))
+        # Clean up
+        tg.state._pop_queued_msgs("w4")
+
 
 class TestProcessSignalsWithNames(unittest.TestCase):
     """Test that process_signals includes session names in tags."""
@@ -2962,10 +3058,13 @@ class TestProcessSignalsWithNames(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sig_names"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3009,11 +3108,14 @@ class TestResolveName(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_resolve"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3058,11 +3160,14 @@ class TestNameBasedCommands(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_namecmds"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         tg._save_session_name("4", "auth")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3153,11 +3258,14 @@ class TestNamePrefixRouting(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_nameprefix"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         tg._save_session_name("4", "auth")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3215,10 +3323,13 @@ class TestQueuedMessageState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_queued"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3259,10 +3370,13 @@ class TestSavedPromptTextState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_prompt_text"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3399,10 +3513,13 @@ class TestBusyState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_busy_state"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3449,10 +3566,13 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_route_busy"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3569,10 +3689,13 @@ class TestSavedCommand(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_saved_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3615,10 +3738,13 @@ class TestSavedCallbacks(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_saved_cb"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3692,10 +3818,13 @@ class TestSmartFocusState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_smartfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3730,10 +3859,13 @@ class TestSmartFocusActivation(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sf_activate"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3797,10 +3929,13 @@ class TestStopSignalClearsSmartFocus(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sf_stop"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3847,10 +3982,13 @@ class TestUnfocusClearsSmartFocus(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sf_unfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3887,10 +4025,13 @@ class TestSmartFocusIntegration(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sf_integration"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3928,10 +4069,13 @@ class TestGodModeState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_state"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3969,8 +4113,7 @@ class TestGodModeState(unittest.TestCase):
     def test_disable_last_removes_file(self):
         tg._set_god_mode("4", True)
         tg._set_god_mode("4", False)
-        path = os.path.join(self.signal_dir, "_god_mode.json")
-        self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(tg.config.GOD_MODE_PATH))
 
     def test_no_duplicate_wids(self):
         tg._set_god_mode("4", True)
@@ -3978,10 +4121,19 @@ class TestGodModeState(unittest.TestCase):
         self.assertEqual(tg._god_mode_wids(), ["4"])
 
     def test_survives_clear_signals(self):
-        """God mode state survives _clear_signals(include_state=True)."""
-        tg._set_god_mode("4", True)
-        tg._clear_signals(include_state=True)
-        self.assertTrue(tg._is_god_mode_for("4"))
+        """God mode state survives _clear_signals — stored outside signal dir."""
+        # Point GOD_MODE_PATH outside signal dir (like production ~/.config/)
+        ext_path = self.signal_dir + "_god_persistent"
+        os.makedirs(ext_path, exist_ok=True)
+        tg.config.GOD_MODE_PATH = os.path.join(ext_path, "_god_mode.json")
+        try:
+            tg._set_god_mode("4", True)
+            tg._clear_signals(include_state=True)
+            self.assertTrue(tg._is_god_mode_for("4"))
+        finally:
+            import shutil
+            shutil.rmtree(ext_path, ignore_errors=True)
+            tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
 
 class TestGodModeAutoAccept(unittest.TestCase):
@@ -3991,10 +4143,13 @@ class TestGodModeAutoAccept(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_accept"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4063,6 +4218,23 @@ class TestGodModeAutoAccept(unittest.TestCase):
         self.assertIn("Auto-allowed", msg)
         self.assertIn("permission", msg)
 
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("wants to execute plan", "", ["1. Yes", "2. No"], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.state, "save_active_prompt")
+    def test_plan_permission_not_auto_accepted_in_god_mode(self, mock_save_prompt, mock_send, mock_proj, mock_extract, mock_select):
+        """ExitPlanMode permission (message contains 'plan') is NOT auto-accepted in god mode."""
+        tg._set_god_mode("4", True)
+        self._write_signal("permission", "w4",
+                           message="Claude has written up a plan and is ready to execute. Would you like to proceed?")
+        tg.signals.process_signals()
+        mock_select.assert_not_called()
+        mock_save_prompt.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        self.assertNotIn("Auto-allowed", msg)
+
 
 class TestGodModeCommand(unittest.TestCase):
     """Test /god command handling."""
@@ -4072,10 +4244,13 @@ class TestGodModeCommand(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4171,10 +4346,13 @@ class TestGodModeAcceptEditsOnStop(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_stop"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4375,10 +4553,13 @@ class TestGodModeQuestionNotAutoAccepted(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_question"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4434,10 +4615,13 @@ class TestGodModeUnknownArg(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_unknown"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4456,10 +4640,13 @@ class TestProcessSignalsClearsBusy(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_stop_busy"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4488,10 +4675,13 @@ class TestProcessSignalsCorruptedJson(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_corrupt_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4519,10 +4709,13 @@ class TestProcessSignalNoPane(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_no_pane"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4546,10 +4739,13 @@ class TestProcessSignalsReturnValue(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_sig_return"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4582,10 +4778,13 @@ class TestProcessSignalsMultiple(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_multi_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4616,10 +4815,13 @@ class TestAutofocusState(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_af_state"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4651,10 +4853,13 @@ class TestAutofocusCommand(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_af_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4729,10 +4934,13 @@ class TestPermissionContextInMessage(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_perm_ctx"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4763,10 +4971,13 @@ class TestQueuedMessagesPersistence(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_queued_persist"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4786,10 +4997,13 @@ class TestStopSignalQueuedMessages(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_stop_queue"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4822,10 +5036,13 @@ class TestGodModeFocusedWidsInteraction(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_focus"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4858,11 +5075,14 @@ class TestSavedCommandByName(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_saved_name"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         tg._save_session_name("4", "auth")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4939,19 +5159,21 @@ class TestClearSignalsPreservation(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_clear_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    def test_preserves_queued_names_god(self):
-        """All three _persist prefixes survive include_state=True."""
+    def test_preserves_queued_names(self):
+        """_persist prefixes survive include_state=True."""
         for fname, data in [
             ("_queued_w4.json", [{"text": "msg"}]),
             ("_names.json", {"4": "auth"}),
-            ("_god_mode.json", {"wids": ["4"]}),
         ]:
             with open(os.path.join(self.signal_dir, fname), "w") as f:
                 json.dump(data, f)
@@ -4963,7 +5185,6 @@ class TestClearSignalsPreservation(unittest.TestCase):
         # Preserved
         self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_queued_w4.json")))
         self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_names.json")))
-        self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_god_mode.json")))
         # Deleted
         self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "_focus.json")))
         self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "_busy_w4.json")))
@@ -4990,10 +5211,13 @@ class TestWidLabel(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_wid_label"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5012,10 +5236,13 @@ class TestGodModeAutoAcceptNonBash(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_nonbash"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5048,10 +5275,13 @@ class TestPermissionOptionsFirstOptionInjection(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_opt_inject"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5081,10 +5311,13 @@ class TestRouteToPane_PromptPaneOverride(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_prompt_pane"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5107,10 +5340,13 @@ class TestBusySince(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_busy_since"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5135,10 +5371,13 @@ class TestSavedCallbackEdgeCases(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_saved_edge"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5239,11 +5478,14 @@ class TestGodModeGodOffByName(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_god_off_name"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         tg._save_session_name("4", "auth")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5299,10 +5541,13 @@ class TestWriteSignal(unittest.TestCase):
         self.signal_dir = "/tmp/tg_hook_test_write_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
         self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
         tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 

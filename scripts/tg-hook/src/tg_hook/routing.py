@@ -156,15 +156,16 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             return f"📨 Answered in {label}:\n`{reply[:500]}`"
 
         # Prompt with no free text and no matching shortcut/number —
-        # re-save the prompt and fall through to normal message handling.
-        # This prevents long messages split by Telegram from being misrouted
-        # as permission prompt replies.
+        # re-save the prompt so the user can try again.
         state.save_active_prompt(wid, prompt_pane, total=total,
                                  shortcuts=shortcuts,
                                  free_text_at=free_text_at,
                                  remaining_qs=remaining_qs,
                                  project=proj)
-        config._log("route", f"prompt re-saved: reply {reply!r} not valid for prompt")
+
+        # Active prompt but unrecognized reply — guide the user.
+        valid = ", ".join(f"`{k}`" for k in sorted(shortcuts))
+        return f"⚠️ Use buttons above or type: {valid}"
 
     # Check pane idle state (always authoritative)
     is_idle, typed_text = _pane_idle_state(pane)
