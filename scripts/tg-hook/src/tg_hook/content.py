@@ -211,6 +211,10 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
         return new_lines
     sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     opcodes = sm.get_opcodes()
+    # No actual changes — content is identical or only has replacements
+    has_changes = any(tag != "equal" for tag, *_ in opcodes)
+    if not has_changes:
+        return []
     equal_count = sum(j2 - j1 for tag, _, _, j1, j2 in opcodes if tag == "equal")
     if equal_count < 3:
         return new_lines

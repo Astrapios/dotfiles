@@ -1556,8 +1556,19 @@ class TestComputeNewLinesEdgeCases(unittest.TestCase):
 
     def test_single_line_identical(self):
         result = tg._compute_new_lines(["a"], ["a"])
-        # Single equal line < 3 threshold → returns all new
-        self.assertEqual(result, ["a"])
+        # Identical content returns empty, even if short
+        self.assertEqual(result, [])
+
+    def test_two_lines_identical(self):
+        result = tg._compute_new_lines(["a", "b"], ["a", "b"])
+        self.assertEqual(result, [])
+
+    def test_short_content_with_new_line(self):
+        """Short content (<3 lines) with a genuine new line."""
+        old = ["a"]
+        new = ["a", "b"]
+        result = tg._compute_new_lines(old, new)
+        self.assertEqual(result, ["a", "b"])  # <3 equal, returns all
 
     def test_interleaved_inserts(self):
         """New lines inserted between existing lines."""
