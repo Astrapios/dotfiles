@@ -399,6 +399,7 @@ def _god_mode_wids() -> list[str]:
                     os.remove(path)
                 except OSError:
                     pass
+                config._log("god", f"Migrated god mode from {path}: {wids}")
             return wids
         except (OSError, json.JSONDecodeError):
             continue
@@ -423,11 +424,13 @@ def _set_god_mode(w_idx: str, enabled: bool):
     if wids:
         with open(path, "w") as f:
             json.dump({"wids": wids}, f)
+        config._log("god", f"Set god mode: {wids} -> {path}")
     else:
         try:
             os.remove(path)
         except OSError:
             pass
+        config._log("god", f"Cleared god mode (removed {path})")
 
 
 def _clear_god_mode():
@@ -436,5 +439,6 @@ def _clear_god_mode():
                  os.path.join(config.SIGNAL_DIR, "_god_mode.json")):
         try:
             os.remove(path)
+            config._log("god", f"Cleared god mode file: {path}")
         except OSError:
             pass

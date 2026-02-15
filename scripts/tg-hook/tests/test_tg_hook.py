@@ -3021,17 +3021,55 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
-    def test_smartfocus_stop_sends_full_response(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
-        """Stop signal with active smartfocus sends full response (not suppressed)."""
+    def test_smartfocus_stop_no_prev_sends_short(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with smartfocus but no prev_lines sends short notification."""
         tg.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
-        tg.process_signals()
-        # Full response via _send_long_message
+        tg.process_signals()  # no smartfocus_prev passed
+        # Short notification via tg_send (not _send_long_message with full content)
+        mock_send.assert_called()
+        calls = [c[0][0] for c in mock_send.call_args_list]
+        self.assertTrue(any("finished" in c for c in calls))
+        # Smartfocus should be cleared
+        self.assertIsNone(tg.state._load_smartfocus_state())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n  line2\n  new stuff\n❯ prompt"))
+    @patch("time.sleep")
+    def test_smartfocus_stop_with_prev_sends_tail(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with smartfocus_prev sends only new (tail) content."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        # prev_lines matches first part of response — only "new stuff" is new
+        prev = ["Answer", "  line1", "  line2"]
+        tg.process_signals(smartfocus_prev=prev)
+        # Tail content via _send_long_message
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
         self.assertIn("finished", header)
-        # Smartfocus should be cleared
-        self.assertIsNone(tg.state._load_smartfocus_state())
+        body = mock_long.call_args[0][1]
+        self.assertIn("new stuff", body)
+        self.assertNotIn("line1", body)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
+    @patch("time.sleep")
+    def test_smartfocus_stop_no_new_lines_sends_short(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with smartfocus_prev matching all content sends short notification."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        prev = ["Answer", "  line1"]
+        tg.process_signals(smartfocus_prev=prev)
+        # No new content — short notification only
+        mock_long.assert_not_called()
+        calls = [c[0][0] for c in mock_send.call_args_list]
+        self.assertTrue(any("finished" in c for c in calls))
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.telegram, "_send_long_message")

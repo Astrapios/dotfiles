@@ -5,6 +5,12 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.6.1
+
+- Fix duplicate smartfocus messages: stop signal now sends only tail content (new lines since last smartfocus update) instead of full response
+- Fix stale smartfocus variable: re-read state after processing signals to prevent extra "👁" message
+- Add god mode diagnostic logging for persistence debugging
+
 ## 0.6.0
 
 - Send full stop message ("✅ finished") when autofocus session completes, instead of suppressing

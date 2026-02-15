@@ -25,9 +25,12 @@ def _format_question_msg(tag: str, project: str, question: dict) -> str:
     return "\n".join(parts)
 
 
-def process_signals(focused_wids: set[str] | None = None) -> str | None:
+def process_signals(focused_wids: set[str] | None = None,
+                     smartfocus_prev: list[str] | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
-    If focused_wids is set, stop signals for those windows are suppressed."""
+    If focused_wids is set, stop signals for those windows are suppressed.
+    smartfocus_prev: previous lines from smartfocus monitoring, used to send
+    only the tail (new content) when a smartfocus session stops."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return None
 
@@ -75,6 +78,29 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
 
             if focused_wids and w_idx in focused_wids:
                 pass
+            elif was_smartfocus and pane:
+                # Smartfocus already streamed most content — send only the tail
+                time.sleep(1)
+                pw = tmux._get_pane_width(pane)
+                for num_lines in (30, 80, 200):
+                    raw = tmux._capture_pane(pane, num_lines)
+                    if content._has_response_start(raw):
+                        break
+                cleaned = content.clean_pane_content(raw, "stop", pw) if raw else ""
+                if cleaned and smartfocus_prev:
+                    cur_lines = cleaned.splitlines()
+                    new = content._compute_new_lines(smartfocus_prev, cur_lines)
+                    if new:
+                        tail_text = "\n".join(new).strip()
+                        if tail_text:
+                            header = f"✅{tag} (`{project}`) finished:\n\n"
+                            telegram._send_long_message(header, tail_text, wid, reply_markup=stop_kb)
+                        else:
+                            telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
+                    else:
+                        telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
+                else:
+                    telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
             else:
                 raw = ""
                 if pane:

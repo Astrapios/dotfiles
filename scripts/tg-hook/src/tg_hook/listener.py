@@ -89,7 +89,9 @@ def cmd_listen():
     telegram._set_bot_commands()
     telegram.tg_send(tmux.format_sessions_message(sessions),
                      reply_markup=telegram._build_reply_keyboard())
+    god_wids = state._god_mode_wids()
     config._log("listen", f"Found {len(sessions)} Claude session(s).")
+    config._log("listen", f"God mode: {god_wids or 'off'}")
     config._log("listen", "Press Ctrl+C to stop")
 
     paused = False
@@ -201,7 +203,12 @@ def cmd_listen():
         if deepfocus_state:
             focused_wids.add(deepfocus_state["wid"])
 
-        signal_wid = signals.process_signals(focused_wids=focused_wids or None)
+        signal_wid = signals.process_signals(
+            focused_wids=focused_wids or None,
+            smartfocus_prev=smartfocus_prev_lines if smartfocus_state else None,
+        )
+        # Re-read smartfocus state — process_signals may have cleared it
+        smartfocus_state = state._load_smartfocus_state()
         if signal_wid:
             last_win_idx = signal_wid
 
