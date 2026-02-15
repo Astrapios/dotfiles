@@ -1357,15 +1357,22 @@ class TestHandleCommand(unittest.TestCase):
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_command(self, mock_run, mock_send):
+        # Set up busy and prompt state to verify they get cleared
+        tg._mark_busy("w4")
+        tg.save_active_prompt("w4", "0:4.0", total=3)
         action, _, last = tg._handle_command(
             "/interrupt w4", self.sessions, "4")
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted", msg)
-        # Check tmux send-keys Escape was sent
+        # Check Escape + Ctrl+U sent
         cmd_str = mock_run.call_args[0][0][2]
         self.assertIn("Escape", cmd_str)
+        self.assertIn("C-u", cmd_str)
+        # Busy and prompt state should be cleared
+        self.assertFalse(tg._is_busy("w4"))
+        self.assertIsNone(tg.load_active_prompt("w4"))
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     def test_interrupt_no_session(self, mock_send):

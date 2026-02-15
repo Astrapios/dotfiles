@@ -48,6 +48,20 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     return text
 
 
+def _interrupt_session(idx: str, sessions: dict):
+    """Interrupt a Claude session: Escape, clear prompt, clear busy/prompt state."""
+    pane, project = sessions[idx]
+    wid = f"w{idx}"
+    p = shlex.quote(pane)
+    # Escape interrupts current operation, Ctrl+U clears the prompt line
+    subprocess.run(["bash", "-c",
+                    f"tmux send-keys -t {p} Escape && sleep 0.1 && "
+                    f"tmux send-keys -t {p} C-u"], timeout=5)
+    state._clear_busy(wid)
+    state.load_active_prompt(wid)  # load = consume and delete
+    telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
+
+
 def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tuple[str | None, dict, str | None]:
     """Handle a command in active mode. Returns (action, sessions, last_win_idx).
     action is 'pause', 'quit', or None (continue processing)."""
@@ -253,20 +267,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         raw_target = int_m.group(1)
         idx = state._resolve_name(raw_target, sessions) if raw_target else None
         if idx:
-            pane, project = sessions[idx]
-            p = shlex.quote(pane)
-            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
-            telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
+            _interrupt_session(idx, sessions)
             return None, sessions, idx
         elif raw_target:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
                              reply_markup=tmux._sessions_keyboard(sessions))
         elif len(sessions) == 1:
             idx = next(iter(sessions))
-            pane, project = sessions[idx]
-            p = shlex.quote(pane)
-            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
-            telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
+            _interrupt_session(idx, sessions)
             return None, sessions, idx
         else:
             sessions = tmux.scan_claude_sessions()
