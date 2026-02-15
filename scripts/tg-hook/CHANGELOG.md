@@ -9,6 +9,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 
 - Detect interrupted sessions (Esc pressed mid-response) and notify via Telegram
 - Listener scans panes every 5s for the "Interrupted ·" pattern since no hook fires on interrupt
+- Clear stale busy state when pane is idle (interrupt leaves _busy file behind)
 
 ## 0.3.2
 

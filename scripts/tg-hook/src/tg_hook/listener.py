@@ -172,9 +172,6 @@ def cmd_listen():
             from tg_hook import routing
             for idx, (pane, project) in sessions.items():
                 wid = f"w{idx}"
-                if state._is_busy(wid):
-                    interrupted_notified.discard(wid)
-                    continue
                 try:
                     raw = tmux._capture_pane(pane, 15)
                 except Exception:
@@ -183,6 +180,9 @@ def cmd_listen():
                 if not idle:
                     interrupted_notified.discard(wid)
                     continue
+                # Pane is idle — clear stale busy flag (interrupt doesn't fire Stop hook)
+                if state._is_busy(wid):
+                    state._clear_busy(wid)
                 if wid in interrupted_notified:
                     continue
                 if content._detect_interrupted(raw):
