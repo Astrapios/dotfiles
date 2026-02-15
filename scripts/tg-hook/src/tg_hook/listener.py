@@ -69,6 +69,9 @@ def cmd_listen():
     smartfocus_pane_width: int = 0
     smartfocus_prev_lines: list[str] = []
 
+    interrupted_notified: set[str] = set()  # wids already notified as interrupted
+    last_interrupt_check: float = 0
+
     # Consume existing updates to avoid replaying old messages
     offset = 0
     try:
@@ -162,6 +165,32 @@ def cmd_listen():
             state._cleanup_stale_prompts()
             state._cleanup_stale_busy(sessions)
             last_prompt_cleanup = time.time()
+
+        # --- Interrupt detection (no hook fires on Esc interrupt) ---
+        if time.time() - last_interrupt_check > 5:
+            last_interrupt_check = time.time()
+            from tg_hook import routing
+            for idx, (pane, project) in sessions.items():
+                wid = f"w{idx}"
+                if state._is_busy(wid):
+                    interrupted_notified.discard(wid)
+                    continue
+                try:
+                    raw = tmux._capture_pane(pane, 15)
+                except Exception:
+                    continue
+                idle, _ = routing._pane_idle_state(pane)
+                if not idle:
+                    interrupted_notified.discard(wid)
+                    continue
+                if wid in interrupted_notified:
+                    continue
+                if content._detect_interrupted(raw):
+                    label = state._wid_label(idx)
+                    telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.")
+                    interrupted_notified.add(wid)
+            # Clear for gone sessions
+            interrupted_notified -= interrupted_notified - {f"w{i}" for i in sessions}
 
         focus_state = state._load_focus_state()
         deepfocus_state = state._load_deepfocus_state()

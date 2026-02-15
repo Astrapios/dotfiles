@@ -5,6 +5,11 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.4.0
+
+- Detect interrupted sessions (Esc pressed mid-response) and notify via Telegram
+- Listener scans panes every 5s for the "Interrupted ·" pattern since no hook fires on interrupt
+
 ## 0.3.2
 
 - Fix smart focus duplicate messages when tool status line changes mid-response

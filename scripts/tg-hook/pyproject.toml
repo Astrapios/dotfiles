@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tg-hook"
-version = "0.3.2"
+version = "0.4.0"
 description = "Telegram bridge for Claude Code hooks"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.28"]

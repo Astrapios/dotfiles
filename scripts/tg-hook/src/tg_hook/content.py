@@ -154,6 +154,28 @@ def _has_response_start(raw: str) -> bool:
     return False
 
 
+def _detect_interrupted(raw: str) -> bool:
+    """Check if pane content shows Claude was interrupted (Esc pressed mid-response).
+
+    Looks for the '⎿  Interrupted ·' pattern between the last response and the ❯ prompt.
+    """
+    lines = raw.splitlines()
+    # Walk backward from end, find last ❯
+    end = -1
+    for i in range(len(lines) - 1, -1, -1):
+        s = lines[i].strip()
+        if s.startswith("❯"):
+            end = i
+            break
+    if end < 0:
+        return False
+    # Check the few lines just above ❯ for the interrupted marker
+    for i in range(end - 1, max(end - 6, -1), -1):
+        if "Interrupted" in lines[i] and "·" in lines[i]:
+            return True
+    return False
+
+
 def clean_pane_content(raw: str, event: str, pane_width: int = 0) -> str:
     """Clean captured tmux pane content."""
     lines = raw.splitlines()

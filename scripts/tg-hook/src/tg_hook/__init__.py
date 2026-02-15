@@ -65,8 +65,8 @@ from .state import (
 # content
 from .content import (
     _extract_pane_permission, _filter_noise, _filter_tool_calls,
-    _has_response_start, clean_pane_content, clean_pane_status,
-    _compute_new_lines,
+    _has_response_start, _detect_interrupted, clean_pane_content,
+    clean_pane_status, _compute_new_lines,
 )
 
 # routing

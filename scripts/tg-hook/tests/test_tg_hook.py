@@ -5555,5 +5555,77 @@ class TestTgSendPhotoMimeType(unittest.TestCase):
             os.remove(path)
 
 
+class TestDetectInterrupted(unittest.TestCase):
+    """Test _detect_interrupted detects Esc-interrupted Claude sessions."""
+
+    def test_interrupted_after_question(self):
+        """Detects interrupted state after AskUserQuestion."""
+        raw = (
+            "❯ ask me question\n"
+            "\n"
+            "● User answered Claude's questions:\n"
+            "  ⎿  · What would you like to work on next? → Code review\n"
+            "  ⎿  Interrupted · What should Claude do instead?\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertTrue(tg._detect_interrupted(raw))
+
+    def test_interrupted_mid_response(self):
+        """Detects interrupted state during normal response."""
+        raw = (
+            "❯ write me a very long story about a dog\n"
+            "  ⎿  Interrupted · What should Claude do instead?\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertTrue(tg._detect_interrupted(raw))
+
+    def test_normal_completion_not_interrupted(self):
+        """Normal completion is not detected as interrupted."""
+        raw = (
+            "● Here is the response you asked for.\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertFalse(tg._detect_interrupted(raw))
+
+    def test_word_interrupted_in_response(self):
+        """The word 'interrupted' in normal text without · is not a match."""
+        raw = (
+            "● The process was interrupted by a signal.\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertFalse(tg._detect_interrupted(raw))
+
+    def test_busy_pane_not_interrupted(self):
+        """Pane without ❯ prompt is not interrupted."""
+        raw = (
+            "● Working on the task...\n"
+            "  ⎿  Interrupted · What should Claude do instead?\n"
+            "* Thinking…\n"
+        )
+        # No ❯ prompt at the end — end stays at len(lines),
+        # so the lines-before-end check won't match
+        self.assertFalse(tg._detect_interrupted(raw))
+
+    def test_old_interrupt_not_detected(self):
+        """Interrupt marker from earlier in history (not near last ❯) is ignored."""
+        raw = (
+            "  ⎿  Interrupted · What should Claude do instead?\n"
+            "\n"
+            "❯ do something else\n"
+            "\n"
+            "● Here is the result of doing something else.\n"
+            "  More details about the result here.\n"
+            "  And even more details about it.\n"
+            "  Final line of the response.\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertFalse(tg._detect_interrupted(raw))
+
+
 if __name__ == "__main__":
     unittest.main()
