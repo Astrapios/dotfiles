@@ -190,8 +190,8 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     # doesn't treat as Enter (CR), causing the message to never submit.
     clean_text = text.replace("\n", " ").replace("\r", " ")
 
-    # Normal message: type text + Enter
-    cmd = f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && tmux send-keys -t {p} Enter"
+    # Normal message: type text + Enter (sleep lets Claude Code accept the input)
+    cmd = f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && sleep 0.1 && tmux send-keys -t {p} Enter"
     subprocess.run(["bash", "-c", cmd], timeout=10)
     state._mark_busy(wid)
     return f"📨 Sent to {label}:\n`{text[:500]}`"
