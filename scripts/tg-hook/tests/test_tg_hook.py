@@ -2278,7 +2278,9 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("name", names)
         self.assertNotIn("sessions", names)
         self.assertIn("god", names)
-        self.assertEqual(len(commands), 14)
+        self.assertIn("autofocus", names)
+        self.assertIn("saved", names)
+        self.assertEqual(len(commands), 16)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -4172,6 +4174,1090 @@ class TestHelpIncludesGod(unittest.TestCase):
         self.assertIn("g4", msg)
         self.assertIn("ga", msg)
         self.assertIn("goff", msg)
+
+
+class TestIsUiChrome(unittest.TestCase):
+    """Test _is_ui_chrome pattern matching."""
+
+    def test_empty_string(self):
+        self.assertTrue(tg._is_ui_chrome(""))
+
+    def test_separator_thin(self):
+        self.assertTrue(tg._is_ui_chrome("────────────────"))
+
+    def test_separator_thick(self):
+        self.assertTrue(tg._is_ui_chrome("━━━━━━━━━━━━━━━━"))
+
+    def test_accept_edits_on(self):
+        self.assertTrue(tg._is_ui_chrome("⏵⏵ accept edits on"))
+
+    def test_paused_indicator(self):
+        self.assertTrue(tg._is_ui_chrome("⏸ paused"))
+
+    def test_context_left(self):
+        self.assertTrue(tg._is_ui_chrome("Context left until auto-compact: 50%"))
+
+    def test_working_emoji(self):
+        self.assertTrue(tg._is_ui_chrome("⏳ Working..."))
+
+    def test_working_asterisk(self):
+        self.assertTrue(tg._is_ui_chrome("* Working..."))
+
+    def test_shortcut_hint(self):
+        self.assertTrue(tg._is_ui_chrome("✻ esc for shortcuts"))
+
+    def test_ctrl_background(self):
+        self.assertTrue(tg._is_ui_chrome("ctrl+b to run in background"))
+
+    def test_thinking_with_timing(self):
+        self.assertTrue(tg._is_ui_chrome("* Percolating… (1m 14s · ↓ 1.8k tokens)"))
+
+    def test_thinking_spinner(self):
+        self.assertTrue(tg._is_ui_chrome("⠐ Thinking…"))
+
+    def test_working_spinner(self):
+        self.assertTrue(tg._is_ui_chrome("✶ Working…"))
+
+    def test_more_lines(self):
+        self.assertTrue(tg._is_ui_chrome("+12 more lines (ctrl+e to expand)"))
+
+    def test_normal_text(self):
+        self.assertFalse(tg._is_ui_chrome("Hello world"))
+
+    def test_prompt(self):
+        self.assertFalse(tg._is_ui_chrome("❯ test"))
+
+    def test_bullet(self):
+        self.assertFalse(tg._is_ui_chrome("● Response text"))
+
+    def test_short_separator_not_chrome(self):
+        """Separators need at least 3 chars."""
+        self.assertFalse(tg._is_ui_chrome("──"))
+
+
+class TestFilterToolCalls(unittest.TestCase):
+    """Test _filter_tool_calls removes tool bullets and continuations."""
+
+    def test_removes_tool_bullet(self):
+        lines = [
+            "● Bash(echo hello)",
+            "  ⎿  hello",
+            "● The result is 42.",
+        ]
+        result = tg._filter_tool_calls(lines)
+        self.assertEqual(result, ["● The result is 42."])
+
+    def test_preserves_text_bullets(self):
+        lines = [
+            "● Here is the answer",
+            "  The result is 42.",
+        ]
+        result = tg._filter_tool_calls(lines)
+        self.assertEqual(result, lines)
+
+    def test_multiple_tool_calls(self):
+        lines = [
+            "● Read(file.py)",
+            "  content here",
+            "● Bash(git status)",
+            "  on main branch",
+            "● Summary of changes",
+        ]
+        result = tg._filter_tool_calls(lines)
+        self.assertEqual(result, ["● Summary of changes"])
+
+    def test_empty_input(self):
+        self.assertEqual(tg._filter_tool_calls([]), [])
+
+    def test_no_tool_bullets(self):
+        lines = ["normal line", "another line"]
+        result = tg._filter_tool_calls(lines)
+        self.assertEqual(result, lines)
+
+
+class TestGodModeQuestionNotAutoAccepted(unittest.TestCase):
+    """Test that god mode does NOT auto-accept AskUserQuestion signals."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_god_question"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.state, "save_active_prompt")
+    def test_question_not_auto_accepted(self, mock_save, mock_send, mock_proj, mock_select):
+        """AskUserQuestion should always show the question, even in god mode."""
+        tg._set_god_mode("4", True)
+        questions = [{"question": "Pick one?", "options": [
+            {"label": "A", "description": "first"},
+        ]}]
+        self._write_signal("question", questions=questions)
+        tg.process_signals()
+        # Should NOT auto-accept
+        mock_select.assert_not_called()
+        # Should show the question normally
+        msg = mock_send.call_args[0][0]
+        self.assertIn("asks", msg)
+        self.assertIn("Pick one?", msg)
+        # Should save active prompt
+        mock_save.assert_called_once()
+
+
+class TestGodModeCallback(unittest.TestCase):
+    """Test cmd_god callback handler."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    def test_cmd_god_callback(self, mock_cmd, mock_answer, mock_remove):
+        callback = {"id": "cb1", "data": "cmd_god_4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        mock_cmd.assert_called_once_with("/god w4", self.sessions, None)
+        self.assertIsNone(action)
+
+
+class TestGodModeUnknownArg(unittest.TestCase):
+    """Test /god with unrecognized argument."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_god_unknown"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_unknown_arg(self, mock_send, mock_scan):
+        tg._handle_command("/god xyz123", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+
+class TestProcessSignalsClearsBusy(unittest.TestCase):
+    """Test that stop signal clears busy state."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_stop_busy"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_stop_clears_busy(self, mock_sleep, mock_run, mock_proj, mock_send):
+        tg._mark_busy("w4")
+        self.assertTrue(tg._is_busy("w4"))
+        self._write_signal("stop")
+        tg.process_signals()
+        self.assertFalse(tg._is_busy("w4"))
+
+
+class TestProcessSignalsCorruptedJson(unittest.TestCase):
+    """Test signal processing with corrupted signal files."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_corrupt_sig"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_corrupt_json_removed_no_crash(self):
+        """Corrupted JSON signal file is removed without crashing."""
+        fpath = os.path.join(self.signal_dir, f"{time.time():.6f}_test.json")
+        with open(fpath, "w") as f:
+            f.write("{corrupt json{{")
+        tg.process_signals()  # should not raise
+        self.assertFalse(os.path.exists(fpath))
+
+    def test_empty_json_file_removed(self):
+        """Empty signal file is removed without crashing."""
+        fpath = os.path.join(self.signal_dir, f"{time.time():.6f}_test.json")
+        with open(fpath, "w") as f:
+            f.write("")
+        tg.process_signals()
+        self.assertFalse(os.path.exists(fpath))
+
+
+class TestProcessSignalNoPane(unittest.TestCase):
+    """Test stop signal with empty pane."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_no_pane"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("time.sleep")
+    def test_stop_without_pane(self, mock_sleep, mock_send):
+        """Stop signal with no pane sends fallback message."""
+        signal = {"event": "stop", "pane": "", "wid": "w4", "project": "test"}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+        tg.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("could not capture pane", msg)
+
+
+class TestProcessSignalsReturnValue(unittest.TestCase):
+    """Test process_signals return value."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_sig_return"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_no_signals_returns_none(self):
+        result = tg.process_signals()
+        self.assertIsNone(result)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● done\n❯"))
+    @patch("time.sleep")
+    def test_returns_last_wid(self, mock_sleep, mock_run, mock_proj, mock_send):
+        signal = {"event": "stop", "pane": "%20", "wid": "w7", "project": "test"}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+        result = tg.process_signals()
+        self.assertEqual(result, "7")
+
+    def test_nonexistent_dir_returns_none(self):
+        tg.config.SIGNAL_DIR = "/tmp/tg_hook_nonexistent_xyz_123"
+        result = tg.process_signals()
+        self.assertIsNone(result)
+
+
+class TestProcessSignalsMultiple(unittest.TestCase):
+    """Test processing multiple signal files in order."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_multi_sig"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● done\n❯"))
+    @patch("time.sleep")
+    def test_processes_all_signals(self, mock_sleep, mock_run, mock_proj, mock_send):
+        """Multiple stop signals are all processed."""
+        for i, wid in enumerate(["w4", "w5"]):
+            signal = {"event": "stop", "pane": f"%{20+i}", "wid": wid, "project": "test"}
+            fname = f"1000000.{i:06d}_test.json"
+            with open(os.path.join(self.signal_dir, fname), "w") as f:
+                json.dump(signal, f)
+        result = tg.process_signals()
+        self.assertEqual(result, "5")  # last wid
+        # Both signals should be processed (2 tg_send calls)
+        self.assertEqual(mock_send.call_count, 2)
+        # Signal files should be cleaned up
+        remaining = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(remaining, [])
+
+
+class TestAutofocusState(unittest.TestCase):
+    """Test autofocus state management."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_af_state"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_default_enabled(self):
+        self.assertTrue(tg._is_autofocus_enabled())
+
+    def test_disable(self):
+        tg._set_autofocus(False)
+        self.assertFalse(tg._is_autofocus_enabled())
+
+    def test_reenable(self):
+        tg._set_autofocus(False)
+        tg._set_autofocus(True)
+        self.assertTrue(tg._is_autofocus_enabled())
+
+    def test_disabled_blocks_smartfocus(self):
+        """When autofocus is off, _maybe_activate_smartfocus does nothing."""
+        tg._set_autofocus(False)
+        tg._maybe_activate_smartfocus("4", "0:4.0", "proj",
+                                      "📨 Sent to `w4`:\n`fix`")
+        self.assertIsNone(tg._load_smartfocus_state())
+
+
+class TestAutofocusCommand(unittest.TestCase):
+    """Test /autofocus command handling."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_af_cmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_toggle_off(self, mock_send):
+        """Toggle from default on to off."""
+        tg._handle_command("/autofocus", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("off", msg)
+        self.assertFalse(tg._is_autofocus_enabled())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_toggle_on(self, mock_send):
+        """Toggle from off to on."""
+        tg._set_autofocus(False)
+        tg._handle_command("/autofocus", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("on", msg)
+        self.assertTrue(tg._is_autofocus_enabled())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_explicit_on(self, mock_send):
+        tg._set_autofocus(False)
+        tg._handle_command("/autofocus on", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("on", msg)
+        self.assertTrue(tg._is_autofocus_enabled())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_explicit_off(self, mock_send):
+        tg._handle_command("/autofocus off", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("off", msg)
+        self.assertFalse(tg._is_autofocus_enabled())
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_off_clears_smartfocus(self, mock_send):
+        """Turning off autofocus clears any active smart focus."""
+        tg._save_smartfocus_state("4", "0:4.0", "proj")
+        tg._handle_command("/autofocus off", self.sessions, None)
+        self.assertIsNone(tg._load_smartfocus_state())
+
+    def test_af_alias(self):
+        self.assertEqual(tg._resolve_alias("af", False), "/autofocus")
+
+    def test_af_alias_suppressed_during_prompt(self):
+        self.assertEqual(tg._resolve_alias("af", True), "af")
+
+
+class TestEnableAcceptEditsEdgeCases(unittest.TestCase):
+    """Test _enable_accept_edits edge cases."""
+
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "_capture_pane", side_effect=Exception("tmux error"))
+    def test_capture_exception_returns(self, mock_cap, mock_run):
+        """Exception during capture_pane returns without error."""
+        tg._enable_accept_edits("0:4.0")
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "_capture_pane", return_value="no mode indicator here")
+    def test_no_mode_line_sends_btab(self, mock_cap, mock_run):
+        """No ⏵⏵ line found → sends BTab."""
+        tg._enable_accept_edits("0:4.0")
+        self.assertEqual(mock_run.call_count, 5)  # max cycles
+
+
+class TestPermissionContextInMessage(unittest.TestCase):
+    """Test that response context appears in permission messages."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_perm_ctx"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("wants to run bash", "", ["1. Yes", "2. No"], "I'll run git status to check"))
+    @patch.object(tg.state, "save_active_prompt")
+    def test_context_in_bash_permission(self, mock_save, mock_extract, mock_proj, mock_send):
+        """Response context appears in bash permission message."""
+        self._write_signal("permission", cmd="git status")
+        tg.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("I'll run git status to check", msg)
+        self.assertIn("git status", msg)
+
+
+class TestQueuedMessagesPersistence(unittest.TestCase):
+    """Test queued messages survive _clear_signals(include_state=True)."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_queued_persist"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_survives_clear_signals_with_state(self):
+        """Queued messages persist through _clear_signals(include_state=True)."""
+        tg._save_queued_msg("w4", "important message")
+        tg._clear_signals(include_state=True)
+        msgs = tg._load_queued_msgs("w4")
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["text"], "important message")
+
+
+class TestStopSignalQueuedMessages(unittest.TestCase):
+    """Test stop signal shows queued message notification."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_stop_queue"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
+    @patch("time.sleep")
+    def test_stop_shows_queued_messages(self, mock_sleep, mock_run, mock_proj, mock_send):
+        """Stop signal with queued messages shows notification."""
+        tg._save_queued_msg("w4", "pending msg")
+        self._write_signal("stop")
+        tg.process_signals()
+        # Should have 2 tg_send calls: stop message + queued notification
+        self.assertEqual(mock_send.call_count, 2)
+        queued_msg = mock_send.call_args_list[1][0][0]
+        self.assertIn("1 saved message", queued_msg)
+        self.assertIn("pending msg", queued_msg)
+
+
+class TestGodModeFocusedWidsInteraction(unittest.TestCase):
+    """Test god mode works correctly with focused_wids suppression."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_god_focus"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("", "", ["1. Yes", "2. No"], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_permission_auto_accepted_while_focused(self, mock_send, mock_proj, mock_extract, mock_select):
+        """Permission auto-accepted even when stop signals would be suppressed by focus."""
+        tg._set_god_mode("4", True)
+        self._write_signal("permission", cmd="git status")
+        tg.process_signals(focused_wids={"4"})
+        mock_select.assert_called_once_with("%20", 1)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Auto-allowed", msg)
+
+
+class TestSavedCommandByName(unittest.TestCase):
+    """Test /saved command with session name."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_saved_name"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        tg._save_session_name("4", "auth")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_by_name(self, mock_send):
+        tg._save_queued_msg("w4", "queued msg")
+        tg._handle_command("/saved auth", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("queued msg", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_nonexistent_name(self, mock_send):
+        tg._handle_command("/saved nonexistent", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+
+class TestStatusCommand(unittest.TestCase):
+    """Test /status command variants."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    def test_status_with_explicit_lines(self, mock_run, mock_send):
+        """Status with explicit line count uses that count."""
+        mock_run.return_value = MagicMock(stdout="line1\nline2\nline3\n❯ prompt")
+        tg._handle_command("/status w4 5", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("`myproj`", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_status_nonexistent_session(self, mock_send):
+        tg._handle_command("/status w99", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+
+class TestSendLongMessageWithFooter(unittest.TestCase):
+    """Test _send_long_message footer parameter."""
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_footer_appended(self, mock_send):
+        tg._send_long_message("H:\n", "body", wid="4", footer="1. Yes\n2. No")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("```", msg)
+        self.assertIn("1. Yes", msg)
+        self.assertIn("2. No", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_no_footer(self, mock_send):
+        tg._send_long_message("H:\n", "body", wid="4")
+        msg = mock_send.call_args[0][0]
+        self.assertTrue(msg.endswith("```"))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_chunked_footer_on_last(self, mock_send):
+        """Footer only appears after the last chunk."""
+        line = "x" * 79 + "\n"
+        body = line * 100
+        tg._send_long_message("H:\n", body, wid="4", footer="opts")
+        last_msg = mock_send.call_args_list[-1][0][0]
+        self.assertIn("opts", last_msg)
+        # Earlier chunks should not have footer
+        for c in mock_send.call_args_list[:-1]:
+            self.assertNotIn("opts", c[0][0])
+
+
+class TestClearSignalsPreservation(unittest.TestCase):
+    """Test _clear_signals preserves the right files."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_clear_sig"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_preserves_queued_names_god(self):
+        """All three _persist prefixes survive include_state=True."""
+        for fname, data in [
+            ("_queued_w4.json", [{"text": "msg"}]),
+            ("_names.json", {"4": "auth"}),
+            ("_god_mode.json", {"wids": ["4"]}),
+        ]:
+            with open(os.path.join(self.signal_dir, fname), "w") as f:
+                json.dump(data, f)
+        # Add some state files that should be deleted
+        for fname in ["_focus.json", "_busy_w4.json", "_active_prompt_w4.json"]:
+            with open(os.path.join(self.signal_dir, fname), "w") as f:
+                json.dump({}, f)
+        tg._clear_signals(include_state=True)
+        # Preserved
+        self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_queued_w4.json")))
+        self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_names.json")))
+        self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_god_mode.json")))
+        # Deleted
+        self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "_focus.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "_busy_w4.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "_active_prompt_w4.json")))
+
+    def test_without_state_preserves_all_underscore(self):
+        """include_state=False preserves all _ files."""
+        for fname in ["_focus.json", "_busy_w4.json"]:
+            with open(os.path.join(self.signal_dir, fname), "w") as f:
+                json.dump({}, f)
+        # Regular signal
+        with open(os.path.join(self.signal_dir, "123.json"), "w") as f:
+            json.dump({}, f)
+        tg._clear_signals(include_state=False)
+        self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_focus.json")))
+        self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_busy_w4.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "123.json")))
+
+
+class TestWidLabel(unittest.TestCase):
+    """Test _wid_label formatting."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_wid_label"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_unnamed(self):
+        self.assertEqual(tg._wid_label("4"), "`w4`")
+
+    def test_named(self):
+        tg._save_session_name("4", "auth")
+        self.assertEqual(tg._wid_label("4"), "`w4 [auth]`")
+
+
+class TestGodModeAutoAcceptNonBash(unittest.TestCase):
+    """Test god mode auto-accept for non-bash permissions (edit, write)."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_god_nonbash"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("wants to update `file.py`", "+new=True", ["1. Yes", "2. No"], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_edit_auto_accepted(self, mock_send, mock_proj, mock_extract, mock_select):
+        """Non-bash edit permission auto-accepted in god mode."""
+        tg._set_god_mode("4", True)
+        self._write_signal("permission", cmd="")
+        tg.process_signals()
+        mock_select.assert_called_once_with("%20", 1)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Auto-allowed", msg)
+        self.assertIn("wants to update", msg)
+
+
+class TestPermissionOptionsFirstOptionInjection(unittest.TestCase):
+    """Test that '1. Yes' is injected when options don't start with it."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_opt_inject"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(tg.content, "_extract_pane_permission",
+                  return_value=("", "", ["2. Yes, always", "3. No (esc)"], ""))
+    @patch.object(tg.state, "save_active_prompt")
+    def test_injects_yes_option(self, mock_save, mock_extract, mock_proj, mock_send):
+        """When options don't start with 1., inject '1. Yes'."""
+        self._write_signal("permission", cmd="echo test")
+        tg.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("1. Yes", msg)
+
+
+class TestRouteToPane_PromptPaneOverride(unittest.TestCase):
+    """Test that active prompt uses prompt's pane, not routing pane."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_prompt_pane"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch("subprocess.run")
+    def test_uses_prompt_pane(self, mock_run):
+        """When prompt has a pane, use it for selection, not the routing pane."""
+        prompt = {"pane": "%99", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "n": 3}}
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
+            tg.route_to_pane("0:4.0", "4", "y")
+        cmd_str = mock_run.call_args[0][0][2]
+        self.assertIn("%99", cmd_str)
+        self.assertNotIn("0:4.0", cmd_str)
+
+
+class TestBusySince(unittest.TestCase):
+    """Test _busy_since timestamp retrieval."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_busy_since"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_returns_none_when_not_busy(self):
+        self.assertIsNone(tg._busy_since("w99"))
+
+    def test_returns_timestamp(self):
+        before = time.time()
+        tg._mark_busy("w4")
+        after = time.time()
+        ts = tg._busy_since("w4")
+        self.assertIsNotNone(ts)
+        self.assertGreaterEqual(ts, before)
+        self.assertLessEqual(ts, after)
+
+
+class TestSavedCallbackEdgeCases(unittest.TestCase):
+    """Test saved_send/saved_discard callback edge cases."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_saved_edge"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_send_empty_queue(self, mock_send, mock_answer, mock_remove):
+        """saved_send with empty queue shows message."""
+        callback = {"id": "cb1", "data": "saved_send_w4", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No saved messages to send", msg)
+
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_send_dead_session(self, mock_send, mock_answer, mock_remove):
+        """saved_send for session no longer in sessions shows warning."""
+        tg._save_queued_msg("w5", "msg")
+        callback = {"id": "cb1", "data": "saved_send_w5", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)  # w5 not in sessions
+        msg = mock_send.call_args[0][0]
+        self.assertIn("no longer active", msg)
+
+
+class TestFormatQuestionMsg(unittest.TestCase):
+    """Test _format_question_msg formatting."""
+
+    def test_basic_question(self):
+        q = {"question": "Which one?", "options": [
+            {"label": "A", "description": "first"},
+            {"label": "B", "description": "second"},
+        ]}
+        msg = tg._format_question_msg(" `w4`", "myproj", q)
+        self.assertIn("Which one?", msg)
+        self.assertIn("1. A — first", msg)
+        self.assertIn("2. B — second", msg)
+        self.assertIn("3. Type your answer", msg)
+        self.assertIn("4. Chat about this", msg)
+
+    def test_no_description(self):
+        q = {"question": "Pick?", "options": [
+            {"label": "X"},
+        ]}
+        msg = tg._format_question_msg("", "proj", q)
+        self.assertIn("1. X", msg)
+        self.assertNotIn("—", msg)
+
+    def test_project_in_backticks(self):
+        q = {"question": "Q?", "options": []}
+        msg = tg._format_question_msg("", "my_proj", q)
+        self.assertIn("`my_proj`", msg)
+
+
+class TestSelectOption(unittest.TestCase):
+    """Test _select_option arrow key navigation."""
+
+    @patch("subprocess.run")
+    def test_option_1_no_down(self, mock_run):
+        tg._select_option("0:4.0", 1)
+        cmd = mock_run.call_args[0][0][2]
+        self.assertNotIn("Down", cmd)
+        self.assertIn("Enter", cmd)
+
+    @patch("subprocess.run")
+    def test_option_3_two_downs(self, mock_run):
+        tg._select_option("0:4.0", 3)
+        cmd = mock_run.call_args[0][0][2]
+        self.assertEqual(cmd.count("Down"), 2)
+        self.assertIn("sleep 0.1", cmd)
+        self.assertIn("Enter", cmd)
+
+
+class TestCleanPaneStatus(unittest.TestCase):
+    """Test clean_pane_status preserves thinking indicators."""
+
+    def test_keeps_working_indicator(self):
+        raw = "● Working\n⏳ Working...\n❯ prompt"
+        result = tg.clean_pane_status(raw)
+        self.assertIn("Working...", result)
+
+    def test_keeps_thinking_timing(self):
+        raw = "● Task\n* Percolating… (1m 14s · ↓ 1.8k tokens)\n❯ prompt"
+        result = tg.clean_pane_status(raw)
+        self.assertIn("Percolating", result)
+
+    def test_still_filters_separator(self):
+        raw = "● Task\n────────────\n❯ prompt"
+        result = tg.clean_pane_status(raw)
+        self.assertNotIn("────", result)
+
+
+class TestGodModeGodOffByName(unittest.TestCase):
+    """Test /god off with session name."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_god_off_name"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+        tg._save_session_name("4", "auth")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_off_by_name(self, mock_send, mock_scan):
+        tg._set_god_mode("4", True)
+        tg._handle_command("/god off auth", self.sessions, None)
+        self.assertFalse(tg._is_god_mode_for("4"))
+        msg = mock_send.call_args[0][0]
+        self.assertIn("off", msg)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_by_name(self, mock_send, mock_scan):
+        """Enable god mode using session name."""
+        with patch.object(tg.routing, "_pane_idle_state", return_value=(False, "")):
+            tg._handle_command("/god auth", self.sessions, None)
+        self.assertTrue(tg._is_god_mode_for("4"))
+        msg = mock_send.call_args[0][0]
+        self.assertIn("on", msg)
+
+
+class TestPollUpdates(unittest.TestCase):
+    """Test _poll_updates helper."""
+
+    @patch("requests.get")
+    def test_returns_data_and_offset(self, mock_get):
+        resp = MagicMock()
+        resp.json.return_value = {"result": [{"update_id": 100}]}
+        resp.raise_for_status = MagicMock()
+        mock_get.return_value = resp
+        data, offset = tg._poll_updates(0, timeout=1)
+        self.assertIsNotNone(data)
+        self.assertEqual(offset, 101)
+
+    @patch("requests.get", side_effect=Exception("network error"))
+    def test_error_returns_none(self, mock_get):
+        data, offset = tg._poll_updates(50, timeout=1)
+        self.assertIsNone(data)
+        self.assertEqual(offset, 50)
+
+    @patch("requests.get", side_effect=KeyboardInterrupt)
+    def test_keyboard_interrupt_propagates(self, mock_get):
+        with self.assertRaises(KeyboardInterrupt):
+            tg._poll_updates(0, timeout=1)
+
+
+class TestWriteSignal(unittest.TestCase):
+    """Test write_signal creates correct signal files."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_write_sig"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    def test_creates_signal_file(self, mock_wid):
+        os.environ["TMUX_PANE"] = "%20"
+        tg.write_signal("stop", {"cwd": "/home/user/myproj"})
+        files = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        self.assertEqual(len(files), 1)
+        with open(os.path.join(self.signal_dir, files[0])) as f:
+            sig = json.load(f)
+        self.assertEqual(sig["event"], "stop")
+        self.assertEqual(sig["wid"], "w4")
+        self.assertEqual(sig["pane"], "%20")
+        self.assertEqual(sig["project"], "myproj")
+
+    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    def test_extra_fields(self, mock_wid):
+        os.environ["TMUX_PANE"] = "%20"
+        tg.write_signal("permission", {"cwd": "/tmp/p"}, cmd="echo hi")
+        files = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        with open(os.path.join(self.signal_dir, files[0])) as f:
+            sig = json.load(f)
+        self.assertEqual(sig["cmd"], "echo hi")
+
+
+class TestPaneIdleStateChromeOrder(unittest.TestCase):
+    """Test _pane_idle_state with various chrome patterns below prompt."""
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_prompt_above_context_line(self, mock_capture):
+        """Prompt above 'Context left until...' line is idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "Context left until auto-compact: 33%\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_prompt_above_more_lines(self, mock_capture):
+        """Prompt above '+N more lines' indicator is idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "+12 more lines (ctrl+e to expand)\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
 
 
 if __name__ == "__main__":
