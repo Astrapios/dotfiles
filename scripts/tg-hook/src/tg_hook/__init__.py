@@ -54,7 +54,7 @@ from .state import (
     _resolve_name, _wid_label,
     _save_queued_msg, _load_queued_msgs, _pop_queued_msgs,
     _save_prompt_text, _pop_prompt_text,
-    _mark_busy, _is_busy, _clear_busy, _cleanup_stale_busy,
+    _mark_busy, _is_busy, _busy_since, _clear_busy, _cleanup_stale_busy,
 )
 
 # content

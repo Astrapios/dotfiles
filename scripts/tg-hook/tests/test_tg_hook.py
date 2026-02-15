@@ -3414,12 +3414,24 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
     @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
     @patch.object(tg.state, "load_active_prompt", return_value=None)
     def test_busy_self_heals_when_pane_idle(self, mock_prompt, mock_idle, mock_run):
-        """If busy file exists but pane is idle, self-heal and send."""
+        """If busy file exists but pane is idle and grace period passed, self-heal and send."""
         tg._mark_busy("w4")
-        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        # Pretend busy was set 10s ago (past the 5s grace period)
+        with patch.object(tg.state, "_busy_since", return_value=time.time() - 10):
+            result = tg.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Sent to", result)
         # Busy file should be re-set (cleared then re-marked by send)
         self.assertTrue(tg._is_busy("w4"))
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_busy_grace_period_queues(self, mock_prompt, mock_idle, mock_run):
+        """Within 5s grace period, busy file is trusted even if pane looks idle."""
+        tg._mark_busy("w4")
+        # busy_since is just now — within grace period
+        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        self.assertIn("Saved", result)
 
 
 class TestSavedCommand(unittest.TestCase):

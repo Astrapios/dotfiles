@@ -154,8 +154,12 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     is_idle, typed_text = _pane_idle_state(pane)
 
     # Busy guard: file-based, but pane overrides if session is genuinely idle
+    # Grace period: don't self-heal within 5s of marking busy (race between
+    # sending Enter and Claude starting to process)
     if state._is_busy(wid):
-        if is_idle:
+        busy_ts = state._busy_since(wid)
+        recently_sent = busy_ts and (time.time() - busy_ts < 5)
+        if is_idle and not recently_sent:
             # Stop signal was missed (crash, newline issue, etc.) — self-heal
             state._clear_busy(wid)
         else:

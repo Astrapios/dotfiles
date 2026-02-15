@@ -283,6 +283,16 @@ def _is_busy(wid: str) -> bool:
     return os.path.exists(os.path.join(config.SIGNAL_DIR, f"_busy_{wid}.json"))
 
 
+def _busy_since(wid: str) -> float | None:
+    """Return the timestamp when session was marked busy, or None."""
+    path = os.path.join(config.SIGNAL_DIR, f"_busy_{wid}.json")
+    try:
+        with open(path) as f:
+            return json.load(f).get("ts")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _clear_busy(wid: str):
     """Clear busy mark for a session (called on stop signal)."""
     path = os.path.join(config.SIGNAL_DIR, f"_busy_{wid}.json")
