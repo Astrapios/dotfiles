@@ -26,11 +26,13 @@ def _format_question_msg(tag: str, project: str, question: dict) -> str:
 
 
 def process_signals(focused_wids: set[str] | None = None,
-                     smartfocus_prev: list[str] | None = None) -> str | None:
+                     smartfocus_prev: list[str] | None = None,
+                     smartfocus_has_sent: bool = False) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
     If focused_wids is set, stop signals for those windows are suppressed.
     smartfocus_prev: previous lines from smartfocus monitoring, used to send
-    only the tail (new content) when a smartfocus session stops."""
+    only the tail (new content) when a smartfocus session stops.
+    smartfocus_has_sent: whether any 👁 update was sent during this smartfocus session."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return None
 
@@ -79,7 +81,7 @@ def process_signals(focused_wids: set[str] | None = None,
             if focused_wids and w_idx in focused_wids:
                 pass
             elif was_smartfocus and pane:
-                # Smartfocus already streamed most content — send only the tail
+                # Smartfocus session ended — send tail or full content
                 time.sleep(1)
                 pw = tmux._get_pane_width(pane)
                 for num_lines in (30, 80, 200):
@@ -91,14 +93,24 @@ def process_signals(focused_wids: set[str] | None = None,
                     cur_lines = cleaned.splitlines()
                     new = content._compute_new_lines(smartfocus_prev, cur_lines)
                     if new:
+                        # New lines since last 👁 update — send tail
                         tail_text = "\n".join(new).strip()
                         if tail_text:
                             header = f"✅{tag} (`{project}`) finished:\n\n"
                             telegram._send_long_message(header, tail_text, wid, reply_markup=stop_kb)
                         else:
                             telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
-                    else:
+                    elif smartfocus_has_sent:
+                        # No new lines but 👁 already delivered content
                         telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
+                    else:
+                        # No new lines AND never sent any 👁 — send full response
+                        header = f"✅{tag} (`{project}`) finished:\n\n"
+                        telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
+                elif cleaned:
+                    # No prev_lines (very fast response) — send full content
+                    header = f"✅{tag} (`{project}`) finished:\n\n"
+                    telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
                 else:
                     telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb)
             else:

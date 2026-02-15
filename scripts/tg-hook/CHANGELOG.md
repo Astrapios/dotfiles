@@ -5,6 +5,11 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.7.3
+
+- Fix stop message missing content when smartfocus never sent a 👁 update (fast responses)
+- Photo handler now checks busy/idle state, saves typed text, marks busy, and activates smartfocus
+
 ## 0.7.2
 
 - Show 🔱 god mode indicator on `/status` session list

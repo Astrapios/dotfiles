@@ -9,7 +9,7 @@ import time
 
 import requests
 
-from tg_hook import config, telegram, tmux, state, content, commands, signals
+from tg_hook import config, telegram, tmux, state, content, commands, signals, routing
 
 
 # Track file mtimes for auto-reload
@@ -68,6 +68,7 @@ def cmd_listen():
     smartfocus_target_wid: str | None = None
     smartfocus_pane_width: int = 0
     smartfocus_prev_lines: list[str] = []
+    smartfocus_has_sent: bool = False
 
     interrupted_notified: set[str] = set()  # wids already notified as interrupted
     last_interrupt_check: float = 0
@@ -144,8 +145,8 @@ def cmd_listen():
                     deepfocus_first_new_ts = 0
                     smartfocus_target_wid = None
                     smartfocus_pane_width = 0
-                    smartfocus_last_hash = 0
                     smartfocus_prev_lines = []
+                    smartfocus_has_sent = False
                     telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions),
                                      reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
@@ -206,6 +207,7 @@ def cmd_listen():
         signal_wid = signals.process_signals(
             focused_wids=focused_wids or None,
             smartfocus_prev=smartfocus_prev_lines if smartfocus_state else None,
+            smartfocus_has_sent=smartfocus_has_sent if smartfocus_state else False,
         )
         # Re-read smartfocus state — process_signals may have cleared it
         smartfocus_state = state._load_smartfocus_state()
@@ -255,6 +257,7 @@ def cmd_listen():
                     smartfocus_target_wid = sfw
                     smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
                     smartfocus_prev_lines = []
+                    smartfocus_has_sent = False
                 sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
                 if sfw not in sessions:
                     sessions = tmux.scan_claude_sessions()
@@ -279,10 +282,12 @@ def cmd_listen():
                                 if new_text:
                                     header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
                                     telegram._send_long_message(header, new_text, sfw)
+                                    smartfocus_has_sent = True
                         smartfocus_prev_lines = cur_lines
         elif smartfocus_target_wid:
             smartfocus_target_wid = None
             smartfocus_prev_lines = []
+            smartfocus_has_sent = False
 
         # --- Deep focus monitoring (streams all output) ---
         if deepfocus_state:
@@ -389,13 +394,39 @@ def cmd_listen():
 
                     if target_idx:
                         pane, project = sessions[target_idx]
+                        wid = f"w{target_idx}"
                         instruction = f"Read {path}"
                         if remaining_text:
                             instruction += f" — {remaining_text}"
+
+                        # Busy check — queue if session is working
+                        if state._is_busy(wid):
+                            state._save_queued_msg(wid, instruction)
+                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`")
+                            last_win_idx = target_idx
+                            continue
+
+                        is_idle, typed_text = routing._pane_idle_state(pane)
+                        if not is_idle:
+                            state._save_queued_msg(wid, instruction)
+                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`")
+                            last_win_idx = target_idx
+                            continue
+
                         p = shlex.quote(pane)
-                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && tmux send-keys -t {p} Enter"
+
+                        # Save locally typed text before clearing
+                        if typed_text:
+                            state._save_queued_msg(wid, typed_text)
+                            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+                            time.sleep(0.2)
+
+                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.1 && tmux send-keys -t {p} Enter"
                         subprocess.run(["bash", "-c", cmd], timeout=10)
-                        telegram.tg_send(f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{path}`")
+                        state._mark_busy(wid)
+                        confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{path}`"
+                        telegram.tg_send(confirm)
+                        commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
                         last_win_idx = target_idx
                     else:
                         telegram.tg_send(f"📷 Photo saved to `{path}` — no target session.\n{tmux.format_sessions_message(sessions)}",

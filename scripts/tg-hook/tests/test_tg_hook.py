@@ -3148,15 +3148,15 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
-    def test_smartfocus_stop_no_prev_sends_short(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
-        """Stop signal with smartfocus but no prev_lines sends short notification."""
+    def test_smartfocus_stop_no_prev_sends_full(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with smartfocus but no prev_lines sends full content."""
         tg.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         tg.process_signals()  # no smartfocus_prev passed
-        # Short notification via tg_send (not _send_long_message with full content)
-        mock_send.assert_called()
-        calls = [c[0][0] for c in mock_send.call_args_list]
-        self.assertTrue(any("finished" in c for c in calls))
+        # Full content via _send_long_message (content was never delivered)
+        mock_long.assert_called_once()
+        header = mock_long.call_args[0][0]
+        self.assertIn("finished", header)
         # Smartfocus should be cleared
         self.assertIsNone(tg.state._load_smartfocus_state())
 
@@ -3187,16 +3187,16 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
-    def test_smartfocus_stop_no_new_lines_sends_short(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
-        """Stop signal with smartfocus_prev matching all content sends short notification."""
+    def test_smartfocus_stop_no_new_lines_never_sent_sends_full(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with prev matching all content but never sent 👁 → full content."""
         tg.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         prev = ["Answer", "  line1"]
-        tg.process_signals(smartfocus_prev=prev)
-        # No new content — short notification only
-        mock_long.assert_not_called()
-        calls = [c[0][0] for c in mock_send.call_args_list]
-        self.assertTrue(any("finished" in c for c in calls))
+        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
+        # Content was never delivered via 👁 → send full
+        mock_long.assert_called_once()
+        body = mock_long.call_args[0][1]
+        self.assertIn("line1", body)
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.telegram, "_send_long_message")
@@ -6151,6 +6151,118 @@ class TestDetectInterrupted(unittest.TestCase):
             "❯ \n"
         )
         self.assertFalse(tg._detect_interrupted(raw))
+
+
+class TestSmartfocusColdStart(unittest.TestCase):
+    """Test stop message includes full content when smartfocus never sent a 👁 update."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_sf_cold"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
+        tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  the full response\n❯ prompt"))
+    @patch("time.sleep")
+    def test_no_prev_lines_sends_full_content(self, mock_sleep, mock_run, mock_proj,
+                                               mock_kb, mock_long, mock_send):
+        """Smartfocus stop with no prev_lines (very fast) sends full content."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        # smartfocus_prev is empty (no iterations captured), smartfocus_has_sent=False
+        tg.process_signals(smartfocus_prev=[], smartfocus_has_sent=False)
+        mock_long.assert_called_once()
+        header = mock_long.call_args[0][0]
+        self.assertIn("finished", header)
+        body = mock_long.call_args[0][1]
+        self.assertIn("the full response", body)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
+    @patch("time.sleep")
+    def test_prev_matches_but_never_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
+                                                     mock_kb, mock_long, mock_send):
+        """Smartfocus stop: prev matches all content, never sent 👁 → send full response."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        # prev_lines matches entire cleaned content — diff is empty
+        prev = ["Answer", "  line1"]
+        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
+        # Full content should be sent via _send_long_message
+        mock_long.assert_called_once()
+        body = mock_long.call_args[0][1]
+        self.assertIn("line1", body)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
+    @patch("time.sleep")
+    def test_prev_matches_already_sent_sends_short(self, mock_sleep, mock_run, mock_proj,
+                                                    mock_kb, mock_long, mock_send):
+        """Smartfocus stop: prev matches all content, already sent 👁 → short 'finished'."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        prev = ["Answer", "  line1"]
+        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
+        # Only short notification, no long message
+        mock_long.assert_not_called()
+        calls = [c[0][0] for c in mock_send.call_args_list]
+        self.assertTrue(any("finished" in c for c in calls))
+
+
+class TestPhotoAutofocus(unittest.TestCase):
+    """Test photo handler activates smartfocus and respects busy state."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_photo_af"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
+        tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_photo_confirm_activates_smartfocus(self):
+        """Photo confirm message triggers smartfocus activation."""
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "📷 Photo sent to `w4` (`myproj`):\n`/tmp/photo.jpg`")
+        st = tg._load_smartfocus_state()
+        self.assertIsNotNone(st)
+        self.assertEqual(st["wid"], "4")
+
+    def test_photo_saved_does_not_activate(self):
+        """Busy photo (saved) does NOT trigger smartfocus."""
+        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+                                      "💾 Photo saved for `w4` (busy):\n`/tmp/photo.jpg`")
+        self.assertIsNone(tg._load_smartfocus_state())
 
 
 if __name__ == "__main__":
