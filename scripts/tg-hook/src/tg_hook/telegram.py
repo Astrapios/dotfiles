@@ -44,6 +44,8 @@ def _send_long_message(header: str, body: str, wid: str = "",
     boundaries. reply_markup is attached to the last chunk only so buttons appear
     at the bottom.
     """
+    # Escape triple backticks in body to prevent breaking the code block wrapper
+    body = body.replace("```", "'''")
     footer_str = f"\n{footer}" if footer else ""
     overhead = len(header) + len("```\n") + len("\n```") + len(footer_str) + 50
     chunk_size = config.TG_MAX - overhead
