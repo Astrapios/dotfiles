@@ -82,8 +82,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         sessions = tmux.scan_claude_sessions()
         help_lines = [
             "📖 *Commands:*",
-            "`/sessions` — list active Claude sessions",
-            "`/status [wN] [lines]` — show last response or N filtered lines",
+            "`/status` — list active Claude sessions",
+            "`/status wN [lines]` — show last response or N filtered lines",
             "`/last [wN]` — re-send last Telegram message for a session",
             "`/saved [wN]` — review saved messages for busy sessions",
             "`/focus wN` — watch completed responses",
@@ -107,33 +107,24 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         telegram.tg_send("\n".join(help_lines), reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
-    if text.lower() == "/sessions":
+    # /status [wN|name] [lines]  (/sessions is an alias for bare /status)
+    if text.lower() in ("/sessions", "/status"):
         sessions = tmux.scan_claude_sessions()
         telegram.tg_send(tmux.format_sessions_message(sessions),
                          reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
-    # /status [wN|name] [lines]
-    status_m = re.match(r"^/status(?:\s+w?(\w[\w-]*))?(?:\s+(\d+))?$", text.lower())
+    status_m = re.match(r"^/status\s+w?(\w[\w-]*)(?:\s+(\d+))?$", text.lower())
     if status_m:
         raw_target = status_m.group(1)
         num_lines = int(status_m.group(2)) if status_m.group(2) else 20
         idx = state._resolve_name(raw_target, sessions) if raw_target else None
         targets = []
-        if raw_target and idx:
+        if idx:
             targets = [(idx, sessions[idx])]
-        elif raw_target:
+        else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
                              reply_markup=tmux._sessions_keyboard(sessions))
-            return None, sessions, last_win_idx
-        elif len(sessions) == 1:
-            targets = list(sessions.items())
-        elif len(sessions) > 1:
-            kb = tmux._command_sessions_keyboard("status", sessions)
-            telegram.tg_send("📋 Status for which session?", reply_markup=kb)
-            return None, sessions, last_win_idx
-        else:
-            telegram.tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.")
             return None, sessions, last_win_idx
         explicit_lines = status_m.group(2) is not None
         for win_idx, (pane, project) in targets:

@@ -1323,7 +1323,6 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Commands", msg)
-        self.assertIn("/sessions", msg)
         self.assertIn("/status", msg)
         self.assertIn("/focus", msg)
         self.assertIn("/new", msg)
@@ -2383,17 +2382,14 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
-    def test_bare_status_multiple_no_last_shows_picker(self, mock_send):
-        """Bare /status with multiple sessions and no last_win shows picker."""
+    @patch.object(tg.tmux, "scan_claude_sessions")
+    def test_bare_status_shows_sessions(self, mock_scan, mock_send):
+        """Bare /status shows session list."""
+        mock_scan.return_value = self.sessions
         action, _, _ = tg._handle_command("/status", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
-        self.assertIn("Status for which", msg)
-        _, kwargs = mock_send.call_args
-        kb = kwargs.get("reply_markup")
-        self.assertIsNotNone(kb)
-        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
-        self.assertIn("cmd_status_4", buttons)
+        self.assertIn("Active Claude sessions", msg)
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.tmux, "scan_claude_sessions")
