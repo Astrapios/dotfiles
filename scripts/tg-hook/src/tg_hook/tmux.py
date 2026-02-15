@@ -83,6 +83,18 @@ def _capture_pane(pane: str, num_lines: int = 20) -> str:
         return ""
 
 
+def _get_cursor_x(pane: str) -> int | None:
+    """Get the cursor column position (0-based) for a tmux pane."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", pane, "-p", "#{cursor_x}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return None
+
+
 def scan_claude_sessions() -> dict[str, tuple[str, str]]:
     """Scan tmux for panes running claude. Returns {window_index: (pane_target, project)}."""
     sessions = {}

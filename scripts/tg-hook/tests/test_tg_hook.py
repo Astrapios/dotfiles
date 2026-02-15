@@ -3203,6 +3203,25 @@ class TestPaneIdleState(unittest.TestCase):
         self.assertTrue(is_idle)
         self.assertEqual(typed, "partial command")
 
+    @patch.object(tg.tmux, "_get_cursor_x", return_value=7)
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_filters_suggestion(self, mock_capture, mock_cursor):
+        """Cursor at col 7 means only 'fix' is typed, rest is suggestion."""
+        #                0123456789...
+        mock_capture.return_value = "  ❯ fix the bug in auth\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "fix")
+
+    @patch.object(tg.tmux, "_get_cursor_x", return_value=4)
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_cursor_at_prompt_no_text(self, mock_capture, mock_cursor):
+        """Cursor right after ❯ means no typed text, even with suggestion."""
+        mock_capture.return_value = "  ❯ suggest something\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
     @patch.object(tg.tmux, "_capture_pane")
     def test_busy(self, mock_capture):
         mock_capture.return_value = "● Working on something\n  Processing files...\n"

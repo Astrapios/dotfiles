@@ -50,6 +50,7 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
     and checks if it's a ❯ prompt. Old ❯ lines from submitted commands
     in earlier lines are correctly ignored.
     typed_text is any text on the same line after ❯ (locally typed input).
+    Uses cursor position to exclude grayed-out auto-suggestions.
     """
     try:
         raw = tmux._capture_pane(pane, 15)
@@ -61,7 +62,13 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
             continue
         m = re.match(r'^(\s*❯\s*)(.*)', line)
         if m:
-            return True, m.group(2).strip()
+            # Use cursor position to exclude auto-suggestions
+            cursor_x = tmux._get_cursor_x(pane)
+            if cursor_x is not None:
+                typed = line[:cursor_x][len(m.group(1)):].strip()
+            else:
+                typed = m.group(2).strip()
+            return True, typed
         return False, ""
     return False, ""
 
