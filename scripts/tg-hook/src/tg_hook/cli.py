@@ -76,14 +76,57 @@ def cmd_hook():
                 json.dump({"cmd": cmd}, f)
 
 
+def cmd_help():
+    """Print CLI usage information."""
+    print("""tg-hook — Telegram bridge for Claude Code
+
+Usage: tg-hook <command> [args...]
+
+Commands:
+  listen              Start the Telegram listener daemon
+  hook                Read Claude hook JSON from stdin (called by hooks)
+  notify <message>    Send a one-shot notification to Telegram
+  ask <question>      Send a question, wait for reply, print to stdout
+  send-photo <path> [caption]  Send a photo to Telegram
+  help                Show this help message
+
+Setup:
+  1. Create a Telegram bot via @BotFather, get the token
+  2. Get your chat ID (send a message to the bot, check getUpdates)
+  3. Save credentials to ~/.config/tg_hook.env:
+       TELEGRAM_BOT_TOKEN=your-bot-token
+       TELEGRAM_CHAT_ID=your-chat-id
+  4. Configure Claude Code hooks (see claude_settings.json)
+  5. Run: tg-hook listen
+
+Telegram commands (inside listener):
+  /status [wN]        List sessions or show session output
+  /focus wN           Watch completed responses
+  /deepfocus wN       Stream all output in real-time
+  /unfocus            Stop monitoring
+  /god [wN|all|off]   Auto-accept permissions (god mode)
+  /interrupt wN       Interrupt current task
+  /name wN label      Name a session
+  /new [dir]          Start new Claude session
+  /saved [wN]         Review queued messages
+  /last [wN]          Re-send last Telegram message
+  /autofocus          Toggle auto-monitor on send
+  /kill wN            Exit a Claude session
+  /stop / /start      Pause/resume listener
+  /quit               Shut down listener""")
+
+
 def main():
     """CLI entry point."""
     if len(sys.argv) < 2:
-        print("Usage: tg-hook <command> [args...]")
-        print("Commands: notify, ask, send-photo, hook, listen")
+        cmd_help()
         sys.exit(1)
 
     command = sys.argv[1]
+
+    if command == "help" or command == "--help" or command == "-h":
+        cmd_help()
+        return
 
     if command == "hook":
         cmd_hook()
@@ -110,4 +153,5 @@ def main():
         listener.cmd_listen()
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
+        print("Run 'tg-hook help' for usage information.")
         sys.exit(1)

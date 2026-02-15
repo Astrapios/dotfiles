@@ -57,6 +57,7 @@ from .state import (
     _save_queued_msg, _load_queued_msgs, _pop_queued_msgs,
     _save_prompt_text, _pop_prompt_text,
     _mark_busy, _is_busy, _busy_since, _clear_busy, _cleanup_stale_busy,
+    _is_god_mode_for, _god_mode_wids, _set_god_mode, _clear_god_mode,
 )
 
 # content
@@ -78,11 +79,12 @@ from .signals import _format_question_msg, process_signals
 # commands
 from .commands import (
     _ALIASES, _any_active_prompt, _resolve_alias,
-    _maybe_activate_smartfocus, _handle_command, _handle_callback,
+    _enable_accept_edits, _maybe_activate_smartfocus,
+    _handle_command, _handle_callback,
 )
 
 # listener
 from .listener import cmd_listen
 
 # cli
-from .cli import cmd_notify, cmd_ask, cmd_send_photo, cmd_hook, main
+from .cli import cmd_notify, cmd_ask, cmd_send_photo, cmd_hook, cmd_help, main

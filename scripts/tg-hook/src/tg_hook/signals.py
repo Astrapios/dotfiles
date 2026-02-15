@@ -4,7 +4,7 @@ import os
 import re
 import time
 
-from tg_hook import config, telegram, tmux, content, state
+from tg_hook import config, telegram, tmux, content, state, routing
 
 
 def _format_question_msg(tag: str, project: str, question: dict) -> str:
@@ -103,40 +103,52 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                         reply_markup=saved_kb,
                     )
 
+            # God mode: ensure accept-edits is on when session becomes idle
+            if pane and w_idx and state._is_god_mode_for(w_idx):
+                from tg_hook import commands  # deferred to avoid circular
+                commands._enable_accept_edits(pane)
+
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
             perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
-            if options and not any(o.startswith("1.") for o in options):
-                options.insert(0, "1. Yes")
-            max_opt = 0
-            for o in options:
-                m_opt = re.match(r'(\d+)', o)
-                if m_opt:
-                    max_opt = max(max_opt, int(m_opt.group(1)))
-            opts_text = "\n".join(options)
-            n = max_opt or 3
-            perm_kb = telegram._build_inline_keyboard([[
-                ("\u2705 Allow", f"perm_{wid}_1"),
-                ("\u2705 Always", f"perm_{wid}_2"),
-                ("\u274c Deny", f"perm_{wid}_{n}"),
-            ]])
-            context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
-            if bash_cmd:
-                msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{context_str}```\n{bash_cmd[:2000]}\n```\n{opts_text}"
-                telegram.tg_send(msg, reply_markup=perm_kb)
-                config._save_last_msg(wid, msg)
+
+            # God mode: auto-accept and send compact receipt
+            if w_idx and state._is_god_mode_for(w_idx):
+                desc = bash_cmd[:200] if bash_cmd else (perm_header or "permission")
+                telegram.tg_send(f"\U0001f531{tag} Auto-allowed (`{project}`): `{desc}`")
+                routing._select_option(pane, 1)
             else:
-                title = perm_header or "needs permission"
-                header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
-                if perm_body:
-                    telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text)
-                else:
-                    msg = f"{header_str}{opts_text}"
+                if options and not any(o.startswith("1.") for o in options):
+                    options.insert(0, "1. Yes")
+                max_opt = 0
+                for o in options:
+                    m_opt = re.match(r'(\d+)', o)
+                    if m_opt:
+                        max_opt = max(max_opt, int(m_opt.group(1)))
+                opts_text = "\n".join(options)
+                n = max_opt or 3
+                perm_kb = telegram._build_inline_keyboard([[
+                    ("\u2705 Allow", f"perm_{wid}_1"),
+                    ("\u2705 Always", f"perm_{wid}_2"),
+                    ("\u274c Deny", f"perm_{wid}_{n}"),
+                ]])
+                context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
+                if bash_cmd:
+                    msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{context_str}```\n{bash_cmd[:2000]}\n```\n{opts_text}"
                     telegram.tg_send(msg, reply_markup=perm_kb)
                     config._save_last_msg(wid, msg)
-            state.save_active_prompt(wid, pane, total=n,
-                                     shortcuts={"y": 1, "yes": 1, "allow": 1,
-                                                "n": n, "no": n, "deny": n})
+                else:
+                    title = perm_header or "needs permission"
+                    header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
+                    if perm_body:
+                        telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text)
+                    else:
+                        msg = f"{header_str}{opts_text}"
+                        telegram.tg_send(msg, reply_markup=perm_kb)
+                        config._save_last_msg(wid, msg)
+                state.save_active_prompt(wid, pane, total=n,
+                                         shortcuts={"y": 1, "yes": 1, "allow": 1,
+                                                    "n": n, "no": n, "deny": n})
 
         elif event == "question":
             questions = signal.get("questions", [])

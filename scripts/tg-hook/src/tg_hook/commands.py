@@ -8,7 +8,8 @@ import time
 from tg_hook import config, telegram, tmux, state, content, routing
 
 
-_ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus"}
+_ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus",
+                            "ga": "/god all", "goff": "/god off"}
 
 
 def _any_active_prompt() -> bool:
@@ -45,6 +46,9 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^i(\d+)$", stripped)
     if m:
         return f"/interrupt w{m.group(1)}"
+    m = re.match(r"^g(\d+)$", stripped)
+    if m:
+        return f"/god w{m.group(1)}"
     return text
 
 
@@ -60,6 +64,24 @@ def _interrupt_session(idx: str, sessions: dict):
     state._clear_busy(wid)
     state.load_active_prompt(wid)  # load = consume and delete
     telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
+
+
+def _enable_accept_edits(pane: str):
+    """Cycle Shift+Tab until 'accept edits on' mode is active."""
+    p = shlex.quote(pane)
+    for _ in range(5):
+        try:
+            raw = tmux._capture_pane(pane, 5)
+        except Exception:
+            return
+        for line in raw.splitlines():
+            s = line.strip()
+            if s.startswith("\u23f5\u23f5"):
+                if "accept edits on" in s.lower():
+                    return
+                break
+        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} BTab"], timeout=5)
+        time.sleep(0.3)
 
 
 def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: str):
@@ -106,6 +128,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
             "`/autofocus` — toggle auto-monitor on send (default: on)",
+            "`/god [wN|all|off]` — auto-accept permissions",
             "`/name wN [label]` — name a session",
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
             "`/interrupt [wN]` — interrupt current task (Esc)",
@@ -117,6 +140,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
             "`af` autofocus | `sv` saved | `?` help",
+            "`g4` god w4 | `ga` god all | `goff` god off",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
             "*Photos:* send a photo to have Claude read it. Add `wN` in caption to target.",
@@ -253,6 +277,70 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("👁 Autofocus *off*.")
             else:
                 telegram.tg_send("👁 Autofocus *on*.")
+        return None, sessions, last_win_idx
+
+    # /god [w4|all|off|off w4]
+    god_m = re.match(r"^/god(?:\s+(.+))?$", text, re.IGNORECASE)
+    if god_m:
+        arg = god_m.group(1).strip() if god_m.group(1) else None
+        sessions = tmux.scan_claude_sessions()
+        if arg is None:
+            # Bare /god — show status
+            wids = state._god_mode_wids()
+            if not wids:
+                status_msg = "\U0001f531 God mode is *off*."
+            elif "all" in wids:
+                status_msg = "\U0001f531 God mode is *on* for all sessions."
+            else:
+                labels = ", ".join(state._wid_label(w) for w in sorted(wids, key=lambda x: int(x) if x.isdigit() else 0))
+                status_msg = f"\U0001f531 God mode is *on* for {labels}."
+            kb = tmux._command_sessions_keyboard("god", sessions)
+            telegram.tg_send(status_msg, reply_markup=kb)
+            return None, sessions, last_win_idx
+
+        # /god off [wN]
+        off_m = re.match(r"^off(?:\s+w?(\w[\w-]*))?$", arg, re.IGNORECASE)
+        if off_m:
+            off_target = off_m.group(1)
+            if off_target:
+                idx = state._resolve_name(off_target, sessions) or off_target
+                state._set_god_mode(idx, False)
+                telegram.tg_send(f"\U0001f531 God mode *off* for {state._wid_label(idx)}.")
+            else:
+                state._clear_god_mode()
+                telegram.tg_send("\U0001f531 God mode *off*.")
+            return None, sessions, last_win_idx
+
+        # /god all
+        if arg.lower() == "all":
+            state._set_god_mode("all", True)
+            telegram.tg_send("\U0001f531 God mode *on* for all sessions.")
+            # Cycle accept-edits for all idle sessions
+            for idx, (p, proj) in sessions.items():
+                idle, _ = routing._pane_idle_state(p)
+                if idle:
+                    _enable_accept_edits(p)
+            return None, sessions, last_win_idx
+
+        # /god wN|name
+        target_m = re.match(r"^w?(\w[\w-]*)$", arg)
+        if target_m:
+            raw_target = target_m.group(1)
+            idx = state._resolve_name(raw_target, sessions)
+            if idx:
+                state._set_god_mode(idx, True)
+                telegram.tg_send(f"\U0001f531 God mode *on* for {state._wid_label(idx)}.")
+                pane_t, _ = sessions[idx]
+                idle, _ = routing._pane_idle_state(pane_t)
+                if idle:
+                    _enable_accept_edits(pane_t)
+                return None, sessions, idx
+            else:
+                telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                                 reply_markup=tmux._sessions_keyboard(sessions))
+                return None, sessions, last_win_idx
+
+        telegram.tg_send(f"⚠️ Unknown `/god` argument: `{arg}`")
         return None, sessions, last_win_idx
 
     # /name wN|name [label]
@@ -531,7 +619,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|last)_(w?)(\d+)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|last|god)_(w?)(\d+)$", cb_data)
     if m:
         cmd, _, idx = m.group(1), m.group(2), m.group(3)
         cmd_text = f"/{cmd} w{idx}"

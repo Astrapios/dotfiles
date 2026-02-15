@@ -2266,7 +2266,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("deepfocus", names)
         self.assertIn("name", names)
         self.assertNotIn("sessions", names)
-        self.assertEqual(len(commands), 13)
+        self.assertIn("god", names)
+        self.assertEqual(len(commands), 14)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -3804,6 +3805,345 @@ class TestSmartFocusIntegration(unittest.TestCase):
         st = tg._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
+
+
+class TestGodModeState(unittest.TestCase):
+    """Test god mode state functions."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_god_state"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_default_off(self):
+        self.assertFalse(tg._is_god_mode_for("4"))
+        self.assertEqual(tg._god_mode_wids(), [])
+
+    def test_enable_per_session(self):
+        tg._set_god_mode("4", True)
+        self.assertTrue(tg._is_god_mode_for("4"))
+        self.assertFalse(tg._is_god_mode_for("5"))
+        self.assertEqual(tg._god_mode_wids(), ["4"])
+
+    def test_enable_all(self):
+        tg._set_god_mode("all", True)
+        self.assertTrue(tg._is_god_mode_for("4"))
+        self.assertTrue(tg._is_god_mode_for("99"))
+        self.assertIn("all", tg._god_mode_wids())
+
+    def test_disable_per_session(self):
+        tg._set_god_mode("4", True)
+        tg._set_god_mode("5", True)
+        tg._set_god_mode("4", False)
+        self.assertFalse(tg._is_god_mode_for("4"))
+        self.assertTrue(tg._is_god_mode_for("5"))
+
+    def test_clear_god_mode(self):
+        tg._set_god_mode("4", True)
+        tg._set_god_mode("5", True)
+        tg._clear_god_mode()
+        self.assertFalse(tg._is_god_mode_for("4"))
+        self.assertFalse(tg._is_god_mode_for("5"))
+        self.assertEqual(tg._god_mode_wids(), [])
+
+    def test_disable_last_removes_file(self):
+        tg._set_god_mode("4", True)
+        tg._set_god_mode("4", False)
+        path = os.path.join(self.signal_dir, "_god_mode.json")
+        self.assertFalse(os.path.exists(path))
+
+    def test_no_duplicate_wids(self):
+        tg._set_god_mode("4", True)
+        tg._set_god_mode("4", True)
+        self.assertEqual(tg._god_mode_wids(), ["4"])
+
+    def test_survives_clear_signals(self):
+        """God mode state survives _clear_signals(include_state=True)."""
+        tg._set_god_mode("4", True)
+        tg._clear_signals(include_state=True)
+        self.assertTrue(tg._is_god_mode_for("4"))
+
+
+class TestGodModeAutoAccept(unittest.TestCase):
+    """Test permission auto-accept in god mode."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_god_accept"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, wid, pane="0:4.0", project="myproj", **extra):
+        import time as t
+        signal = {"event": event, "pane": pane, "wid": wid, "project": project, **extra}
+        fname = f"{t.time():.6f}_test.json"
+        path = os.path.join(self.signal_dir, fname)
+        with open(path, "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to run bash", "ls -la", ["1. Yes", "2. Always", "3. Deny"], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_mode_auto_accepts(self, mock_send, mock_proj, mock_extract, mock_select):
+        """Permission in god-mode session is auto-accepted."""
+        tg._set_god_mode("4", True)
+        self._write_signal("permission", "w4", cmd="ls -la")
+        tg.signals.process_signals()
+        mock_select.assert_called_once_with("0:4.0", 1)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Auto-allowed", msg)
+        self.assertIn("ls -la", msg)
+        # No active prompt should be saved
+        self.assertIsNone(tg.state.load_active_prompt("w4"))
+
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to run bash", "rm -rf /", ["1. Yes", "2. Always", "3. Deny"], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.state, "save_active_prompt")
+    def test_non_god_session_normal_flow(self, mock_save_prompt, mock_send, mock_proj, mock_extract, mock_select):
+        """Permission in non-god session follows normal flow."""
+        tg._set_god_mode("5", True)  # god mode for w5, not w4
+        self._write_signal("permission", "w4", cmd="rm -rf /")
+        tg.signals.process_signals()
+        mock_select.assert_not_called()
+        mock_save_prompt.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("needs permission", msg)
+
+    @patch.object(tg.routing, "_select_option")
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to edit", "file.py", ["1. Yes", "2. Always", "3. Deny"], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_all_accepts_any_session(self, mock_send, mock_proj, mock_extract, mock_select):
+        """God mode 'all' auto-accepts for any session."""
+        tg._set_god_mode("all", True)
+        self._write_signal("permission", "w7", pane="0:7.0")
+        tg.signals.process_signals()
+        mock_select.assert_called_once_with("0:7.0", 1)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Auto-allowed", msg)
+
+    @patch.object(tg.content, "_extract_pane_permission", return_value=("", "", [], ""))
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_mode_receipt_has_header_when_no_cmd(self, mock_send, mock_proj, mock_extract):
+        """Receipt uses perm_header when no bash_cmd."""
+        tg._set_god_mode("4", True)
+        self._write_signal("permission", "w4")
+        with patch.object(tg.routing, "_select_option"):
+            tg.signals.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Auto-allowed", msg)
+        self.assertIn("permission", msg)
+
+
+class TestGodModeCommand(unittest.TestCase):
+    """Test /god command handling."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_god_cmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_bare_god_shows_status_off(self, mock_send, mock_scan):
+        tg._handle_command("/god", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("off", msg)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_bare_god_shows_status_on(self, mock_send, mock_scan):
+        tg._set_god_mode("4", True)
+        tg._handle_command("/god", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("on", msg)
+        self.assertIn("w4", msg)
+
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(tg.commands, "_enable_accept_edits")
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_w4_enables(self, mock_send, mock_scan, mock_accept, mock_idle):
+        tg._handle_command("/god w4", self.sessions, None)
+        self.assertTrue(tg._is_god_mode_for("4"))
+        msg = mock_send.call_args[0][0]
+        self.assertIn("on", msg)
+        mock_accept.assert_called_once_with("0:4.0")
+
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(False, ""))
+    @patch.object(tg.commands, "_enable_accept_edits")
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_w4_busy_skips_accept_edits(self, mock_send, mock_scan, mock_accept, mock_idle):
+        tg._handle_command("/god w4", self.sessions, None)
+        self.assertTrue(tg._is_god_mode_for("4"))
+        mock_accept.assert_not_called()
+
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(tg.commands, "_enable_accept_edits")
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_all_enables(self, mock_send, mock_scan, mock_accept, mock_idle):
+        tg._handle_command("/god all", self.sessions, None)
+        self.assertTrue(tg._is_god_mode_for("4"))
+        self.assertTrue(tg._is_god_mode_for("5"))
+        # Should cycle accept-edits for all idle sessions
+        self.assertEqual(mock_accept.call_count, 2)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_off_disables_all(self, mock_send, mock_scan):
+        tg._set_god_mode("4", True)
+        tg._set_god_mode("5", True)
+        tg._handle_command("/god off", self.sessions, None)
+        self.assertFalse(tg._is_god_mode_for("4"))
+        self.assertFalse(tg._is_god_mode_for("5"))
+        msg = mock_send.call_args[0][0]
+        self.assertIn("off", msg)
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_god_off_w4(self, mock_send, mock_scan):
+        tg._set_god_mode("4", True)
+        tg._set_god_mode("5", True)
+        tg._handle_command("/god off w4", self.sessions, None)
+        self.assertFalse(tg._is_god_mode_for("4"))
+        self.assertTrue(tg._is_god_mode_for("5"))
+
+    def test_alias_g4(self):
+        self.assertEqual(tg._resolve_alias("g4", False), "/god w4")
+
+    def test_alias_ga(self):
+        self.assertEqual(tg._resolve_alias("ga", False), "/god all")
+
+    def test_alias_goff(self):
+        self.assertEqual(tg._resolve_alias("goff", False), "/god off")
+
+    def test_alias_g4_with_active_prompt(self):
+        """g4 alias always resolves, even with active prompt."""
+        self.assertEqual(tg._resolve_alias("g4", True), "/god w4")
+
+    def test_alias_ga_suppressed_with_active_prompt(self):
+        """ga is ambiguous during prompts."""
+        self.assertEqual(tg._resolve_alias("ga", True), "ga")
+
+
+class TestGodModeAcceptEditsOnStop(unittest.TestCase):
+    """Test accept-edits cycling on stop signal for god mode sessions."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_god_stop"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, wid, pane="0:4.0", project="myproj"):
+        import time as t
+        signal = {"event": event, "pane": pane, "wid": wid, "project": project}
+        fname = f"{t.time():.6f}_test.json"
+        path = os.path.join(self.signal_dir, fname)
+        with open(path, "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(tg.commands, "_enable_accept_edits")
+    @patch.object(tg.content, "_has_response_start", return_value=True)
+    @patch.object(tg.content, "clean_pane_content", return_value="done")
+    @patch.object(tg.tmux, "_capture_pane", return_value="● done\n❯")
+    @patch.object(tg.tmux, "_get_pane_width", return_value=80)
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch("time.sleep")
+    def test_stop_triggers_accept_edits_for_god_session(self, mock_sleep, mock_long,
+                                                         mock_proj, mock_pw, mock_cap,
+                                                         mock_clean, mock_has, mock_accept):
+        tg._set_god_mode("4", True)
+        self._write_signal("stop", "w4")
+        tg.signals.process_signals()
+        mock_accept.assert_called_once_with("0:4.0")
+
+    @patch.object(tg.commands, "_enable_accept_edits")
+    @patch.object(tg.content, "_has_response_start", return_value=True)
+    @patch.object(tg.content, "clean_pane_content", return_value="done")
+    @patch.object(tg.tmux, "_capture_pane", return_value="● done\n❯")
+    @patch.object(tg.tmux, "_get_pane_width", return_value=80)
+    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch("time.sleep")
+    def test_stop_no_accept_edits_without_god(self, mock_sleep, mock_long,
+                                               mock_proj, mock_pw, mock_cap,
+                                               mock_clean, mock_has, mock_accept):
+        self._write_signal("stop", "w4")
+        tg.signals.process_signals()
+        mock_accept.assert_not_called()
+
+
+class TestEnableAcceptEdits(unittest.TestCase):
+    """Test _enable_accept_edits helper."""
+
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "_capture_pane", return_value="some output\n⏵⏵ accept edits on")
+    def test_already_on(self, mock_cap, mock_run):
+        """No BTab sent if accept edits already on."""
+        tg._enable_accept_edits("0:4.0")
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "_capture_pane", side_effect=[
+        "some output\n⏵⏵ auto-accept",
+        "some output\n⏵⏵ accept edits on",
+    ])
+    def test_cycles_once(self, mock_cap, mock_run):
+        """Sends BTab once to cycle to accept edits on."""
+        tg._enable_accept_edits("0:4.0")
+        self.assertEqual(mock_run.call_count, 1)
+
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "_capture_pane", return_value="some output\n⏵⏵ auto-accept")
+    def test_max_cycles(self, mock_cap, mock_run):
+        """Stops after 5 cycles even if not found."""
+        tg._enable_accept_edits("0:4.0")
+        self.assertEqual(mock_run.call_count, 5)
+
+
+class TestHelpIncludesGod(unittest.TestCase):
+    """Test /help includes /god command."""
+
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={})
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_help_has_god(self, mock_send, mock_scan):
+        tg._handle_command("/help", {}, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("/god", msg)
+        self.assertIn("g4", msg)
+        self.assertIn("ga", msg)
+        self.assertIn("goff", msg)
 
 
 if __name__ == "__main__":

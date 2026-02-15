@@ -164,6 +164,7 @@ def _set_bot_commands():
         {"command": "new", "description": "Start new Claude session"},
         {"command": "stop", "description": "Pause the listener"},
         {"command": "start", "description": "Resume the listener"},
+        {"command": "god", "description": "Auto-accept permissions (god mode)"},
         {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
         {"command": "quit", "description": "Shut down the listener"},
     ]

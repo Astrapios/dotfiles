@@ -34,7 +34,7 @@ def _clear_signals(include_state: bool = False):
     Queued messages (_queued_) and session names (_names) are always preserved."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return
-    _persist = ("_queued_", "_names")
+    _persist = ("_queued_", "_names", "_god_mode")
     for f in os.listdir(config.SIGNAL_DIR):
         if f.startswith(_persist):
             continue
@@ -366,3 +366,48 @@ def _cleanup_stale_busy(active_sessions: dict):
                 os.remove(os.path.join(config.SIGNAL_DIR, fname))
             except OSError:
                 pass
+
+
+def _is_god_mode_for(w_idx: str) -> bool:
+    """Check if god mode is enabled for a specific window index."""
+    wids = _god_mode_wids()
+    return "all" in wids or w_idx in wids
+
+
+def _god_mode_wids() -> list[str]:
+    """Return list of god-mode wids (may contain 'all')."""
+    path = os.path.join(config.SIGNAL_DIR, "_god_mode.json")
+    try:
+        with open(path) as f:
+            return json.load(f).get("wids", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _set_god_mode(w_idx: str, enabled: bool):
+    """Enable/disable god mode for a specific wid or 'all'."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, "_god_mode.json")
+    wids = _god_mode_wids()
+    if enabled:
+        if w_idx not in wids:
+            wids.append(w_idx)
+    else:
+        wids = [w for w in wids if w != w_idx]
+    if wids:
+        with open(path, "w") as f:
+            json.dump({"wids": wids}, f)
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _clear_god_mode():
+    """Disable god mode entirely."""
+    path = os.path.join(config.SIGNAL_DIR, "_god_mode.json")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
