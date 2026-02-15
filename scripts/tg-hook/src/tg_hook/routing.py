@@ -93,6 +93,14 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     prompt = state.load_active_prompt(wid)
 
     if prompt:
+        prompt_pane = prompt.get("pane", pane)
+        # Discard stale prompts whose pane uses session:window.pane format
+        # but doesn't match the current pane (e.g. session renamed 0→main).
+        # Pane IDs like %20 are stable across renames and always valid.
+        if ":" in prompt_pane and prompt_pane != pane:
+            config._log("route", f"discarding stale prompt: stored pane={prompt_pane!r}, current={pane!r}")
+            prompt = None
+    if prompt:
         total = prompt.get("total", 0)
         shortcuts = prompt.get("shortcuts", {})
         free_text_at = prompt.get("free_text_at")

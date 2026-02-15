@@ -494,8 +494,8 @@ packages:
   timestamp: 1766926974520
 - pypi: ./
   name: tg-hook
-  version: 0.6.1
-  sha256: 82a59ab01f08d6c3176f143464bad5c92c9545fe426d6e605ca9d644030b1452
+  version: 0.7.1
+  sha256: e6c10cb7b2997e4765a280e185387e16ecd167fdca365eba6169459b8e55107b
   requires_dist:
   - requests>=2.28
   requires_python: '>=3.11'

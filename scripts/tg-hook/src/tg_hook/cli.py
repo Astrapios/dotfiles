@@ -116,6 +116,7 @@ Telegram commands (inside listener):
   /focus wN           Watch completed responses
   /deepfocus wN       Stream all output in real-time
   /unfocus            Stop monitoring
+  /clear [wN]         Reset transient state (prompts, busy, focus)
   /god [wN|all|off]   Auto-accept permissions (god mode)
   /interrupt wN       Interrupt current task
   /name wN label      Name a session

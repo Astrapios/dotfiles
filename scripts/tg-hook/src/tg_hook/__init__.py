@@ -59,6 +59,7 @@ from .state import (
     _save_queued_msg, _load_queued_msgs, _pop_queued_msgs,
     _save_prompt_text, _pop_prompt_text,
     _mark_busy, _is_busy, _busy_since, _clear_busy, _cleanup_stale_busy,
+    _clear_window_state, _clear_all_transient_state,
     _is_god_mode_for, _god_mode_wids, _set_god_mode, _clear_god_mode,
 )
 

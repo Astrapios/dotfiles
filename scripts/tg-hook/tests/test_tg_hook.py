@@ -756,11 +756,12 @@ class TestPlanSignalBypassesGodMode(unittest.TestCase):
         tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
+        # Clear god mode BEFORE restoring paths (otherwise it deletes the real file)
+        tg.state._clear_god_mode()
         tg.config.SIGNAL_DIR = self._orig_signal_dir
         tg.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
-        tg.state._clear_god_mode()
 
     @patch.object(tg.content, "_extract_pane_permission",
                   return_value=("wants to enter plan mode", "", ["1. Yes", "2. No"], ""))
@@ -2401,7 +2402,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("god", names)
         self.assertIn("autofocus", names)
         self.assertIn("saved", names)
-        self.assertEqual(len(commands), 16)
+        self.assertIn("clear", names)
+        self.assertEqual(len(commands), 17)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -2876,6 +2878,110 @@ class TestUnfocusClearsBoth(unittest.TestCase):
         self.assertIsNone(tg._load_deepfocus_state())
         msg = mock_send.call_args[0][0]
         self.assertIn("Focus stopped", msg)
+
+
+class TestClearCommand(unittest.TestCase):
+    """Test /clear command handling."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_clear_cmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
+        tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_all(self, mock_send):
+        """Test /clear removes all transient state."""
+        tg._mark_busy("w4")
+        tg._mark_busy("w5")
+        tg.save_active_prompt("w4", "0:4.0", total=3)
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._save_smartfocus_state("5", "0:5.0", "other")
+        tg._handle_command("/clear", self.sessions, "4")
+        # All transient state should be gone
+        self.assertFalse(tg._is_busy("w4"))
+        self.assertFalse(tg._is_busy("w5"))
+        self.assertIsNone(tg.load_active_prompt("w4"))
+        self.assertIsNone(tg._load_focus_state())
+        self.assertIsNone(tg._load_smartfocus_state())
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Cleared all", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_specific_window(self, mock_send):
+        """Test /clear wN only clears that window's state."""
+        tg._mark_busy("w4")
+        tg._mark_busy("w5")
+        tg.save_active_prompt("w4", "0:4.0", total=3)
+        tg._save_focus_state("4", "0:4.0", "myproj")
+        tg._handle_command("/clear w4", self.sessions, "4")
+        # w4 state cleared
+        self.assertFalse(tg._is_busy("w4"))
+        self.assertIsNone(tg.load_active_prompt("w4"))
+        self.assertIsNone(tg._load_focus_state())
+        # w5 state untouched
+        self.assertTrue(tg._is_busy("w5"))
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Cleared transient state", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_preserves_queued_and_names(self, mock_send):
+        """Test /clear does NOT remove queued messages or session names."""
+        tg._save_queued_msg("w4", "hello")
+        tg._save_session_name("4", "auth")
+        tg._mark_busy("w4")
+        tg._handle_command("/clear", self.sessions, "4")
+        # Queued and names preserved
+        self.assertEqual(len(tg._load_queued_msgs("w4")), 1)
+        self.assertEqual(tg._load_session_names()["4"], "auth")
+        # Busy cleared
+        self.assertFalse(tg._is_busy("w4"))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_focus_only_if_matching(self, mock_send):
+        """Test /clear wN only clears focus if it targets that window."""
+        tg._save_focus_state("5", "0:5.0", "other")
+        tg._mark_busy("w4")
+        tg._handle_command("/clear w4", self.sessions, "4")
+        # Focus for w5 should be untouched
+        self.assertIsNotNone(tg._load_focus_state())
+        # Busy for w4 cleared
+        self.assertFalse(tg._is_busy("w4"))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_unknown_session(self, mock_send):
+        tg._handle_command("/clear w99", self.sessions, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_alias_all(self, mock_send):
+        """Test 'c' alias resolves to /clear."""
+        resolved = tg._resolve_alias("c", has_active_prompt=False)
+        self.assertEqual(resolved, "/clear")
+
+    def test_clear_alias_window(self):
+        """Test 'c4' alias resolves to /clear w4."""
+        resolved = tg._resolve_alias("c4", has_active_prompt=False)
+        self.assertEqual(resolved, "/clear w4")
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_clear_preserves_god_mode(self, mock_send):
+        """Test /clear does NOT remove god mode state."""
+        tg._set_god_mode("4", True)
+        tg._mark_busy("w4")
+        tg._handle_command("/clear", self.sessions, "4")
+        self.assertTrue(tg._is_god_mode_for("4"))
+        self.assertFalse(tg._is_busy("w4"))
 
 
 class TestNameCommand(unittest.TestCase):
@@ -5369,6 +5475,53 @@ class TestRouteToPane_PromptPaneOverride(unittest.TestCase):
         cmd_str = mock_run.call_args[0][0][2]
         self.assertIn("%99", cmd_str)
         self.assertNotIn("0:4.0", cmd_str)
+
+
+class TestRouteToPane_StalePromptDiscarded(unittest.TestCase):
+    """Test that prompts with stale session:window.pane references are discarded."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_stale_prompt"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
+        tg.config.SIGNAL_DIR = self.signal_dir
+        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_stale_session_pane_discarded(self, mock_idle, mock_run):
+        """Prompt with old session name (0:4.0) is discarded when current is main:4.0."""
+        prompt = {"pane": "0:4.0", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "n": 3}}
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
+            result = tg.route_to_pane("main:4.0", "4", "hello")
+        # Message should be sent normally, not treated as prompt answer
+        self.assertIn("Sent to", result)
+
+    @patch("subprocess.run")
+    def test_matching_pane_not_discarded(self, mock_run):
+        """Prompt with matching session:window.pane is used normally."""
+        prompt = {"pane": "main:4.0", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "n": 3}}
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
+            result = tg.route_to_pane("main:4.0", "4", "y")
+        self.assertIn("Selected option", result)
+
+    @patch("subprocess.run")
+    def test_pane_id_format_not_discarded(self, mock_run):
+        """Prompt with %N pane ID format is always used (no colon = not stale)."""
+        prompt = {"pane": "%20", "total": 3, "ts": 0,
+                  "shortcuts": {"y": 1, "n": 3}}
+        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
+            result = tg.route_to_pane("main:4.0", "4", "y")
+        self.assertIn("Selected option", result)
 
 
 class TestBusySince(unittest.TestCase):

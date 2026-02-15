@@ -5,6 +5,17 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.7.1
+
+- Fix god mode being deleted when running tests (tearDown cleared real persistent file)
+- Discard stale active prompts whose tmux pane reference has changed (e.g. session renamed)
+
+## 0.7.0
+
+- Add `/clear [wN]` command to reset transient state (prompts, busy flags, focus)
+- Clear all windows with `/clear`, or target a specific window with `/clear wN`
+- Short aliases: `c` (clear all), `c4` (clear w4)
+
 ## 0.6.1
 
 - Fix duplicate smartfocus messages: stop signal now sends only tail content (new lines since last smartfocus update) instead of full response

@@ -433,6 +433,46 @@ def _set_god_mode(w_idx: str, enabled: bool):
         config._log("god", f"Cleared god mode (removed {path})")
 
 
+def _clear_window_state(wid: str):
+    """Clear transient state for a specific window (e.g. 'w4').
+    Removes prompt, busy, bash_cmd, saved_prompt files.
+    Also clears focus/deepfocus/smartfocus if they target this window."""
+    if not os.path.isdir(config.SIGNAL_DIR):
+        return
+    idx = wid.lstrip("w")
+    prefixes = ("_active_prompt_", "_busy_", "_bash_cmd_", "_saved_prompt_")
+    for p in prefixes:
+        path = os.path.join(config.SIGNAL_DIR, f"{p}{wid}.json")
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    # Clear focus states if they target this window
+    for loader, clearer in ((_load_focus_state, _clear_focus_state),
+                            (_load_deepfocus_state, _clear_deepfocus_state),
+                            (_load_smartfocus_state, _clear_smartfocus_state)):
+        st = loader()
+        if st and st.get("wid") == idx:
+            clearer()
+
+
+def _clear_all_transient_state():
+    """Clear all transient state for all windows.
+    Removes all prompt, busy, bash_cmd, saved_prompt files and all focus states."""
+    if not os.path.isdir(config.SIGNAL_DIR):
+        return
+    prefixes = ("_active_prompt_", "_busy_", "_bash_cmd_", "_saved_prompt_")
+    for f in os.listdir(config.SIGNAL_DIR):
+        if any(f.startswith(p) for p in prefixes):
+            try:
+                os.remove(os.path.join(config.SIGNAL_DIR, f))
+            except OSError:
+                pass
+    _clear_focus_state()
+    _clear_deepfocus_state()
+    _clear_smartfocus_state()
+
+
 def _clear_god_mode():
     """Disable god mode entirely."""
     for path in (config.GOD_MODE_PATH,

@@ -239,6 +239,7 @@ def _set_bot_commands():
         {"command": "focus", "description": "Watch completed responses from a session"},
         {"command": "deepfocus", "description": "Stream all session output in real-time"},
         {"command": "unfocus", "description": "Stop real-time monitoring"},
+        {"command": "clear", "description": "Reset transient state (prompts, busy, focus)"},
         {"command": "autofocus", "description": "Toggle auto-monitor on message send"},
         {"command": "god", "description": "Auto-accept permissions (god mode)"},
         {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},

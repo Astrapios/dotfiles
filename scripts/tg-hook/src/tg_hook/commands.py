@@ -9,7 +9,7 @@ from tg_hook import config, telegram, tmux, state, content, routing
 
 
 _ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus",
-                            "ga": "/god all", "goff": "/god off"}
+                            "ga": "/god all", "goff": "/god off", "c": "/clear"}
 
 
 def _any_active_prompt() -> bool:
@@ -49,6 +49,9 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^g(\d+)$", stripped)
     if m:
         return f"/god w{m.group(1)}"
+    m = re.match(r"^c(\d+)$", stripped)
+    if m:
+        return f"/clear w{m.group(1)}"
     return text
 
 
@@ -128,6 +131,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
             "`/autofocus` — toggle auto-monitor on send (default: on)",
+            "`/clear [wN]` — reset transient state (prompts, busy, focus)",
             "`/god [wN|all|off]` — auto-accept permissions",
             "`/name wN [label]` — name a session",
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
@@ -140,6 +144,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
             "`af` autofocus | `sv` saved | `?` help",
+            "`c` clear | `c4` clear w4",
             "`g4` god w4 | `ga` god all | `goff` god off",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
@@ -247,6 +252,26 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
                              reply_markup=tmux._sessions_keyboard(sessions))
+            return None, sessions, last_win_idx
+
+    # /clear [wN|name]
+    clear_m = re.match(r"^/clear(?:\s+w?(\w[\w-]*))?$", text.lower())
+    if clear_m:
+        raw_target = clear_m.group(1)
+        if raw_target:
+            idx = state._resolve_name(raw_target, sessions)
+            if idx:
+                wid = f"w{idx}"
+                state._clear_window_state(wid)
+                telegram.tg_send(f"🧹 Cleared transient state for {state._wid_label(idx)}.")
+                return None, sessions, last_win_idx
+            else:
+                telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                                 reply_markup=tmux._sessions_keyboard(sessions))
+                return None, sessions, last_win_idx
+        else:
+            state._clear_all_transient_state()
+            telegram.tg_send("🧹 Cleared all transient state.")
             return None, sessions, last_win_idx
 
     # /unfocus

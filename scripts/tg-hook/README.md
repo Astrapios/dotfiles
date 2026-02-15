@@ -123,6 +123,7 @@ Once the listener is running, send these from Telegram:
 | `/focus wN` | Watch completed responses from a session |
 | `/deepfocus wN` | Stream all output in real-time |
 | `/unfocus` | Stop monitoring |
+| `/clear [wN]` | Reset transient state (prompts, busy, focus) |
 | `/god [wN\|all\|off]` | Auto-accept permissions (god mode) |
 | `/autofocus` | Toggle auto-monitor on message send |
 | `/name wN label` | Name a session for easier routing |
@@ -142,6 +143,7 @@ Once the listener is running, send these from Telegram:
 | `f4` | `/focus w4` |
 | `df4` | `/deepfocus w4` |
 | `i4` | `/interrupt w4` |
+| `c` / `c4` | `/clear` / `/clear w4` |
 | `g4` | `/god w4` |
 | `ga` | `/god all` |
 | `goff` | `/god off` |
