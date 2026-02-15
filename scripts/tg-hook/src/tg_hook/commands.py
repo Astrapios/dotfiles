@@ -107,8 +107,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         telegram.tg_send("\n".join(help_lines), reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
-    # /status [wN|name] [lines]  (/sessions is an alias for bare /status)
-    if text.lower() in ("/sessions", "/status"):
+    # /status [wN|name] [lines]
+    if text.lower() == "/status":
         sessions = tmux.scan_claude_sessions()
         telegram.tg_send(tmux.format_sessions_message(sessions),
                          reply_markup=tmux._sessions_keyboard(sessions))

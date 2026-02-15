@@ -153,8 +153,7 @@ def _remove_inline_keyboard(message_id: int, chat_id: str = ""):
 def _set_bot_commands():
     """Register bot commands with Telegram so they appear in the / picker."""
     commands = [
-        {"command": "status", "description": "Show last response or pane status"},
-        {"command": "sessions", "description": "List active Claude sessions"},
+        {"command": "status", "description": "List sessions, or show session status with wN"},
         {"command": "help", "description": "Show available commands"},
         {"command": "focus", "description": "Watch completed responses from a session"},
         {"command": "deepfocus", "description": "Stream all session output in real-time"},

@@ -1344,16 +1344,6 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("Shut down", msg)
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
-    def test_sessions_command(self, mock_scan, mock_send):
-        mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command(
-            "/sessions", self.sessions, "4")
-        self.assertIsNone(action)
-        msg = mock_send.call_args[0][0]
-        self.assertIn("Active Claude sessions", msg)
-
-    @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_command(self, mock_run, mock_send):
         # Set up busy and prompt state to verify they get cleared
@@ -2271,12 +2261,12 @@ class TestSetBotCommands(unittest.TestCase):
         commands = mock_post.call_args[1]["json"]["commands"]
         names = [c["command"] for c in commands]
         self.assertIn("status", names)
-        self.assertIn("sessions", names)
         self.assertIn("help", names)
         self.assertIn("quit", names)
         self.assertIn("deepfocus", names)
         self.assertIn("name", names)
-        self.assertEqual(len(commands), 14)
+        self.assertNotIn("sessions", names)
+        self.assertEqual(len(commands), 13)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
