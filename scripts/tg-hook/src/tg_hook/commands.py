@@ -524,15 +524,6 @@ def _handle_callback(callback: dict, sessions: dict,
                 telegram.tg_send("No saved messages to send.")
         else:  # discard
             state._pop_queued_msgs(wid)
-            saved_text = state._pop_prompt_text(wid)
-            if saved_text and win_idx in sessions:
-                pane = sessions[win_idx][0]
-                p = shlex.quote(pane)
-                subprocess.run(
-                    ["bash", "-c",
-                     f"tmux send-keys -t {p} -l {shlex.quote(saved_text)}"],
-                    timeout=10,
-                )
             telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(win_idx)}.")
         return sessions, last_win_idx, None
 

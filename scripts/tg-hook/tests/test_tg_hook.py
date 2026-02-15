@@ -3366,9 +3366,10 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
     def test_idle_with_text_saves_and_clears(self, mock_prompt, mock_idle, mock_run):
         result = tg.route_to_pane(self.pane, self.win_idx, "new msg")
         self.assertIn("Sent to", result)
-        # Should have saved the existing text
-        saved = tg._pop_prompt_text("w4")
-        self.assertEqual(saved, "existing text")
+        # Should have saved the existing text to queued messages
+        msgs = tg._load_queued_msgs("w4")
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["text"], "existing text")
         # Should have called Escape + send-keys
         self.assertEqual(mock_run.call_count, 2)  # Escape + send-keys
         esc_cmd = mock_run.call_args_list[0][0][0][2]
@@ -3531,22 +3532,6 @@ class TestSavedCallbacks(unittest.TestCase):
         # Queue should be empty
         self.assertEqual(tg._load_queued_msgs("w4"), [])
 
-    @patch("subprocess.run")
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    def test_saved_discard_restores_prompt_text(self, mock_send, mock_answer,
-                                                 mock_remove, mock_run):
-        tg._save_queued_msg("w4", "hello")
-        tg._save_prompt_text("w4", "old input")
-        callback = {"id": "cb1", "data": "saved_discard_w4", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
-        # Should restore the prompt text
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0][2]
-        self.assertIn("old input", cmd)
-        # Prompt text should be cleared
-        self.assertIsNone(tg._pop_prompt_text("w4"))
 
 
 class TestSavedAlias(unittest.TestCase):

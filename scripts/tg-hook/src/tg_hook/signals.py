@@ -2,8 +2,6 @@
 import json
 import os
 import re
-import shlex
-import subprocess
 import time
 
 from tg_hook import config, telegram, tmux, content, state
@@ -101,16 +99,6 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                         f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
                         reply_markup=saved_kb,
                     )
-                else:
-                    # Restore saved prompt text if no queued messages
-                    saved_text = state._pop_prompt_text(wid)
-                    if saved_text and pane:
-                        p = shlex.quote(pane)
-                        subprocess.run(
-                            ["bash", "-c",
-                             f"tmux send-keys -t {p} -l {shlex.quote(saved_text)}"],
-                            timeout=10,
-                        )
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")

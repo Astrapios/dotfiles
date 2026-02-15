@@ -174,8 +174,8 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     p = shlex.quote(pane)
 
     if typed_text:
-        # Save locally typed text and clear it before sending
-        state._save_prompt_text(wid, typed_text)
+        # Save locally typed text to queue and clear it before sending
+        state._save_queued_msg(wid, typed_text)
         subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
         time.sleep(0.2)
 
