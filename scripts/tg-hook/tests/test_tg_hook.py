@@ -574,7 +574,7 @@ class TestProcessSignals(unittest.TestCase):
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("needs permission", msg)
-        self.assertIn("`rm /tmp/test_file.txt`", msg)
+        self.assertIn("```\nrm /tmp/test_file.txt\n```", msg)
 
     @patch.object(tg.telegram, "tg_send", return_value=1)
     @patch.object(tg.tmux, "get_pane_project", return_value="proj")
