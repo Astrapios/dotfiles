@@ -68,6 +68,25 @@ When adding new commands, aliases, or user-facing features to tg-hook, update al
 
 Also update `_set_bot_commands` in `src/tg_hook/telegram.py` if adding a new `/command`, and the `_ALIASES` dict / alias regexes in `commands.py` if adding short aliases.
 
+### Personal Pixi Tools (`~/pixi_tools/`)
+
+Standalone pixi projects for utilities that shouldn't be added to any project repo's dependencies. Each tool lives in its own subdirectory with a `pixi.toml`.
+
+```bash
+# Run a script using a pixi tool environment
+pixi run --manifest-path ~/pixi_tools/<tool>/pixi.toml python script.py
+```
+
+Available tools:
+- **`ppt/`** — PowerPoint generation (`python-pptx`)
+
+If a tool directory doesn't exist yet, create it with a `pixi.toml` and run `pixi install`:
+```bash
+mkdir -p ~/pixi_tools/<tool>
+# Write pixi.toml with needed dependencies
+cd ~/pixi_tools/<tool> && pixi install
+```
+
 ### Config Files
 
 - `.tmux.conf` — Prefix is Ctrl+A, smart pane switching with Ctrl+hjkl, `|`/`_` for splits
