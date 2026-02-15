@@ -111,7 +111,7 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
 def _build_reply_keyboard() -> dict:
     """Build a persistent ReplyKeyboardMarkup with common commands."""
     return {"keyboard": [
-        [{"text": "/status"}, {"text": "/sessions"}, {"text": "/last"}],
+        [{"text": "/sessions"}, {"text": "/last"}, {"text": "/saved"}],
         [{"text": "/focus"}, {"text": "/interrupt"}, {"text": "/help"}],
     ], "resize_keyboard": True, "is_persistent": True}
 
