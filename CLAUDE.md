@@ -49,9 +49,11 @@ A pip-installable Python package bridging Claude Code sessions to Telegram. Stru
 
 ### Versioning
 
-tg-hook uses semver pre-1.0. Bump version in `pyproject.toml` and add a `CHANGELOG.md` entry in the same commit as the change:
+tg-hook uses semver pre-1.0. **On every commit touching `scripts/tg-hook/`**, check whether a version bump is needed and include it in the same commit:
 - **MINOR** (0.X.0): new user-facing feature — new CLI command, new Telegram command, new public API function
 - **PATCH** (0.0.X): bug fixes, refactors, test-only or docs-only changes
+
+Always update both `pyproject.toml` version and `CHANGELOG.md` together with the change.
 
 ### Credentials
 
