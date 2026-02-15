@@ -28,6 +28,15 @@ def cmd_send_photo(path: str, caption: str = ""):
     print(f"Photo sent: {path}")
 
 
+def cmd_send_doc(path: str, caption: str = ""):
+    """Send a file as a document to Telegram."""
+    if not os.path.isfile(path):
+        print(f"File not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    telegram.tg_send_document(path, caption)
+    print(f"Document sent: {path}")
+
+
 def cmd_hook():
     """Read hook JSON from stdin, write signal files for listen to process."""
     if not config.TG_HOOKS_ENABLED:
@@ -88,6 +97,7 @@ Commands:
   notify <message>    Send a one-shot notification to Telegram
   ask <question>      Send a question, wait for reply, print to stdout
   send-photo <path> [caption]  Send a photo to Telegram
+  send-doc <path> [caption]    Send a file as a document to Telegram
   help                Show this help message
 
 Setup:
@@ -149,6 +159,13 @@ def main():
         path = sys.argv[2]
         caption = sys.argv[3] if len(sys.argv) > 3 else ""
         cmd_send_photo(path, caption)
+    elif command == "send-doc":
+        if len(sys.argv) < 3:
+            print("Usage: tg-hook send-doc <path> [caption]", file=sys.stderr)
+            sys.exit(1)
+        path = sys.argv[2]
+        caption = sys.argv[3] if len(sys.argv) > 3 else ""
+        cmd_send_doc(path, caption)
     elif command == "listen":
         listener.cmd_listen()
     else:

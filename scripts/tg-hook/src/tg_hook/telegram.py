@@ -1,6 +1,8 @@
 """Telegram API: send, poll, photos, keyboards."""
+import mimetypes
 import os
 import re
+import struct
 import time
 
 import requests
@@ -81,18 +83,97 @@ def _send_long_message(header: str, body: str, wid: str = "",
         config._save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")
 
 
-def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
-    """Send a photo to Telegram. Returns message_id."""
+def _get_image_dimensions(path: str) -> tuple[int, int]:
+    """Parse image dimensions from PNG, JPEG, or GIF headers. Returns (width, height) or (0, 0)."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(32)
+            if len(header) < 10:
+                return (0, 0)
+
+            # PNG: 8-byte signature, then IHDR chunk with width/height at bytes 16-23
+            if header[:8] == b"\x89PNG\r\n\x1a\n":
+                if len(header) >= 24:
+                    w, h = struct.unpack(">II", header[16:24])
+                    return (w, h)
+
+            # GIF: "GIF87a" or "GIF89a", width/height at bytes 6-9 (little-endian)
+            if header[:4] == b"GIF8":
+                w, h = struct.unpack("<HH", header[6:10])
+                return (w, h)
+
+            # JPEG: starts with 0xFFD8, scan for SOF markers
+            if header[:2] == b"\xff\xd8":
+                f.seek(2)
+                while True:
+                    marker_data = f.read(2)
+                    if len(marker_data) < 2:
+                        break
+                    if marker_data[0] != 0xFF:
+                        break
+                    marker = marker_data[1]
+                    # SOF0-SOF3 (0xC0-0xC3) contain dimensions
+                    if 0xC0 <= marker <= 0xC3:
+                        sof = f.read(7)
+                        if len(sof) >= 7:
+                            h, w = struct.unpack(">HH", sof[3:7])
+                            return (w, h)
+                    # Skip non-SOF segments
+                    length_data = f.read(2)
+                    if len(length_data) < 2:
+                        break
+                    length = struct.unpack(">H", length_data)[0]
+                    f.seek(length - 2, 1)
+
+    except Exception:
+        pass
+    return (0, 0)
+
+
+def tg_send_document(path: str, caption: str = "", chat_id: str = "") -> int:
+    """Send a file as a document to Telegram. Returns message_id."""
     chat_id = chat_id or config.CHAT_ID
+    mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
     with open(path, "rb") as f:
-        data = {"chat_id": chat_id}
+        data: dict = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption[:1024]
+            data["parse_mode"] = "Markdown"
+        r = requests.post(
+            f"https://api.telegram.org/bot{config.BOT}/sendDocument",
+            data=data,
+            files={"document": (os.path.basename(path), f, mime_type)},
+            timeout=60,
+        )
+        if r.status_code == 400 and caption:
+            f.seek(0)
+            data.pop("parse_mode", None)
+            r = requests.post(
+                f"https://api.telegram.org/bot{config.BOT}/sendDocument",
+                data=data,
+                files={"document": (os.path.basename(path), f, mime_type)},
+                timeout=60,
+            )
+    r.raise_for_status()
+    return r.json()["result"]["message_id"]
+
+
+def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
+    """Send a photo to Telegram. Images >1280px auto-route via sendDocument. Returns message_id."""
+    w, h = _get_image_dimensions(path)
+    if w > 1280 or h > 1280:
+        return tg_send_document(path, caption, chat_id)
+    chat_id = chat_id or config.CHAT_ID
+    mime_type = mimetypes.guess_type(path)[0] or "image/png"
+    with open(path, "rb") as f:
+        data: dict = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption[:1024]
             data["parse_mode"] = "Markdown"
         r = requests.post(
             f"https://api.telegram.org/bot{config.BOT}/sendPhoto",
             data=data,
-            files={"photo": (os.path.basename(path), f, "image/png")},
+            files={"photo": (os.path.basename(path), f, mime_type)},
             timeout=60,
         )
         if r.status_code == 400 and caption:
@@ -101,7 +182,7 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
             r = requests.post(
                 f"https://api.telegram.org/bot{config.BOT}/sendPhoto",
                 data=data,
-                files={"photo": (os.path.basename(path), f, "image/png")},
+                files={"photo": (os.path.basename(path), f, mime_type)},
                 timeout=60,
             )
     r.raise_for_status()

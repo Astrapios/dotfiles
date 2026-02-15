@@ -18,7 +18,10 @@ When the user asks you to show, send, or share an image, figure, chart, screensh
 tg-hook send-photo /path/to/file.png "optional caption"
 ```
 
-This sends the file directly to the user's Telegram chat. Use it for:
-- Generated plots, charts, or diagrams
-- Screenshots or captured images
-- Any image file the user wants to see on their phone
+Images larger than 1280px are automatically sent as documents to preserve full resolution.
+
+To send any file (PDF, log, archive, etc.) as a document:
+
+```bash
+tg-hook send-doc /path/to/file.ext "optional caption"
+```

@@ -5,6 +5,7 @@ Usage:
   tg-hook notify "message"        - Send a message, don't wait
   tg-hook ask "question"          - Send a message, wait for reply, print it to stdout
   tg-hook send-photo path [caption] - Send a photo to Telegram
+  tg-hook send-doc path [caption]   - Send a file as a document to Telegram
   tg-hook hook                    - Read hook JSON from stdin, write signal for listen
   tg-hook listen                  - Auto-detect Claude sessions, route messages by wN prefix
 """
@@ -32,7 +33,8 @@ from .config import (
 
 # telegram
 from .telegram import (
-    tg_send, _send_long_message, tg_send_photo, _build_inline_keyboard,
+    tg_send, _send_long_message, _get_image_dimensions, tg_send_document,
+    tg_send_photo, _build_inline_keyboard,
     _answer_callback_query, _remove_inline_keyboard, _set_bot_commands,
     tg_wait_reply, _poll_updates, _download_tg_photo, _extract_chat_messages,
 )
@@ -87,4 +89,4 @@ from .commands import (
 from .listener import cmd_listen
 
 # cli
-from .cli import cmd_notify, cmd_ask, cmd_send_photo, cmd_hook, cmd_help, main
+from .cli import cmd_notify, cmd_ask, cmd_send_photo, cmd_send_doc, cmd_hook, cmd_help, main

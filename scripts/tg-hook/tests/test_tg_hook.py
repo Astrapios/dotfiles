@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import struct
 import sys
 import textwrap
 import unittest
@@ -5258,6 +5259,255 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
         )
         is_idle, typed = tg._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
+
+
+class TestGetImageDimensions(unittest.TestCase):
+    """Test _get_image_dimensions parses PNG, JPEG, GIF headers."""
+
+    def test_png_dimensions(self):
+        """PNG with known dimensions returns correct (w, h)."""
+        import tempfile
+        # Minimal valid PNG: 8-byte sig + IHDR chunk (13 bytes data)
+        sig = b"\x89PNG\r\n\x1a\n"
+        ihdr_data = struct.pack(">II", 1920, 1080) + b"\x08\x02\x00\x00\x00"
+        ihdr_length = struct.pack(">I", 13)
+        ihdr = ihdr_length + b"IHDR" + ihdr_data
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(sig + ihdr)
+            path = f.name
+        try:
+            w, h = tg._get_image_dimensions(path)
+            self.assertEqual((w, h), (1920, 1080))
+        finally:
+            os.remove(path)
+
+    def test_gif_dimensions(self):
+        """GIF with known dimensions returns correct (w, h)."""
+        import tempfile
+        header = b"GIF89a" + struct.pack("<HH", 800, 600) + b"\x00" * 20
+        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as f:
+            f.write(header)
+            path = f.name
+        try:
+            w, h = tg._get_image_dimensions(path)
+            self.assertEqual((w, h), (800, 600))
+        finally:
+            os.remove(path)
+
+    def test_jpeg_dimensions(self):
+        """JPEG with SOF0 marker returns correct (w, h)."""
+        import tempfile
+        soi = b"\xff\xd8"
+        sof0_marker = b"\xff\xc0"
+        sof0_length = struct.pack(">H", 11)
+        sof0_data = b"\x08" + struct.pack(">HH", 2048, 3072) + b"\x03\x01\x11\x00"
+        jpeg = soi + sof0_marker + sof0_length + sof0_data
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(jpeg)
+            path = f.name
+        try:
+            w, h = tg._get_image_dimensions(path)
+            self.assertEqual((w, h), (3072, 2048))
+        finally:
+            os.remove(path)
+
+    def test_non_image_file(self):
+        """Non-image file returns (0, 0)."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"just some text")
+            path = f.name
+        try:
+            w, h = tg._get_image_dimensions(path)
+            self.assertEqual((w, h), (0, 0))
+        finally:
+            os.remove(path)
+
+    def test_missing_file(self):
+        """Missing file returns (0, 0)."""
+        w, h = tg._get_image_dimensions("/nonexistent/file.png")
+        self.assertEqual((w, h), (0, 0))
+
+
+class TestTgSendDocument(unittest.TestCase):
+    """Test tg_send_document function."""
+
+    @patch("requests.post")
+    def test_send_document_with_caption(self, mock_post):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 50}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(b"fake pdf data")
+            path = f.name
+
+        try:
+            msg_id = tg.tg_send_document(path, "test doc")
+            self.assertEqual(msg_id, 50)
+            call_kwargs = mock_post.call_args
+            self.assertIn("sendDocument", call_kwargs[0][0])
+            self.assertIn("document", call_kwargs[1]["files"])
+            self.assertEqual(call_kwargs[1]["data"]["caption"], "test doc")
+            self.assertEqual(call_kwargs[1]["data"]["parse_mode"], "Markdown")
+        finally:
+            os.remove(path)
+
+    @patch("requests.post")
+    def test_send_document_no_caption(self, mock_post):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 51}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as f:
+            f.write(b"fake zip data")
+            path = f.name
+
+        try:
+            tg.tg_send_document(path)
+            call_kwargs = mock_post.call_args
+            self.assertNotIn("caption", call_kwargs[1]["data"])
+            self.assertNotIn("parse_mode", call_kwargs[1]["data"])
+        finally:
+            os.remove(path)
+
+    @patch("requests.post")
+    def test_send_document_markdown_fallback(self, mock_post):
+        """On 400, retries without parse_mode."""
+        fail_resp = MagicMock()
+        fail_resp.status_code = 400
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"result": {"message_id": 52}}
+        ok_resp.raise_for_status = MagicMock()
+
+        mock_post.side_effect = [fail_resp, ok_resp]
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(b"data")
+            path = f.name
+
+        try:
+            msg_id = tg.tg_send_document(path, "bad_markdown")
+            self.assertEqual(msg_id, 52)
+            second_call = mock_post.call_args_list[1]
+            self.assertNotIn("parse_mode", second_call[1]["data"])
+        finally:
+            os.remove(path)
+
+
+class TestTgSendPhotoAutoDetect(unittest.TestCase):
+    """Test tg_send_photo auto-detects large images and routes to sendDocument."""
+
+    @patch.object(tg.telegram, "tg_send_document", return_value=60)
+    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(1920, 1080))
+    def test_large_image_delegates_to_document(self, mock_dims, mock_doc):
+        """Image >1280px delegates to tg_send_document."""
+        msg_id = tg.tg_send_photo("/fake/large.png", "hi")
+        self.assertEqual(msg_id, 60)
+        mock_doc.assert_called_once_with("/fake/large.png", "hi", "")
+
+    @patch("requests.post")
+    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(800, 600))
+    def test_small_image_uses_send_photo(self, mock_dims, mock_post):
+        """Image <=1280px uses sendPhoto as before."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 61}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"small image data")
+            path = f.name
+
+        try:
+            msg_id = tg.tg_send_photo(path)
+            self.assertEqual(msg_id, 61)
+            self.assertIn("sendPhoto", mock_post.call_args[0][0])
+        finally:
+            os.remove(path)
+
+    @patch("requests.post")
+    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(0, 0))
+    def test_dimension_failure_uses_send_photo(self, mock_dims, mock_post):
+        """Dimension check failure (0, 0) falls through to sendPhoto."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 62}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"data")
+            path = f.name
+
+        try:
+            msg_id = tg.tg_send_photo(path)
+            self.assertEqual(msg_id, 62)
+            self.assertIn("sendPhoto", mock_post.call_args[0][0])
+        finally:
+            os.remove(path)
+
+
+class TestCmdSendDoc(unittest.TestCase):
+    """Test cmd_send_doc CLI command."""
+
+    @patch.object(tg.telegram, "tg_send_document")
+    def test_send_doc_success(self, mock_doc):
+        """Existing file sends document."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(b"data")
+            path = f.name
+        try:
+            tg.cmd_send_doc(path, "caption")
+            mock_doc.assert_called_once_with(path, "caption")
+        finally:
+            os.remove(path)
+
+    def test_send_doc_file_not_found(self):
+        """Missing file exits with error."""
+        with self.assertRaises(SystemExit) as ctx:
+            tg.cmd_send_doc("/nonexistent/file.pdf")
+        self.assertEqual(ctx.exception.code, 1)
+
+
+class TestTgSendPhotoMimeType(unittest.TestCase):
+    """Test tg_send_photo uses correct MIME type for non-PNG images."""
+
+    @patch("requests.post")
+    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(640, 480))
+    def test_jpeg_mime_type(self, mock_dims, mock_post):
+        """JPEG file gets image/jpeg MIME type."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"result": {"message_id": 70}}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"fake jpeg data")
+            path = f.name
+
+        try:
+            tg.tg_send_photo(path)
+            files_arg = mock_post.call_args[1]["files"]
+            mime = files_arg["photo"][2]
+            self.assertEqual(mime, "image/jpeg")
+        finally:
+            os.remove(path)
 
 
 if __name__ == "__main__":

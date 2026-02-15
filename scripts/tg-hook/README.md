@@ -109,6 +109,7 @@ tg-hook hook                Read Claude hook JSON from stdin (called by hooks)
 tg-hook notify <message>    Send a one-shot notification
 tg-hook ask <question>      Send a question, wait for reply, print to stdout
 tg-hook send-photo <path> [caption]  Send a photo to Telegram
+tg-hook send-doc <path> [caption]    Send a file as a document to Telegram
 tg-hook help                Show help
 ```
 
