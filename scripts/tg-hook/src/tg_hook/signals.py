@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import shlex
+import subprocess
 import time
 
 from tg_hook import config, telegram, tmux, content, state
@@ -62,6 +64,7 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
             project = tmux.get_pane_project(pane) or project
 
         if event == "stop":
+            state._clear_busy(wid)
             if focused_wids and w_idx in focused_wids:
                 pass
             else:
@@ -82,6 +85,32 @@ def process_signals(focused_wids: set[str] | None = None) -> str | None:
                     ("\U0001f50d Focus", f"cmd_focus_{wid}"),
                 ]])
                 telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb)
+
+                # Check for queued messages
+                queued = state._load_queued_msgs(wid)
+                if queued:
+                    preview_lines = []
+                    for i, m in enumerate(queued, 1):
+                        preview_lines.append(f"{i}. `{m['text'][:100]}`")
+                    preview = "\n".join(preview_lines)
+                    saved_kb = telegram._build_inline_keyboard([[
+                        ("\u2709\ufe0f Send", f"saved_send_{wid}"),
+                        ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                    ]])
+                    telegram.tg_send(
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
+                        reply_markup=saved_kb,
+                    )
+                else:
+                    # Restore saved prompt text if no queued messages
+                    saved_text = state._pop_prompt_text(wid)
+                    if saved_text and pane:
+                        p = shlex.quote(pane)
+                        subprocess.run(
+                            ["bash", "-c",
+                             f"tmux send-keys -t {p} -l {shlex.quote(saved_text)}"],
+                            timeout=10,
+                        )
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")

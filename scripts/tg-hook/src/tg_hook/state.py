@@ -216,3 +216,93 @@ def _wid_label(idx: str) -> str:
     if name:
         return f"`w{idx} [{name}]`"
     return f"`w{idx}`"
+
+
+def _save_queued_msg(wid: str, text: str):
+    """Append a message to the queue for a session."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, f"_queued_{wid}.json")
+    msgs = _load_queued_msgs(wid)
+    msgs.append({"text": text, "ts": time.time()})
+    with open(path, "w") as f:
+        json.dump(msgs, f)
+
+
+def _load_queued_msgs(wid: str) -> list[dict]:
+    """Load queued messages (non-destructive)."""
+    path = os.path.join(config.SIGNAL_DIR, f"_queued_{wid}.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _pop_queued_msgs(wid: str) -> list[dict]:
+    """Load and delete queued messages."""
+    path = os.path.join(config.SIGNAL_DIR, f"_queued_{wid}.json")
+    try:
+        with open(path) as f:
+            msgs = json.load(f)
+        os.remove(path)
+        return msgs
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_prompt_text(wid: str, text: str):
+    """Save locally typed prompt text that was cleared."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, f"_saved_prompt_{wid}.json")
+    with open(path, "w") as f:
+        json.dump({"text": text}, f)
+
+
+def _pop_prompt_text(wid: str) -> str | None:
+    """Load and delete saved prompt text. Returns text or None."""
+    path = os.path.join(config.SIGNAL_DIR, f"_saved_prompt_{wid}.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        os.remove(path)
+        return data.get("text")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _mark_busy(wid: str):
+    """Mark a session as busy (message was just sent). Persists to file."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, f"_busy_{wid}.json")
+    with open(path, "w") as f:
+        json.dump({"ts": time.time()}, f)
+
+
+def _is_busy(wid: str) -> bool:
+    """Check if a session is marked busy."""
+    return os.path.exists(os.path.join(config.SIGNAL_DIR, f"_busy_{wid}.json"))
+
+
+def _clear_busy(wid: str):
+    """Clear busy mark for a session (called on stop signal)."""
+    path = os.path.join(config.SIGNAL_DIR, f"_busy_{wid}.json")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _cleanup_stale_busy(active_sessions: dict):
+    """Remove busy files for sessions that no longer exist in tmux."""
+    if not os.path.isdir(config.SIGNAL_DIR):
+        return
+    for fname in os.listdir(config.SIGNAL_DIR):
+        m = re.match(r'^_busy_w(\d+)\.json$', fname)
+        if not m:
+            continue
+        idx = m.group(1)
+        if idx not in active_sessions:
+            try:
+                os.remove(os.path.join(config.SIGNAL_DIR, fname))
+            except OSError:
+                pass

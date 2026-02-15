@@ -1,8 +1,10 @@
 """Pane routing and option selection."""
+import re
 import shlex
 import subprocess
+import time
 
-from tg_hook import config, telegram, state, signals
+from tg_hook import config, telegram, state, signals, tmux
 
 
 def _select_option(pane: str, n: int):
@@ -15,6 +17,53 @@ def _select_option(pane: str, n: int):
         parts.append("sleep 0.1")
     parts.append(f"tmux send-keys -t {p} Enter")
     subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
+
+
+def _is_ui_chrome(s: str) -> bool:
+    """Check if a stripped line is Claude Code UI chrome (not real content)."""
+    if not s:
+        return True
+    if re.match(r'^[─━]{3,}$', s):
+        return True
+    if s.startswith(("⏵⏵ ", "⏸ ")):
+        return True
+    if s.startswith("Context left until auto-compact:"):
+        return True
+    if s in ("⏳ Working...", "* Working..."):
+        return True
+    if re.match(r'^✻ \w+ for ', s):
+        return True
+    if s.startswith('ctrl+') and 'background' in s:
+        return True
+    # Thinking/timing indicators: "* Percolating… (1m 14s …)"
+    if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
+        return True
+    if re.match(r'^\+\d+ more lines \(', s):
+        return True
+    return False
+
+
+def _pane_idle_state(pane: str) -> tuple[bool, str]:
+    """Check if a pane is idle (has ❯ prompt). Returns (is_idle, typed_text).
+
+    Finds the last non-chrome line (skipping separators, hints, spinners)
+    and checks if it's a ❯ prompt. Old ❯ lines from submitted commands
+    in earlier lines are correctly ignored.
+    typed_text is any text on the same line after ❯ (locally typed input).
+    """
+    try:
+        raw = tmux._capture_pane(pane, 15)
+    except Exception:
+        return False, ""
+    for line in reversed(raw.splitlines()):
+        s = line.strip()
+        if _is_ui_chrome(s):
+            continue
+        m = re.match(r'^(\s*❯\s*)(.*)', line)
+        if m:
+            return True, m.group(2).strip()
+        return False, ""
+    return False, ""
 
 
 def route_to_pane(pane: str, win_idx: str, text: str) -> str:
@@ -101,8 +150,37 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
         _advance_question()
         return f"📨 Replied in {label}:\n`{reply[:500]}`"
 
-    # Normal message: type text + Enter
+    # Check pane idle state (always authoritative)
+    is_idle, typed_text = _pane_idle_state(pane)
+
+    # Busy guard: file-based, but pane overrides if session is genuinely idle
+    if state._is_busy(wid):
+        if is_idle:
+            # Stop signal was missed (crash, newline issue, etc.) — self-heal
+            state._clear_busy(wid)
+        else:
+            state._save_queued_msg(wid, text)
+            return f"💾 Saved for {label} (busy):\n`{text[:500]}`"
+
+    if not is_idle:
+        # Claude is busy — queue the message
+        state._save_queued_msg(wid, text)
+        return f"💾 Saved for {label} (busy):\n`{text[:500]}`"
+
     p = shlex.quote(pane)
-    cmd = f"tmux send-keys -t {p} -l {shlex.quote(text)} && tmux send-keys -t {p} Enter"
+
+    if typed_text:
+        # Save locally typed text and clear it before sending
+        state._save_prompt_text(wid, typed_text)
+        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+        time.sleep(0.2)
+
+    # Strip newlines — send-keys -l sends \n as LF which Claude Code
+    # doesn't treat as Enter (CR), causing the message to never submit.
+    clean_text = text.replace("\n", " ").replace("\r", " ")
+
+    # Normal message: type text + Enter
+    cmd = f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && tmux send-keys -t {p} Enter"
     subprocess.run(["bash", "-c", cmd], timeout=10)
+    state._mark_busy(wid)
     return f"📨 Sent to {label}:\n`{text[:500]}`"

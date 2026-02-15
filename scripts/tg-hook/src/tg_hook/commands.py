@@ -8,7 +8,7 @@ import time
 from tg_hook import config, telegram, tmux, state, content, routing
 
 
-_ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus"}
+_ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved"}
 
 
 def _any_active_prompt() -> bool:
@@ -71,6 +71,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/sessions` — list active Claude sessions",
             "`/status [wN] [lines]` — show last response or N filtered lines",
             "`/last [wN]` — re-send last Telegram message for a session",
+            "`/saved [wN]` — review saved messages for busy sessions",
             "`/focus wN` — watch completed responses",
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
@@ -84,7 +85,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Aliases:*",
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
-            "`?` help",
+            "`sv` saved | `?` help",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
             "*Photos:* send a photo to have Claude read it. Add `wN` in caption to target.",
@@ -335,6 +336,54 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             telegram.tg_send("⚠️ No saved messages yet.")
         return None, sessions, last_win_idx
 
+    # /saved [wN|name]
+    saved_m = re.match(r"^/saved(?:\s+w?(\w[\w-]*))?$", text.lower())
+    if saved_m:
+        raw_target = saved_m.group(1)
+        if raw_target:
+            idx = state._resolve_name(raw_target, sessions)
+            if not idx:
+                telegram.tg_send(f"⚠️ No session `{raw_target}`.")
+                return None, sessions, last_win_idx
+            wid = f"w{idx}"
+            queued = state._load_queued_msgs(wid)
+            if queued:
+                preview_lines = []
+                for i, m_q in enumerate(queued, 1):
+                    preview_lines.append(f"{i}. `{m_q['text'][:100]}`")
+                saved_kb = telegram._build_inline_keyboard([[
+                    ("\u2709\ufe0f Send", f"saved_send_{wid}"),
+                    ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                ]])
+                telegram.tg_send(
+                    f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
+                    reply_markup=saved_kb,
+                )
+            else:
+                telegram.tg_send(f"No saved messages for {state._wid_label(idx)}.")
+        else:
+            # Scan all sessions for queued messages
+            found_any = False
+            for idx in sorted(sessions, key=int):
+                wid = f"w{idx}"
+                queued = state._load_queued_msgs(wid)
+                if queued:
+                    found_any = True
+                    preview_lines = []
+                    for i, m_q in enumerate(queued, 1):
+                        preview_lines.append(f"{i}. `{m_q['text'][:100]}`")
+                    saved_kb = telegram._build_inline_keyboard([[
+                        ("\u2709\ufe0f Send", f"saved_send_{wid}"),
+                        ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                    ]])
+                    telegram.tg_send(
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
+                        reply_markup=saved_kb,
+                    )
+            if not found_any:
+                telegram.tg_send("No saved messages.")
+        return None, sessions, last_win_idx
+
     # Parse wN prefix
     m = re.match(r"^w(\d+)\s+(.*)", text, re.DOTALL)
     if m:
@@ -454,6 +503,37 @@ def _handle_callback(callback: dict, sessions: dict,
         cmd_text = f"/status w{idx}"
         _, sessions, last_win_idx = _handle_command(
             cmd_text, sessions, last_win_idx)
+        return sessions, last_win_idx, None
+
+    # Saved message callbacks: saved_send_{wid}, saved_discard_{wid}
+    m = re.match(r"^saved_(send|discard)_(w\d+)$", cb_data)
+    if m:
+        action_type, wid = m.group(1), m.group(2)
+        win_idx = wid.lstrip("w")
+        if action_type == "send":
+            msgs = state._pop_queued_msgs(wid)
+            if msgs and win_idx in sessions:
+                combined = "\n".join(m["text"] for m in msgs)
+                pane = sessions[win_idx][0]
+                confirm = routing.route_to_pane(pane, win_idx, combined)
+                telegram.tg_send(confirm)
+                last_win_idx = win_idx
+            elif msgs:
+                telegram.tg_send(f"⚠️ Session `w{win_idx}` no longer active.")
+            else:
+                telegram.tg_send("No saved messages to send.")
+        else:  # discard
+            state._pop_queued_msgs(wid)
+            saved_text = state._pop_prompt_text(wid)
+            if saved_text and win_idx in sessions:
+                pane = sessions[win_idx][0]
+                p = shlex.quote(pane)
+                subprocess.run(
+                    ["bash", "-c",
+                     f"tmux send-keys -t {p} -l {shlex.quote(saved_text)}"],
+                    timeout=10,
+                )
+            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(win_idx)}.")
         return sessions, last_win_idx, None
 
     config._log("callback", f"unknown callback_data: {cb_data}")

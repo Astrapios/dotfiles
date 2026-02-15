@@ -389,7 +389,8 @@ class TestRouteToPane(unittest.TestCase):
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("subprocess.run")
-    def test_normal_message(self, mock_run):
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_normal_message(self, mock_idle, mock_run):
         """No active prompt — sends text + Enter."""
         with patch.object(tg.state, "load_active_prompt", return_value=None):
             result = tg.route_to_pane(self.pane, self.win_idx, "hello")
@@ -487,12 +488,24 @@ class TestRouteToPane(unittest.TestCase):
         self.assertEqual(cmd_str.count("Enter"), 1)  # submit only
 
     @patch("subprocess.run")
-    def test_message_underscore_safe(self, mock_run):
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_message_underscore_safe(self, mock_idle, mock_run):
         """Route confirmation with underscored text is Markdown-safe."""
         with patch.object(tg.state, "load_active_prompt", return_value=None):
             result = tg.route_to_pane(self.pane, self.win_idx, "fix my_var_name")
         # Text should be in backticks
         self.assertIn("`fix my_var_name`", result)
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_newlines_stripped_before_send(self, mock_idle, mock_run):
+        """Newlines in message text are replaced with spaces before send-keys."""
+        with patch.object(tg.state, "load_active_prompt", return_value=None):
+            result = tg.route_to_pane(self.pane, self.win_idx, "line1\nline2\rline3")
+        self.assertIn("Sent to", result)
+        cmd = mock_run.call_args[0][0][-1]  # bash -c "..."
+        self.assertNotIn("\\n", cmd)
+        self.assertIn("line1 line2 line3", cmd)
 
 
 class TestProcessSignals(unittest.TestCase):
@@ -3103,6 +3116,450 @@ class TestNamePrefixRouting(unittest.TestCase):
             "hello", sessions, None)
         # Should route to single session as no-prefix fallback
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
+
+
+class TestQueuedMessageState(unittest.TestCase):
+    """Test _save_queued_msg, _load_queued_msgs, _pop_queued_msgs."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_queued"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_save_load_cycle(self):
+        tg._save_queued_msg("w4", "hello")
+        tg._save_queued_msg("w4", "world")
+        msgs = tg._load_queued_msgs("w4")
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0]["text"], "hello")
+        self.assertEqual(msgs[1]["text"], "world")
+        self.assertIn("ts", msgs[0])
+
+    def test_pop_returns_and_deletes(self):
+        tg._save_queued_msg("w4", "msg1")
+        msgs = tg._pop_queued_msgs("w4")
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["text"], "msg1")
+        # File should be deleted
+        self.assertEqual(tg._load_queued_msgs("w4"), [])
+
+    def test_load_empty(self):
+        self.assertEqual(tg._load_queued_msgs("w99"), [])
+
+    def test_pop_empty(self):
+        self.assertEqual(tg._pop_queued_msgs("w99"), [])
+
+    def test_separate_sessions(self):
+        tg._save_queued_msg("w4", "for w4")
+        tg._save_queued_msg("w5", "for w5")
+        self.assertEqual(len(tg._load_queued_msgs("w4")), 1)
+        self.assertEqual(len(tg._load_queued_msgs("w5")), 1)
+
+
+class TestSavedPromptTextState(unittest.TestCase):
+    """Test _save_prompt_text and _pop_prompt_text."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_prompt_text"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_save_and_pop(self):
+        tg._save_prompt_text("w4", "partial input")
+        result = tg._pop_prompt_text("w4")
+        self.assertEqual(result, "partial input")
+        # File should be deleted
+        self.assertIsNone(tg._pop_prompt_text("w4"))
+
+    def test_pop_empty(self):
+        self.assertIsNone(tg._pop_prompt_text("w99"))
+
+
+class TestPaneIdleState(unittest.TestCase):
+    """Test _pane_idle_state detects idle/busy and typed text."""
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_no_text(self, mock_capture):
+        mock_capture.return_value = "some output\n  ❯ \n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_with_text(self, mock_capture):
+        mock_capture.return_value = "some output\n  ❯ partial command\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "partial command")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_busy(self, mock_capture):
+        mock_capture.return_value = "● Working on something\n  Processing files...\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_old_prompt_in_scrollback_is_busy(self, mock_capture):
+        """Old ❯ from submitted command should not count as idle."""
+        mock_capture.return_value = "❯ test\n● Working on something\n  Processing files...\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_prompt_after_output_is_idle(self, mock_capture):
+        """New ❯ prompt after output means idle."""
+        mock_capture.return_value = "● Done with task\n  Result: 42\n\n❯ \n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_with_ui_chrome_below(self, mock_capture):
+        """❯ prompt followed by separator and hint lines should be idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────\n"
+            "  ⏵⏵ accept edits on (shift+tab to cycle) · esc to interrupt\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_with_text_and_chrome_below(self, mock_capture):
+        """❯ with typed text followed by chrome should be idle with text."""
+        mock_capture.return_value = (
+            "❯ partial cmd\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "  ⏵⏵ accept edits\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "partial cmd")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_idle_with_thinking_indicator_below(self, mock_capture):
+        """❯ followed by thinking timing line should be idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────\n"
+            "* Percolating… (1m 14s · ↓ 1.8k tokens · thought for 71s)\n"
+        )
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_busy_with_working_spinner(self, mock_capture):
+        """Working spinner on last line means busy."""
+        mock_capture.return_value = "❯ test\n● Doing stuff\n⏳ Working...\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(tg.tmux, "_capture_pane")
+    def test_all_empty_lines(self, mock_capture):
+        mock_capture.return_value = "\n\n\n"
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(tg.tmux, "_capture_pane", side_effect=Exception("tmux error"))
+    def test_exception_returns_busy(self, mock_capture):
+        is_idle, typed = tg._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+        self.assertEqual(typed, "")
+
+
+class TestBusyState(unittest.TestCase):
+    """Test _mark_busy, _is_busy, _clear_busy state file operations."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/tg_hook_test_busy_state"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_mark_and_check(self):
+        self.assertFalse(tg._is_busy("w4"))
+        tg._mark_busy("w4")
+        self.assertTrue(tg._is_busy("w4"))
+
+    def test_clear(self):
+        tg._mark_busy("w4")
+        tg._clear_busy("w4")
+        self.assertFalse(tg._is_busy("w4"))
+
+    def test_clear_nonexistent(self):
+        tg._clear_busy("w99")  # should not raise
+
+    def test_separate_sessions(self):
+        tg._mark_busy("w4")
+        self.assertTrue(tg._is_busy("w4"))
+        self.assertFalse(tg._is_busy("w5"))
+
+    def test_cleanup_removes_dead_sessions(self):
+        """Busy files for sessions not in active_sessions are removed."""
+        tg._mark_busy("w4")
+        tg._mark_busy("w5")
+        active = {"4": ("0:4.0", "proj")}  # w5 is gone
+        tg._cleanup_stale_busy(active)
+        self.assertTrue(tg._is_busy("w4"))
+        self.assertFalse(tg._is_busy("w5"))
+
+    def test_cleanup_empty_sessions(self):
+        """All busy files removed when no sessions active."""
+        tg._mark_busy("w4")
+        tg._cleanup_stale_busy({})
+        self.assertFalse(tg._is_busy("w4"))
+
+
+class TestRouteToPane_BusyDetection(unittest.TestCase):
+    """Test route_to_pane busy detection and prompt text save."""
+
+    def setUp(self):
+        self.pane = "0:4.0"
+        self.win_idx = "4"
+        self.signal_dir = "/tmp/tg_hook_test_route_busy"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(False, ""))
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_busy_queues_message(self, mock_prompt, mock_idle, mock_run):
+        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        self.assertIn("Saved", result)
+        self.assertIn("busy", result)
+        # Message should be queued
+        msgs = tg._load_queued_msgs("w4")
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["text"], "hello")
+        # No subprocess call (no send-keys)
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, "existing text"))
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_idle_with_text_saves_and_clears(self, mock_prompt, mock_idle, mock_run):
+        result = tg.route_to_pane(self.pane, self.win_idx, "new msg")
+        self.assertIn("Sent to", result)
+        # Should have saved the existing text
+        saved = tg._pop_prompt_text("w4")
+        self.assertEqual(saved, "existing text")
+        # Should have called Escape + send-keys
+        self.assertEqual(mock_run.call_count, 2)  # Escape + send-keys
+        esc_cmd = mock_run.call_args_list[0][0][0][2]
+        self.assertIn("Escape", esc_cmd)
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_idle_no_text_sends_normally(self, mock_prompt, mock_idle, mock_run):
+        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        self.assertIn("Sent to", result)
+        # Only one subprocess call (send-keys)
+        self.assertEqual(mock_run.call_count, 1)
+
+    @patch("subprocess.run")
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_busy_file_queues_subsequent_messages(self, mock_prompt, mock_run):
+        """After sending, _busy file prevents subsequent messages when pane is busy."""
+        # First call: pane idle → sends. Second call: pane busy → queues.
+        with patch.object(tg.routing, "_pane_idle_state", return_value=(True, "")):
+            result1 = tg.route_to_pane(self.pane, self.win_idx, "first")
+        self.assertIn("Sent to", result1)
+        self.assertTrue(tg._is_busy("w4"))
+        with patch.object(tg.routing, "_pane_idle_state", return_value=(False, "")):
+            result2 = tg.route_to_pane(self.pane, self.win_idx, "second")
+        self.assertIn("Saved", result2)
+        msgs = tg._load_queued_msgs("w4")
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["text"], "second")
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_busy_cleared_allows_send(self, mock_prompt, mock_idle, mock_run):
+        """After _clear_busy, messages send normally again."""
+        tg._mark_busy("w4")
+        tg._clear_busy("w4")
+        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        self.assertIn("Sent to", result)
+
+    @patch("subprocess.run")
+    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    def test_busy_self_heals_when_pane_idle(self, mock_prompt, mock_idle, mock_run):
+        """If busy file exists but pane is idle, self-heal and send."""
+        tg._mark_busy("w4")
+        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        self.assertIn("Sent to", result)
+        # Busy file should be re-set (cleared then re-marked by send)
+        self.assertTrue(tg._is_busy("w4"))
+
+
+class TestSavedCommand(unittest.TestCase):
+    """Test /saved command."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_saved_cmd"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_empty(self, mock_send):
+        action, _, _ = tg._handle_command("/saved", self.sessions, None)
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No saved messages", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_with_messages(self, mock_send):
+        tg._save_queued_msg("w4", "hello there")
+        action, _, _ = tg._handle_command("/saved", self.sessions, None)
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("1 saved message", msg)
+        self.assertIn("hello there", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_specific_session(self, mock_send):
+        tg._save_queued_msg("w4", "msg for w4")
+        action, _, _ = tg._handle_command("/saved w4", self.sessions, None)
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("msg for w4", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_specific_session_empty(self, mock_send):
+        action, _, _ = tg._handle_command("/saved w4", self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No saved messages", msg)
+
+
+class TestSavedCallbacks(unittest.TestCase):
+    """Test saved_send and saved_discard callbacks."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj")}
+        self.signal_dir = "/tmp/tg_hook_test_saved_cb"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    def test_saved_send(self, mock_route, mock_send, mock_answer, mock_remove):
+        tg._save_queued_msg("w4", "hello")
+        callback = {"id": "cb1", "data": "saved_send_w4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        mock_route.assert_called_once_with("0:4.0", "4", "hello")
+        self.assertEqual(last, "4")
+        # Queue should be empty now
+        self.assertEqual(tg._load_queued_msgs("w4"), [])
+
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`a\nb`")
+    def test_saved_send_multiple(self, mock_route, mock_send, mock_answer, mock_remove):
+        tg._save_queued_msg("w4", "a")
+        tg._save_queued_msg("w4", "b")
+        callback = {"id": "cb1", "data": "saved_send_w4", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        # Should combine with newlines
+        mock_route.assert_called_once_with("0:4.0", "4", "a\nb")
+
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_discard(self, mock_send, mock_answer, mock_remove):
+        tg._save_queued_msg("w4", "hello")
+        callback = {"id": "cb1", "data": "saved_discard_w4", "message_id": 42}
+        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Discarded", msg)
+        # Queue should be empty
+        self.assertEqual(tg._load_queued_msgs("w4"), [])
+
+    @patch("subprocess.run")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_saved_discard_restores_prompt_text(self, mock_send, mock_answer,
+                                                 mock_remove, mock_run):
+        tg._save_queued_msg("w4", "hello")
+        tg._save_prompt_text("w4", "old input")
+        callback = {"id": "cb1", "data": "saved_discard_w4", "message_id": 42}
+        tg._handle_callback(callback, self.sessions, None)
+        # Should restore the prompt text
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0][2]
+        self.assertIn("old input", cmd)
+        # Prompt text should be cleared
+        self.assertIsNone(tg._pop_prompt_text("w4"))
+
+
+class TestSavedAlias(unittest.TestCase):
+    """Test sv alias resolves to /saved."""
+
+    def test_sv_alias(self):
+        resolved = tg._resolve_alias("sv", has_active_prompt=False)
+        self.assertEqual(resolved, "/saved")
+
+    def test_sv_alias_suppressed_during_prompt(self):
+        resolved = tg._resolve_alias("sv", has_active_prompt=True)
+        self.assertEqual(resolved, "sv")
+
+
+class TestHelpIncludesSaved(unittest.TestCase):
+    """Verify /saved appears in help text."""
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions", return_value={})
+    def test_help_has_saved(self, mock_scan, mock_send):
+        tg._handle_command("/help", {}, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("/saved", msg)
+        self.assertIn("sv", msg)
 
 
 if __name__ == "__main__":

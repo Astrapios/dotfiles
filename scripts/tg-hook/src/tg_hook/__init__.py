@@ -52,6 +52,9 @@ from .state import (
     _save_deepfocus_state, _load_deepfocus_state, _clear_deepfocus_state,
     _save_session_name, _clear_session_name, _load_session_names,
     _resolve_name, _wid_label,
+    _save_queued_msg, _load_queued_msgs, _pop_queued_msgs,
+    _save_prompt_text, _pop_prompt_text,
+    _mark_busy, _is_busy, _clear_busy, _cleanup_stale_busy,
 )
 
 # content
@@ -61,7 +64,10 @@ from .content import (
 )
 
 # routing
-from .routing import _select_option, route_to_pane
+from .routing import (
+    _select_option, route_to_pane, _pane_idle_state,
+    _is_ui_chrome,
+)
 
 # signals
 from .signals import _format_question_msg, process_signals

@@ -41,7 +41,7 @@ def cmd_listen():
     # Clear stale prompt state — after restart, no in-memory context to handle them
     if os.path.isdir(config.SIGNAL_DIR):
         for f in os.listdir(config.SIGNAL_DIR):
-            if f.startswith("_active_prompt_") or f.startswith("_bash_cmd_"):
+            if f.startswith(("_active_prompt_", "_bash_cmd_", "_busy_")):
                 try:
                     os.remove(os.path.join(config.SIGNAL_DIR, f))
                 except OSError:
@@ -152,6 +152,7 @@ def cmd_listen():
 
         if time.time() - last_prompt_cleanup > 5:
             state._cleanup_stale_prompts()
+            state._cleanup_stale_busy(sessions)
             last_prompt_cleanup = time.time()
 
         focus_state = state._load_focus_state()
