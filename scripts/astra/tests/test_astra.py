@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Tests for tg-hook — validates formatting, routing, and content cleaning."""
+"""Tests for astra — validates formatting, routing, and content cleaning."""
 import json
 import os
 import re
@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-import tg_hook as tg
+import astra
 
 
 class TestMarkdownSafety(unittest.TestCase):
@@ -18,14 +18,14 @@ class TestMarkdownSafety(unittest.TestCase):
 
     def _send_and_capture(self, send_fn):
         """Call send_fn, return the text that would be sent to Telegram."""
-        with patch.object(tg.telegram, "tg_send") as mock_send:
+        with patch.object(astra.telegram, "tg_send") as mock_send:
             mock_send.return_value = 1
             send_fn(mock_send)
             return mock_send.call_args[0][0]
 
     def test_sessions_message_underscore_project(self):
         sessions = {"1": ("0:1.0", "my_project"), "2": ("0:2.0", "another_test_proj")}
-        msg = tg.format_sessions_message(sessions)
+        msg = astra.format_sessions_message(sessions)
         # Project names must be inside backticks
         self.assertIn("`my_project`", msg)
         self.assertIn("`another_test_proj`", msg)
@@ -115,72 +115,72 @@ class TestFilterNoise(unittest.TestCase):
 
     def test_removes_separators(self):
         raw = "hello\n────────────\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_removes_working_indicator(self):
         raw = "hello\n⏳ Working...\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_removes_accept_edits_line(self):
         raw = "hello\n⏵⏵ accept edits on\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_removes_context_line(self):
         raw = "hello\nContext left until auto-compact: 50%\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_removes_shortcut_hint(self):
         raw = "hello\n✻ esc for shortcuts\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_strips_trailing_blanks(self):
         raw = "hello\n\n\n"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello"])
 
     def test_keeps_normal_content(self):
         raw = "line one\nline two\nline three"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["line one", "line two", "line three"])
 
     def test_removes_prompt_line(self):
         """Prompt lines (❯) should never appear in response content."""
         raw = "response text\n❯ summarize what the problem was\nmore response"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["response text", "more response"])
 
     def test_removes_empty_prompt(self):
         raw = "response text\n❯\nmore response"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["response text", "more response"])
 
     def test_removes_spinner_three_dots(self):
         """Filter spinner lines using ... (three dots) not just … (Unicode)."""
         raw = "hello\n❊ Infusing... (thinking)\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_removes_tool_progress_ctrl_o(self):
         """Filter tool progress lines with (ctrl+o to expand)."""
         raw = "hello\n● Reading 1 file... (ctrl+o to expand)\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_removes_tool_progress_without_bullet(self):
         """Filter tool progress without ● prefix (e.g. 'Reading 2 files…')."""
         raw = "hello\nReading 2 files… (ctrl+o to expand)\nworld"
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
     def test_keeps_response_bullet(self):
         """Response bullets should NOT be filtered."""
         raw = "● All 3 images received.\nHere are the descriptions."
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["● All 3 images received.", "Here are the descriptions."])
 
     def test_removes_wrapped_prompt_continuations(self):
@@ -192,7 +192,7 @@ class TestFilterNoise(unittest.TestCase):
             "  right above the prompt line\n"
             "● Claude's next response."
         )
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["● Response above.", "● Claude's next response."])
 
     def test_prompt_continuation_stops_at_bullet(self):
@@ -202,7 +202,7 @@ class TestFilterNoise(unittest.TestCase):
             "● Response starts here.\n"
             "  Indented response text."
         )
-        result = tg._filter_noise(raw)
+        result = astra._filter_noise(raw)
         self.assertEqual(result, ["● Response starts here.", "  Indented response text."])
 
     def test_keeps_prompt_in_status_mode(self):
@@ -213,7 +213,7 @@ class TestFilterNoise(unittest.TestCase):
             "  have keywords such as compacting in the status line\n"
             "● Claude's next response."
         )
-        result = tg._filter_noise(raw, keep_status=True)
+        result = astra._filter_noise(raw, keep_status=True)
         self.assertIn("❯ Read /tmp/photo.jpg — after compaction, before it should", result)
         self.assertIn("  have keywords such as compacting in the status line", result)
 
@@ -230,7 +230,7 @@ class TestCleanPaneContent(unittest.TestCase):
               It has multiple lines.
             ❯ next prompt here
         """)
-        result = tg.clean_pane_content(raw, "stop")
+        result = astra.clean_pane_content(raw, "stop")
         self.assertIn("Here is the response", result)
         self.assertIn("actual reply", result)
         self.assertNotIn("next prompt", result)
@@ -244,7 +244,7 @@ class TestCleanPaneContent(unittest.TestCase):
             ● The answer is 42.
             ❯ prompt
         """)
-        result = tg.clean_pane_content(raw, "stop")
+        result = astra.clean_pane_content(raw, "stop")
         self.assertIn("The answer is 42", result)
         self.assertNotIn("Bash(echo", result)
 
@@ -258,12 +258,12 @@ class TestCleanPaneContent(unittest.TestCase):
               ⎿  (image data)
             ⠐ Thinking…
         """)
-        result = tg.clean_pane_content(raw, "stop")
+        result = astra.clean_pane_content(raw, "stop")
         self.assertEqual(result, "")
 
     def test_non_stop_event_returns_all(self):
         raw = "line 1\nline 2\nline 3"
-        result = tg.clean_pane_content(raw, "notification")
+        result = astra.clean_pane_content(raw, "notification")
         self.assertIn("line 1", result)
         self.assertIn("line 3", result)
 
@@ -273,21 +273,21 @@ class TestHasResponseStart(unittest.TestCase):
 
     def test_found_text_bullet(self):
         raw = "● Here is the answer\n  result\n❯ prompt"
-        self.assertTrue(tg._has_response_start(raw))
+        self.assertTrue(astra._has_response_start(raw))
 
     def test_only_tool_bullet(self):
         """Tool call bullets don't count as response start."""
         raw = "● Bash(echo hi)\n  ⎿  hi\n❯ prompt"
-        self.assertFalse(tg._has_response_start(raw))
+        self.assertFalse(astra._has_response_start(raw))
 
     def test_no_bullet_at_all(self):
         """Long response cut off — no bullet visible."""
         raw = "  line 5\n  line 6\n  line 7\n❯ prompt"
-        self.assertFalse(tg._has_response_start(raw))
+        self.assertFalse(astra._has_response_start(raw))
 
     def test_bullet_before_prompt(self):
         raw = "old stuff\n● The answer is 42.\n  details\n❯ prompt"
-        self.assertTrue(tg._has_response_start(raw))
+        self.assertTrue(astra._has_response_start(raw))
 
 
 class TestExtractPanePermission(unittest.TestCase):
@@ -312,7 +312,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No, and tell Claude what to do differently (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
 
         self.assertIn("update", header)
         self.assertIn("`scripts/test_file.py`", header)
@@ -331,7 +331,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
 
         self.assertEqual(len(options), 3)
 
@@ -346,7 +346,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
 
         self.assertIn("fetch", header)
         self.assertIn("`https://example.com`", header)
@@ -355,7 +355,7 @@ class TestExtractPanePermission(unittest.TestCase):
     @patch("subprocess.run")
     def test_no_options(self, mock_run):
         mock_run.return_value = self._mock_pane("some random content\nno options here")
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
         self.assertEqual(options, [])
 
     @patch("subprocess.run")
@@ -372,7 +372,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 2. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
 
         self.assertNotIn("Edit file", content)
         self.assertNotIn("hook.py", content)  # standalone filename filtered
@@ -407,7 +407,7 @@ class TestExtractPanePermission(unittest.TestCase):
             return self._mock_pane(long_content)
 
         mock_run.side_effect = side_effect
-        header, body, options, ctx = tg._extract_pane_permission("test_pane")
+        header, body, options, ctx = astra._extract_pane_permission("test_pane")
 
         # Should have expanded — verify it captured the deeper content
         self.assertIn("more plan details", body)
@@ -430,7 +430,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 3. No, and tell Claude what to do differently (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
 
         self.assertIn("update", header)
         self.assertIn("+new_line = True", content)
@@ -449,7 +449,7 @@ class TestExtractPanePermission(unittest.TestCase):
                 2. No (esc)
         """)
         mock_run.return_value = self._mock_pane(pane_content)
-        header, content, options, ctx = tg._extract_pane_permission("test_pane")
+        header, content, options, ctx = astra._extract_pane_permission("test_pane")
 
         self.assertIn("update", header)
         self.assertEqual(ctx, "")
@@ -461,25 +461,25 @@ class TestRouteToPane(unittest.TestCase):
     def setUp(self):
         self.pane = "0:4.0"
         self.win_idx = "4"
-        self.signal_dir = "/tmp/tg_hook_test_route"
+        self.signal_dir = "/tmp/astra_test_route"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     def test_normal_message(self, mock_idle, mock_run):
         """No active prompt — sends text + Enter."""
-        with patch.object(tg.state, "load_active_prompt", return_value=None):
-            result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        with patch.object(astra.state, "load_active_prompt", return_value=None):
+            result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Sent to", result)
         self.assertIn("`w4`", result)
         # Should call bash -c with send-keys
@@ -492,8 +492,8 @@ class TestRouteToPane(unittest.TestCase):
         """Permission prompt — 'y' sends Enter (option 1)."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "yes": 1, "allow": 1, "n": 3, "no": 3, "deny": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "y")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "y")
         self.assertIn("Selected option 1", result)
         cmd_str = mock_run.call_args[0][0][2]  # bash -c "..."
         self.assertIn("Enter", cmd_str)
@@ -504,8 +504,8 @@ class TestRouteToPane(unittest.TestCase):
         """Permission prompt — 'n' navigates to last option."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "yes": 1, "allow": 1, "n": 3, "no": 3, "deny": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "n")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "n")
         self.assertIn("Selected option 3", result)
         cmd_str = mock_run.call_args[0][0][2]
         self.assertEqual(cmd_str.count("Down"), 2)  # n=3, so 2 Downs
@@ -515,8 +515,8 @@ class TestRouteToPane(unittest.TestCase):
         """Digit reply navigates with Down keys."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "2")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "2")
         self.assertIn("Selected option 2", result)
         cmd_str = mock_run.call_args[0][0][2]
         self.assertEqual(cmd_str.count("Down"), 1)  # 1 Down for option 2
@@ -527,8 +527,8 @@ class TestRouteToPane(unittest.TestCase):
     def test_question_free_text(self, mock_run):
         """Free text on question prompt — navigate to Type something, type, Enter."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "my custom answer")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "my custom answer")
         self.assertIn("Answered", result)
         self.assertIn("`my custom answer`", result)
         cmd_str = mock_run.call_args[0][0][2]
@@ -546,47 +546,47 @@ class TestRouteToPane(unittest.TestCase):
     def test_question_numbered(self, mock_run):
         """Digit reply on question selects that option."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "1")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "1")
         self.assertIn("Selected option 1", result)
 
     @patch("subprocess.run")
     def test_question_extra_options(self, mock_run):
         """Question allows selecting n+1 (Type answer) and n+2 (Chat)."""
         prompt = {"pane": "%20", "total": 4, "ts": 0, "free_text_at": 2}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "4")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "4")
         self.assertIn("Selected option 4", result)  # n+2 = 4
 
     def test_unknown_text_returns_guidance(self):
         """Unrecognized text always returns guidance when prompt is active."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "change step 3")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "change step 3")
         self.assertIn("⚠️", result)
         self.assertIn("`n`", result)
         self.assertIn("`y`", result)
         # Prompt was re-saved so user can retry
-        saved = tg.state.load_active_prompt(f"w{self.win_idx}")
+        saved = astra.state.load_active_prompt(f"w{self.win_idx}")
         self.assertIsNotNone(saved)
         self.assertEqual(saved["total"], 3)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     def test_message_underscore_safe(self, mock_idle, mock_run):
         """Route confirmation with underscored text is Markdown-safe."""
-        with patch.object(tg.state, "load_active_prompt", return_value=None):
-            result = tg.route_to_pane(self.pane, self.win_idx, "fix my_var_name")
+        with patch.object(astra.state, "load_active_prompt", return_value=None):
+            result = astra.route_to_pane(self.pane, self.win_idx, "fix my_var_name")
         # Text should be in backticks
         self.assertIn("`fix my_var_name`", result)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     def test_newlines_stripped_before_send(self, mock_idle, mock_run):
         """Newlines in message text are replaced with spaces before send-keys."""
-        with patch.object(tg.state, "load_active_prompt", return_value=None):
-            result = tg.route_to_pane(self.pane, self.win_idx, "line1\nline2\rline3")
+        with patch.object(astra.state, "load_active_prompt", return_value=None):
+            result = astra.route_to_pane(self.pane, self.win_idx, "line1\nline2\rline3")
         self.assertIn("Sent to", result)
         cmd = mock_run.call_args[0][0][-1]  # bash -c "..."
         self.assertNotIn("\\n", cmd)
@@ -597,16 +597,16 @@ class TestProcessSignals(unittest.TestCase):
     """Test signal processing with mocked filesystem and Telegram."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_signals"
+        self.signal_dir = "/tmp/astra_test_signals"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -617,8 +617,8 @@ class TestProcessSignals(unittest.TestCase):
             json.dump(signal, f)
         return fname
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="test_project")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="test_project")
     @patch("subprocess.run")
     @patch("time.sleep")
     def test_stop_signal(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -627,7 +627,7 @@ class TestProcessSignals(unittest.TestCase):
         mock_result.stdout = "● Here is the answer\n  The result is 42.\n❯ prompt"
         mock_run.return_value = mock_result
 
-        tg.process_signals()
+        astra.process_signals()
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
@@ -635,14 +635,14 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("`test_project`", msg)
         self.assertIn("```", msg)  # content in pre block
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="test_proj")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to update `test.py`", "+new=True", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="test_proj")
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("wants to update `test.py`", "+new=True", ["1. Yes", "2. No"], ""))
+    @patch.object(astra.state, "save_active_prompt")
     def test_permission_signal_non_bash(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="", message="Claude needs permission to use Update")
 
-        tg.process_signals()
+        astra.process_signals()
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
@@ -650,38 +650,38 @@ class TestProcessSignals(unittest.TestCase):
         self.assertIn("```", msg)
         self.assertIn("1. Yes", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="test_proj")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("", "", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="test_proj")
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("", "", ["1. Yes", "2. No"], ""))
+    @patch.object(astra.state, "save_active_prompt")
     def test_permission_signal_bash(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="rm /tmp/test_file.txt", message="Claude needs permission")
 
-        tg.process_signals()
+        astra.process_signals()
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("needs permission", msg)
         self.assertIn("```\nrm /tmp/test_file.txt\n```", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to fetch `https://example.com`", "", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("wants to fetch `https://example.com`", "", ["1. Yes", "2. No"], ""))
+    @patch.object(astra.state, "save_active_prompt")
     def test_permission_no_content(self, mock_save, mock_extract, mock_proj, mock_send):
         """WebFetch with no content body should not have empty pre block."""
         self._write_signal("permission", cmd="", message="Claude needs permission")
 
-        tg.process_signals()
+        astra.process_signals()
 
         msg = mock_send.call_args[0][0]
         self.assertIn("wants to fetch", msg)
         self.assertNotIn("```\n\n```", msg)  # no empty pre block
         self.assertIn("1. Yes", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.state, "save_active_prompt")
     def test_question_signal(self, mock_save, mock_proj, mock_send):
         questions = [{"question": "Pick one?", "options": [
             {"label": "A", "description": "first"},
@@ -689,7 +689,7 @@ class TestProcessSignals(unittest.TestCase):
         ]}]
         self._write_signal("question", questions=questions)
 
-        tg.process_signals()
+        astra.process_signals()
 
         msg = mock_send.call_args[0][0]
         self.assertIn("asks", msg)
@@ -707,8 +707,8 @@ class TestProcessSignals(unittest.TestCase):
         with open(state_path, "w") as f:
             json.dump({"type": "test"}, f)
 
-        with patch.object(tg.telegram, "tg_send"):
-            tg.process_signals()
+        with patch.object(astra.telegram, "tg_send"):
+            astra.process_signals()
 
         # State file should still exist (not deleted)
         self.assertTrue(os.path.exists(state_path))
@@ -716,11 +716,11 @@ class TestProcessSignals(unittest.TestCase):
     def test_cleans_processed_signals(self):
         """Processed signal files should be deleted."""
         self._write_signal("stop")
-        with patch.object(tg.telegram, "tg_send", return_value=1), \
-             patch.object(tg.tmux, "get_pane_project", return_value="p"), \
+        with patch.object(astra.telegram, "tg_send", return_value=1), \
+             patch.object(astra.tmux, "get_pane_project", return_value="p"), \
              patch("subprocess.run", return_value=MagicMock(stdout="")), \
              patch("time.sleep"):
-            tg.process_signals()
+            astra.process_signals()
         # Only state files should remain
         remaining = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(remaining, [])
@@ -730,23 +730,23 @@ class TestCmdHook(unittest.TestCase):
     """Test hook command signal writing."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_signals_hook"
+        self.signal_dir = "/tmp/astra_test_signals_hook"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        self._orig_enabled = tg.config.TG_HOOKS_ENABLED
-        tg.config.TG_HOOKS_ENABLED = True
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_enabled = astra.config.TG_HOOKS_ENABLED
+        astra.config.TG_HOOKS_ENABLED = True
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
-        tg.config.TG_HOOKS_ENABLED = self._orig_enabled
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_bash_pretooluse_saves_cmd(self, mock_stdin, mock_wid):
         data = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
@@ -754,14 +754,14 @@ class TestCmdHook(unittest.TestCase):
         mock_stdin.read.return_value = json.dumps(data)
         os.environ["TMUX_PANE"] = "%20"
 
-        tg.cmd_hook()
+        astra.cmd_hook()
 
         cmd_file = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
         self.assertTrue(os.path.exists(cmd_file))
         with open(cmd_file) as f:
             self.assertEqual(json.load(f)["cmd"], "echo hello")
 
-    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_permission_reads_bash_cmd_only_for_bash(self, mock_stdin, mock_wid):
         """Permission notification only reads _bash_cmd if message mentions bash."""
@@ -776,7 +776,7 @@ class TestCmdHook(unittest.TestCase):
         mock_stdin.read.return_value = json.dumps(data)
         os.environ["TMUX_PANE"] = "%20"
 
-        tg.cmd_hook()
+        astra.cmd_hook()
 
         # Bash cmd file should still exist
         self.assertTrue(os.path.exists(cmd_file))
@@ -793,23 +793,23 @@ class TestCmdHookPlanMode(unittest.TestCase):
     """Test that EnterPlanMode PreToolUse writes a plan signal."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_plan"
+        self.signal_dir = "/tmp/astra_test_plan"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        self._orig_enabled = tg.config.TG_HOOKS_ENABLED
-        tg.config.TG_HOOKS_ENABLED = True
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_enabled = astra.config.TG_HOOKS_ENABLED
+        astra.config.TG_HOOKS_ENABLED = True
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
-        tg.config.TG_HOOKS_ENABLED = self._orig_enabled
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_plan_signal_written(self, mock_stdin, mock_wid):
         data = {"hook_event_name": "PreToolUse", "tool_name": "EnterPlanMode",
@@ -817,7 +817,7 @@ class TestCmdHookPlanMode(unittest.TestCase):
         mock_stdin.read.return_value = json.dumps(data)
         os.environ["TMUX_PANE"] = "%20"
 
-        tg.cmd_hook()
+        astra.cmd_hook()
 
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(len(signals), 1)
@@ -830,35 +830,35 @@ class TestPlanSignalBypassesGodMode(unittest.TestCase):
     """Test that plan signals are always sent to Telegram, never auto-accepted."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_plan_god"
+        self.signal_dir = "/tmp/astra_test_plan_god"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
         # Clear god mode BEFORE restoring paths (otherwise it deletes the real file)
-        tg.state._clear_god_mode()
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.state._clear_god_mode()
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("wants to enter plan mode", "", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("time.sleep")
     def test_plan_not_auto_accepted_in_god_mode(self, mock_sleep, mock_send, mock_perm):
         """Even with god mode on, plan signal sends to Telegram instead of auto-accepting."""
-        tg.state._set_god_mode("all", True)
+        astra.state._set_god_mode("all", True)
         # Write a plan signal
-        tg.state.write_signal("plan", {
+        astra.state.write_signal("plan", {
             "hook_event_name": "PreToolUse",
             "tool_name": "EnterPlanMode",
             "cwd": "/tmp/test",
         })
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         # Should have sent a Telegram message (not auto-accepted)
         mock_send.assert_called()
         msg = mock_send.call_args[0][0]
@@ -872,45 +872,45 @@ class TestComputeNewLines(unittest.TestCase):
     """Test _compute_new_lines diff algorithm."""
 
     def test_empty_old_returns_all_new(self):
-        result = tg._compute_new_lines([], ["a", "b", "c"])
+        result = astra._compute_new_lines([], ["a", "b", "c"])
         self.assertEqual(result, ["a", "b", "c"])
 
     def test_identical_returns_empty(self):
         lines = ["a", "b", "c"]
-        result = tg._compute_new_lines(lines, lines[:])
+        result = astra._compute_new_lines(lines, lines[:])
         self.assertEqual(result, [])
 
     def test_scroll_down_overlap(self):
         old = ["a", "b", "c", "d", "e"]
         new = ["c", "d", "e", "f", "g"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["f", "g"])
 
     def test_single_line_scroll(self):
         old = ["a", "b", "c", "d", "e"]
         new = ["b", "c", "d", "e", "f"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["f"])
 
     def test_in_place_change_skipped(self):
         """Lines that changed in place (e.g. timers) are not reported as new."""
         old = ["a", "b", "progress 62%", "c", "d"]
         new = ["a", "b", "progress 88%", "c", "d"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, [])
 
     def test_scroll_with_in_place_change(self):
         """Scrolling + in-place change: only inserted lines returned."""
         old = ["a", "b", "progress 62%", "c", "d"]
         new = ["b", "progress 88%", "c", "d", "e"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["e"])
 
     def test_complete_change_returns_all(self):
         """No overlap (content scrolled past window) returns all new lines."""
         old = ["a", "b"]
         new = ["x", "y", "z"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["x", "y", "z"])
 
 
@@ -919,33 +919,33 @@ class TestJoinWrappedLines(unittest.TestCase):
 
     def test_no_wrapping(self):
         lines = ["short line", "another short"]
-        result = tg._join_wrapped_lines(lines, 80)
+        result = astra._join_wrapped_lines(lines, 80)
         self.assertEqual(result, ["short line", "another short"])
 
     def test_joins_continuation(self):
         # Line near width 80 (within margin of 15), followed by indented continuation
         lines = ["x" * 68, "  continued text"]
-        result = tg._join_wrapped_lines(lines, 80)
+        result = astra._join_wrapped_lines(lines, 80)
         self.assertEqual(result, ["x" * 68 + " continued text"])
 
     def test_preserves_bullet_after_long_line(self):
         lines = ["x" * 68, "● New bullet point"]
-        result = tg._join_wrapped_lines(lines, 80)
+        result = astra._join_wrapped_lines(lines, 80)
         self.assertEqual(result, ["x" * 68, "● New bullet point"])
 
     def test_preserves_numbered_item(self):
         lines = ["x" * 68, "  2. Second item"]
-        result = tg._join_wrapped_lines(lines, 80)
+        result = astra._join_wrapped_lines(lines, 80)
         self.assertEqual(result, ["x" * 68, "  2. Second item"])
 
     def test_chains_multiple_wraps(self):
         lines = ["x" * 68, "  " + "y" * 66, "  final part"]
-        result = tg._join_wrapped_lines(lines, 80)
+        result = astra._join_wrapped_lines(lines, 80)
         self.assertEqual(result, ["x" * 68 + " " + "y" * 66 + " final part"])
 
     def test_skips_when_width_unknown(self):
         lines = ["x" * 78, "  continued"]
-        result = tg._join_wrapped_lines(lines, 0)
+        result = astra._join_wrapped_lines(lines, 0)
         self.assertEqual(result, lines)
 
 
@@ -953,11 +953,11 @@ class TestExtractChatMessages(unittest.TestCase):
     """Test _extract_chat_messages with text, photo, and caption messages."""
 
     def _make_update(self, msg_fields):
-        return {"result": [{"update_id": 1, "message": {"chat": {"id": int(tg.CHAT_ID)}, **msg_fields}}]}
+        return {"result": [{"update_id": 1, "message": {"chat": {"id": int(astra.CHAT_ID)}, **msg_fields}}]}
 
     def test_text_message(self):
         data = self._make_update({"text": "hello"})
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result, [{"text": "hello", "photo": None, "callback": None, "reply_wid": None}])
 
     def test_photo_message_no_caption(self):
@@ -965,7 +965,7 @@ class TestExtractChatMessages(unittest.TestCase):
             {"file_id": "small_id", "width": 90, "height": 90},
             {"file_id": "large_id", "width": 800, "height": 800},
         ]})
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["photo"], "large_id")
         self.assertEqual(result[0]["text"], "")
@@ -976,7 +976,7 @@ class TestExtractChatMessages(unittest.TestCase):
             {"file_id": "small_id", "width": 90, "height": 90},
             {"file_id": "large_id", "width": 800, "height": 800},
         ], "caption": "w4 describe this"})
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["text"], "w4 describe this")
         self.assertEqual(result[0]["photo"], "large_id")
 
@@ -984,12 +984,12 @@ class TestExtractChatMessages(unittest.TestCase):
         data = {"result": [{"update_id": 1, "message": {
             "chat": {"id": 999999}, "text": "hello"
         }}]}
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result, [])
 
     def test_empty_message_skipped(self):
         data = self._make_update({})
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result, [])
 
     def test_reply_wid_from_reply_to_message(self):
@@ -998,7 +998,7 @@ class TestExtractChatMessages(unittest.TestCase):
             "text": "fix the bug",
             "reply_to_message": {"text": "🔔 `w4` (`myproj`): stopped"},
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["reply_wid"], "4")
 
     def test_reply_wid_none_when_no_wn(self):
@@ -1007,13 +1007,13 @@ class TestExtractChatMessages(unittest.TestCase):
             "text": "hello",
             "reply_to_message": {"text": "some message without session id"},
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertIsNone(result[0]["reply_wid"])
 
     def test_reply_wid_none_when_no_reply(self):
         """No reply_to_message → reply_wid is None."""
         data = self._make_update({"text": "hello"})
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertIsNone(result[0]["reply_wid"])
 
     def test_reply_wid_from_caption(self):
@@ -1022,7 +1022,7 @@ class TestExtractChatMessages(unittest.TestCase):
             "text": "looks good",
             "reply_to_message": {"caption": "📷 Photo from `w7`"},
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["reply_wid"], "7")
 
     def test_reply_wid_on_photo_message(self):
@@ -1032,7 +1032,7 @@ class TestExtractChatMessages(unittest.TestCase):
             "caption": "check this",
             "reply_to_message": {"text": "`w3` response"},
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["reply_wid"], "3")
 
     def test_document_message(self):
@@ -1040,7 +1040,7 @@ class TestExtractChatMessages(unittest.TestCase):
         data = self._make_update({
             "document": {"file_id": "doc_abc", "file_name": "report.pdf"},
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(len(result), 1)
         self.assertIsNone(result[0]["photo"])
         self.assertEqual(result[0]["document"]["file_id"], "doc_abc")
@@ -1053,7 +1053,7 @@ class TestExtractChatMessages(unittest.TestCase):
             "document": {"file_id": "doc_xyz", "file_name": "data.csv"},
             "caption": "w4 analyze this",
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["text"], "w4 analyze this")
         self.assertEqual(result[0]["document"]["file_id"], "doc_xyz")
         self.assertEqual(result[0]["document"]["file_name"], "data.csv")
@@ -1064,7 +1064,7 @@ class TestExtractChatMessages(unittest.TestCase):
         data = self._make_update({
             "document": {"file_id": "doc_no_name"},
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["document"]["file_name"], "")
 
 
@@ -1085,8 +1085,8 @@ class TestDownloadTgFile(unittest.TestCase):
 
         mock_get.side_effect = [get_file_resp, download_resp]
 
-        dest = "/tmp/tg_hook_test_photo.jpg"
-        result = tg._download_tg_file("test_file_id", dest)
+        dest = "/tmp/astra_test_photo.jpg"
+        result = astra._download_tg_file("test_file_id", dest)
         self.assertEqual(result, dest)
         self.assertTrue(os.path.exists(dest))
         with open(dest, "rb") as f:
@@ -1095,7 +1095,7 @@ class TestDownloadTgFile(unittest.TestCase):
 
     @patch("requests.get", side_effect=Exception("network error"))
     def test_download_failure_returns_none(self, mock_get):
-        result = tg._download_tg_file("bad_id", "/tmp/tg_hook_test_fail.jpg")
+        result = astra._download_tg_file("bad_id", "/tmp/astra_test_fail.jpg")
         self.assertIsNone(result)
 
 
@@ -1117,7 +1117,7 @@ class TestTgSendPhoto(unittest.TestCase):
             path = f.name
 
         try:
-            msg_id = tg.tg_send_photo(path, "test caption")
+            msg_id = astra.tg_send_photo(path, "test caption")
             self.assertEqual(msg_id, 42)
             call_kwargs = mock_post.call_args
             self.assertIn("sendPhoto", call_kwargs[0][0])
@@ -1141,7 +1141,7 @@ class TestTgSendPhoto(unittest.TestCase):
             path = f.name
 
         try:
-            tg.tg_send_photo(path)
+            astra.tg_send_photo(path)
             call_kwargs = mock_post.call_args
             self.assertNotIn("caption", call_kwargs[1]["data"])
             self.assertNotIn("parse_mode", call_kwargs[1]["data"])
@@ -1167,7 +1167,7 @@ class TestTgSendPhoto(unittest.TestCase):
             path = f.name
 
         try:
-            msg_id = tg.tg_send_photo(path, "caption_with_bad_markdown")
+            msg_id = astra.tg_send_photo(path, "caption_with_bad_markdown")
             self.assertEqual(msg_id, 44)
             # Second call should not have parse_mode
             second_call = mock_post.call_args_list[1]
@@ -1188,7 +1188,7 @@ class TestPaneHasPrompt(unittest.TestCase):
             "  2. Yes, and don't ask again\n"
             "  3. No (esc)\n"
         ))
-        self.assertTrue(tg._pane_has_prompt("0:4.0"))
+        self.assertTrue(astra._pane_has_prompt("0:4.0"))
 
     @patch("subprocess.run")
     def test_detects_indented_options_without_cursor(self, mock_run):
@@ -1199,7 +1199,7 @@ class TestPaneHasPrompt(unittest.TestCase):
             "  1. Yes\n"
             "  2. No (esc)\n"
         ))
-        self.assertTrue(tg._pane_has_prompt("0:4.0"))
+        self.assertTrue(astra._pane_has_prompt("0:4.0"))
 
     @patch("subprocess.run")
     def test_no_options(self, mock_run):
@@ -1208,16 +1208,16 @@ class TestPaneHasPrompt(unittest.TestCase):
             "  The result is 42.\n"
             "❯ prompt\n"
         ))
-        self.assertFalse(tg._pane_has_prompt("0:4.0"))
+        self.assertFalse(astra._pane_has_prompt("0:4.0"))
 
     @patch("subprocess.run")
     def test_empty_pane(self, mock_run):
         mock_run.return_value = MagicMock(stdout="")
-        self.assertFalse(tg._pane_has_prompt("0:4.0"))
+        self.assertFalse(astra._pane_has_prompt("0:4.0"))
 
     @patch("subprocess.run", side_effect=Exception("tmux error"))
     def test_exception_returns_false(self, mock_run):
-        self.assertFalse(tg._pane_has_prompt("0:4.0"))
+        self.assertFalse(astra._pane_has_prompt("0:4.0"))
 
     @patch("subprocess.run")
     def test_numbered_list_in_response_is_false_positive(self, mock_run):
@@ -1234,52 +1234,52 @@ class TestPaneHasPrompt(unittest.TestCase):
             "❯ prompt\n"
         ))
         # This IS a false positive — numbered content looks like options
-        self.assertTrue(tg._pane_has_prompt("0:4.0"))
+        self.assertTrue(astra._pane_has_prompt("0:4.0"))
 
 
 class TestCleanupStalePrompts(unittest.TestCase):
     """Test _cleanup_stale_prompts removes prompts whose pane is idle."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_cleanup"
+        self.signal_dir = "/tmp/astra_test_cleanup"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     def test_removes_stale_prompt(self, mock_idle):
         """Pane is idle (❯ visible) — prompt was answered, remove file."""
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             json.dump({"pane": "0:4.0", "total": 3}, f)
-        tg._cleanup_stale_prompts()
+        astra._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(path))
 
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(False, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(False, ""))
     def test_keeps_active_prompt(self, mock_idle):
         """Pane is not idle — prompt may still be active, keep file."""
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             json.dump({"pane": "0:4.0", "total": 3}, f)
-        tg._cleanup_stale_prompts()
+        astra._cleanup_stale_prompts()
         self.assertTrue(os.path.exists(path))
 
     def test_removes_corrupt_file(self):
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             f.write("not json{{{")
-        tg._cleanup_stale_prompts()
+        astra._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(path))
 
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     def test_ignores_non_prompt_state_files(self, mock_idle):
         """Should not touch _bash_cmd or _focus files."""
         bash_path = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
@@ -1288,7 +1288,7 @@ class TestCleanupStalePrompts(unittest.TestCase):
             json.dump({"cmd": "echo"}, f)
         with open(focus_path, "w") as f:
             json.dump({"wid": "4"}, f)
-        tg._cleanup_stale_prompts()
+        astra._cleanup_stale_prompts()
         self.assertTrue(os.path.exists(bash_path))
         self.assertTrue(os.path.exists(focus_path))
 
@@ -1303,8 +1303,8 @@ class TestCleanupStalePrompts(unittest.TestCase):
         # w1 pane is idle, w2 pane is not idle (prompt still visible)
         def side_effect(pane):
             return (True, "") if pane == "0:1.0" else (False, "")
-        with patch.object(tg.routing, "_pane_idle_state", side_effect=side_effect):
-            tg._cleanup_stale_prompts()
+        with patch.object(astra.routing, "_pane_idle_state", side_effect=side_effect):
+            astra._cleanup_stale_prompts()
         self.assertFalse(os.path.exists(stale))
         self.assertTrue(os.path.exists(active))
 
@@ -1313,76 +1313,76 @@ class TestCleanupStalePrompts(unittest.TestCase):
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             json.dump({"total": 3}, f)
-        tg._cleanup_stale_prompts()
+        astra._cleanup_stale_prompts()
         # Empty pane string short-circuits — file not removed
         self.assertTrue(os.path.exists(path))
 
     def test_nonexistent_signal_dir(self):
         """No crash when signal dir doesn't exist."""
-        tg.config.SIGNAL_DIR = "/tmp/tg_hook_nonexistent_dir_xyz"
-        tg._cleanup_stale_prompts()  # should not raise
+        astra.config.SIGNAL_DIR = "/tmp/astra_nonexistent_dir_xyz"
+        astra._cleanup_stale_prompts()  # should not raise
 
 
 class TestFocusState(unittest.TestCase):
     """Test focus state file operations."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_focus"
+        self.signal_dir = "/tmp/astra_test_focus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_save_and_load_roundtrip(self):
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        state = tg._load_focus_state()
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        state = astra._load_focus_state()
         self.assertEqual(state, {"wid": "4", "pane": "0:4.0", "project": "myproj"})
 
     def test_load_missing_returns_none(self):
-        self.assertIsNone(tg._load_focus_state())
+        self.assertIsNone(astra._load_focus_state())
 
     def test_clear_removes_file(self):
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._clear_focus_state()
-        self.assertIsNone(tg._load_focus_state())
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._clear_focus_state()
+        self.assertIsNone(astra._load_focus_state())
 
     def test_survives_clear_signals_without_state(self):
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._clear_signals(include_state=False)
-        self.assertIsNotNone(tg._load_focus_state())
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._clear_signals(include_state=False)
+        self.assertIsNotNone(astra._load_focus_state())
 
     def test_cleared_by_clear_signals_with_state(self):
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._clear_signals(include_state=True)
-        self.assertIsNone(tg._load_focus_state())
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._clear_signals(include_state=True)
+        self.assertIsNone(astra._load_focus_state())
 
 
 class TestSendLongMessage(unittest.TestCase):
     """Test _send_long_message chunking logic."""
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_short_message_single_send(self, mock_send):
         """Body that fits in one message — sent as single message."""
-        tg._send_long_message("header:\n", "short body", wid="4")
+        astra._send_long_message("header:\n", "short body", wid="4")
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("header:", msg)
         self.assertIn("```\nshort body\n```", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_long_message_chunked(self, mock_send):
         """Body exceeding TG_MAX is split into multiple messages."""
         # Create body that exceeds chunk_size
         line = "x" * 79 + "\n"  # 80 chars per line
         body = line * 100  # 8000 chars total — exceeds TG_MAX minus overhead
-        tg._send_long_message("H:\n", body, wid="4")
+        astra._send_long_message("H:\n", body, wid="4")
         self.assertGreater(mock_send.call_count, 1)
         # First chunk has header + (1/N) label
         first_msg = mock_send.call_args_list[0][0][0]
@@ -1395,28 +1395,28 @@ class TestSendLongMessage(unittest.TestCase):
         for c in mock_send.call_args_list:
             self.assertIn("```", c[0][0])
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_empty_body(self, mock_send):
-        tg._send_long_message("H:\n", "", wid="4")
+        astra._send_long_message("H:\n", "", wid="4")
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("```\n\n```", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_single_long_line_no_break(self, mock_send):
         """Single line with no newlines — can't split at line boundary."""
         body = "x" * 8000
-        tg._send_long_message("H:\n", body, wid="4")
+        astra._send_long_message("H:\n", body, wid="4")
         # The chunking loop puts entire line in one chunk if no newlines
         # Result: single very long message (truncated by tg_send)
         self.assertEqual(mock_send.call_count, 1)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saves_last_msg(self, mock_send):
         """Verifies _last_messages is updated."""
-        tg._send_long_message("H:\n", "body", wid="7")
-        self.assertIn("7", tg._last_messages)
-        self.assertIn("body", tg._last_messages["7"])
+        astra._send_long_message("H:\n", "body", wid="7")
+        self.assertIn("7", astra._last_messages)
+        self.assertIn("body", astra._last_messages["7"])
 
 
 class TestTgSendMarkdownFallback(unittest.TestCase):
@@ -1435,7 +1435,7 @@ class TestTgSendMarkdownFallback(unittest.TestCase):
 
         mock_post.side_effect = [fail_resp, ok_resp]
 
-        tg.tg_send("text with _bad_ markdown")
+        astra.tg_send("text with _bad_ markdown")
 
         self.assertEqual(mock_post.call_count, 2)
         # First call has parse_mode
@@ -1454,7 +1454,7 @@ class TestTgSendMarkdownFallback(unittest.TestCase):
         ok_resp.raise_for_status = MagicMock()
         mock_post.return_value = ok_resp
 
-        result = tg.tg_send("clean text")
+        result = astra.tg_send("clean text")
         self.assertEqual(result, 1)
         mock_post.assert_called_once()
 
@@ -1463,23 +1463,23 @@ class TestLoadActivePrompt(unittest.TestCase):
     """Test load_active_prompt — no time-based expiry."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_prompt"
+        self.signal_dir = "/tmp/astra_test_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_load_and_remove(self):
         """Loading a prompt returns state and removes the file."""
-        tg.save_active_prompt("w4", "0:4.0", total=3)
-        state = tg.load_active_prompt("w4")
+        astra.save_active_prompt("w4", "0:4.0", total=3)
+        state = astra.load_active_prompt("w4")
         self.assertIsNotNone(state)
         self.assertEqual(state["pane"], "0:4.0")
         self.assertEqual(state["total"], 3)
@@ -1488,7 +1488,7 @@ class TestLoadActivePrompt(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
     def test_missing_returns_none(self):
-        self.assertIsNone(tg.load_active_prompt("w99"))
+        self.assertIsNone(astra.load_active_prompt("w99"))
 
     def test_old_timestamp_still_loads(self):
         """Prompt with ancient timestamp still loads — no time-based expiry."""
@@ -1496,7 +1496,7 @@ class TestLoadActivePrompt(unittest.TestCase):
         state = {"pane": "0:4.0", "total": 3, "ts": 1000000.0}  # year 1970
         with open(path, "w") as f:
             json.dump(state, f)
-        loaded = tg.load_active_prompt("w4")
+        loaded = astra.load_active_prompt("w4")
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded["total"], 3)
 
@@ -1504,16 +1504,16 @@ class TestLoadActivePrompt(unittest.TestCase):
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             f.write("{corrupt")
-        self.assertIsNone(tg.load_active_prompt("w4"))
+        self.assertIsNone(astra.load_active_prompt("w4"))
 
     def test_save_with_all_fields(self):
         """All optional fields are persisted."""
-        tg.save_active_prompt("w4", "0:4.0", total=5,
+        astra.save_active_prompt("w4", "0:4.0", total=5,
                               shortcuts={"y": 1, "n": 5},
                               free_text_at=3,
                               remaining_qs=[{"question": "Q2?"}],
                               project="myproj")
-        state = tg.load_active_prompt("w4")
+        state = astra.load_active_prompt("w4")
         self.assertEqual(state["shortcuts"], {"y": 1, "n": 5})
         self.assertEqual(state["free_text_at"], 3)
         self.assertEqual(state["remaining_qs"], [{"question": "Q2?"}])
@@ -1526,9 +1526,9 @@ class TestHandleCommand(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_help_command(self, mock_send):
-        action, sessions, last = tg._handle_command(
+        action, sessions, last = astra._handle_command(
             "/help", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
@@ -1539,27 +1539,27 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("/kill", msg)
         self.assertIn("/interrupt", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_stop_command(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/stop", self.sessions, "4")
         self.assertEqual(action, "pause")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_quit_command(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/quit", self.sessions, "4")
         self.assertEqual(action, "quit_pending")
         msg = mock_send.call_args[0][0]
         self.assertIn("Shut down", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_command(self, mock_run, mock_send):
         # Set up busy and prompt state to verify they get cleared
-        tg._mark_busy("w4")
-        tg.save_active_prompt("w4", "0:4.0", total=3)
-        action, _, last = tg._handle_command(
+        astra._mark_busy("w4")
+        astra.save_active_prompt("w4", "0:4.0", total=3)
+        action, _, last = astra._handle_command(
             "/interrupt w4", self.sessions, "4")
         self.assertIsNone(action)
         self.assertEqual(last, "4")
@@ -1570,21 +1570,21 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("Escape", cmd_str)
         self.assertIn("C-u", cmd_str)
         # Busy and prompt state should be cleared
-        self.assertFalse(tg._is_busy("w4"))
-        self.assertIsNone(tg.load_active_prompt("w4"))
+        self.assertFalse(astra._is_busy("w4"))
+        self.assertIsNone(astra.load_active_prompt("w4"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_interrupt_no_session(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/interrupt w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_interrupt_no_window_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/interrupt", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
@@ -1592,35 +1592,35 @@ class TestHandleCommand(unittest.TestCase):
         kb = kwargs.get("reply_markup")
         self.assertIsNotNone(kb)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_interrupt_no_arg_multi_sessions_shows_picker(self, mock_scan, mock_send):
         """Bare /interrupt with multiple sessions shows picker, ignores last_win."""
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/interrupt", self.sessions, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_no_arg_single_session_auto_targets(self, mock_run, mock_send):
         """Bare /interrupt with single session auto-interrupts it."""
         single = {"5": ("0:5.0", "other")}
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "/interrupt", single, None)
         self.assertEqual(last, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_kill_command_success(self, mock_scan, mock_run, mock_send):
         """Kill removes session — success message."""
         mock_scan.return_value = {"4": ("0:4.0", "myproj")}  # w5 gone
         with patch("time.sleep"):
-            action, sessions, _ = tg._handle_command(
+            action, sessions, _ = astra._handle_command(
                 "/kill w5", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
@@ -1629,33 +1629,33 @@ class TestHandleCommand(unittest.TestCase):
         cmd_str = mock_run.call_args[0][0][2]
         self.assertEqual(cmd_str.count("C-c"), 3)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_kill_command_still_running(self, mock_scan, mock_run, mock_send):
         """Kill doesn't remove session — warning message."""
         mock_scan.return_value = self.sessions  # w5 still there
         with patch("time.sleep"):
-            action, _, _ = tg._handle_command(
+            action, _, _ = astra._handle_command(
                 "/kill w5", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("still running", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_kill_nonexistent_session(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/kill w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_new_command_default_dir(self, mock_scan, mock_run, mock_send):
         """New session with default directory."""
         mock_run.return_value = MagicMock(stdout="6\n")
         mock_scan.return_value = {**self.sessions, "6": ("0:6.0", "claude-0213-1500")}
-        action, sessions, last = tg._handle_command(
+        action, sessions, last = astra._handle_command(
             "/new", self.sessions, "4")
         self.assertIsNone(action)
         self.assertEqual(last, "6")
@@ -1666,88 +1666,88 @@ class TestHandleCommand(unittest.TestCase):
         cmd_arg = mock_run.call_args[0][0]
         self.assertIn("new-window", cmd_arg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_new_command_custom_dir(self, mock_scan, mock_run, mock_send):
         """New session with user-specified directory."""
         mock_run.return_value = MagicMock(stdout="7\n")
         mock_scan.return_value = {**self.sessions, "7": ("0:7.0", "mydir")}
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "/new ~/mydir", self.sessions, "4")
         self.assertEqual(last, "7")
         msg = mock_send.call_args[0][0]
         self.assertIn("Started Claude", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run", side_effect=Exception("tmux error"))
     def test_new_command_failure(self, mock_run, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/new", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Failed to start", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_last_command(self, mock_send):
-        tg._last_messages["4"] = "previous message"
-        action, _, _ = tg._handle_command(
+        astra._last_messages["4"] = "previous message"
+        action, _, _ = astra._handle_command(
             "/last w4", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "previous message")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_last_command_no_saved(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/last w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved message", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
     def test_wn_prefix_routing(self, mock_route, mock_send):
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "w4 hello", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
     def test_no_prefix_single_session(self, mock_route, mock_send):
         """Single session — routes without prefix."""
         sessions = {"4": ("0:4.0", "myproj")}
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "hello", sessions, None)
         self.assertEqual(last, "4")
         mock_route.assert_called_once()
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_no_prefix_multiple_sessions_no_last(self, mock_send):
         """Multiple sessions, no last — asks user to specify."""
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "hello", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Multiple sessions", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
     def test_no_prefix_uses_last_win(self, mock_route, mock_send):
         """Multiple sessions but last_win_idx set — routes to it."""
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "hello", self.sessions, "5")
         self.assertEqual(last, "5")
         mock_route.assert_called_once_with("0:5.0", "5", "hello")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_no_sessions(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "hello", {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude sessions", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_wn_nonexistent_session(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "w99 hello", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude session at `w99`", msg)
@@ -1757,48 +1757,48 @@ class TestComputeNewLinesEdgeCases(unittest.TestCase):
     """Additional edge cases for _compute_new_lines."""
 
     def test_both_empty(self):
-        result = tg._compute_new_lines([], [])
+        result = astra._compute_new_lines([], [])
         self.assertEqual(result, [])
 
     def test_new_empty_old_has_content(self):
-        result = tg._compute_new_lines(["a", "b"], [])
+        result = astra._compute_new_lines(["a", "b"], [])
         self.assertEqual(result, [])
 
     def test_single_line_identical(self):
-        result = tg._compute_new_lines(["a"], ["a"])
+        result = astra._compute_new_lines(["a"], ["a"])
         # Identical content returns empty, even if short
         self.assertEqual(result, [])
 
     def test_two_lines_identical(self):
-        result = tg._compute_new_lines(["a", "b"], ["a", "b"])
+        result = astra._compute_new_lines(["a", "b"], ["a", "b"])
         self.assertEqual(result, [])
 
     def test_short_content_with_new_line(self):
         """Short content with a genuine new line returns only the insert."""
         old = ["a"]
         new = ["a", "b"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["b"])
 
     def test_short_content_replace_no_duplicate(self):
         """Short content where one line changes should NOT re-send everything."""
         old = ["Good question — let me check.", "Searching for 1 pattern…"]
         new = ["Good question — let me check.", "Searching for 1 pattern, reading 1 file…"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, [])  # replace only, no inserts
 
     def test_completely_different_content(self):
         """Zero overlap returns all new content."""
         old = ["Response A", "Details about A"]
         new = ["Response B", "Details about B"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertEqual(result, new)
 
     def test_interleaved_inserts(self):
         """New lines inserted between existing lines."""
         old = ["a", "b", "c", "d", "e"]
         new = ["a", "b", "NEW1", "c", "d", "NEW2", "e"]
-        result = tg._compute_new_lines(old, new)
+        result = astra._compute_new_lines(old, new)
         self.assertIn("NEW1", result)
         self.assertIn("NEW2", result)
         self.assertNotIn("a", result)
@@ -1808,27 +1808,27 @@ class TestCmdHookEdgeCases(unittest.TestCase):
     """Test cmd_hook edge cases."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_hook_edge"
+        self.signal_dir = "/tmp/astra_test_hook_edge"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        self._orig_enabled = tg.config.TG_HOOKS_ENABLED
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_enabled = astra.config.TG_HOOKS_ENABLED
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
-        tg.config.TG_HOOKS_ENABLED = self._orig_enabled
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.TG_HOOKS_ENABLED = self._orig_enabled
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("sys.stdin")
     def test_hooks_disabled_consumes_stdin(self, mock_stdin):
-        """With CLAUDE_TG_HOOKS != '1', stdin is consumed but no signal written."""
-        tg.config.TG_HOOKS_ENABLED = False
+        """With CLAUDE_ASTRA != '1', stdin is consumed but no signal written."""
+        astra.config.TG_HOOKS_ENABLED = False
         mock_stdin.read.return_value = '{"hook_event_name": "Stop"}'
-        tg.cmd_hook()
+        astra.cmd_hook()
         mock_stdin.read.assert_called_once()
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(signals, [])
@@ -1836,49 +1836,49 @@ class TestCmdHookEdgeCases(unittest.TestCase):
     @patch("sys.stdin")
     def test_empty_stdin(self, mock_stdin):
         """Empty stdin — no crash, no signal."""
-        tg.config.TG_HOOKS_ENABLED = True
+        astra.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = ""
-        tg.cmd_hook()  # should not raise
+        astra.cmd_hook()  # should not raise
 
     @patch("sys.stdin")
     def test_invalid_json(self, mock_stdin):
         """Invalid JSON — no crash, no signal."""
-        tg.config.TG_HOOKS_ENABLED = True
+        astra.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = "not json{{"
-        tg.cmd_hook()  # should not raise
+        astra.cmd_hook()  # should not raise
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(signals, [])
 
     @patch("sys.stdin")
     def test_unknown_event_ignored(self, mock_stdin):
         """Unknown hook_event_name — no signal written."""
-        tg.config.TG_HOOKS_ENABLED = True
+        astra.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = json.dumps({
             "hook_event_name": "UnknownEvent", "cwd": "/tmp"
         })
-        tg.cmd_hook()
+        astra.cmd_hook()
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(signals, [])
 
     @patch("sys.stdin")
     def test_needs_attention_suppressed(self, mock_stdin):
         """AskUserQuestion 'needs your attention' notification is suppressed."""
-        tg.config.TG_HOOKS_ENABLED = True
+        astra.config.TG_HOOKS_ENABLED = True
         mock_stdin.read.return_value = json.dumps({
             "hook_event_name": "Notification",
             "notification_type": "permission_prompt",
             "message": "Claude needs your attention",
             "cwd": "/tmp",
         })
-        tg.cmd_hook()
+        astra.cmd_hook()
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(signals, [])
 
-    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
     @patch("sys.stdin")
     def test_question_signal_written(self, mock_stdin, mock_wid):
         """AskUserQuestion PreToolUse creates question signal."""
-        tg.config.TG_HOOKS_ENABLED = True
+        astra.config.TG_HOOKS_ENABLED = True
         questions = [{"question": "Pick?", "options": [{"label": "A"}]}]
         mock_stdin.read.return_value = json.dumps({
             "hook_event_name": "PreToolUse",
@@ -1887,7 +1887,7 @@ class TestCmdHookEdgeCases(unittest.TestCase):
             "cwd": "/tmp/proj",
         })
         os.environ["TMUX_PANE"] = "%20"
-        tg.cmd_hook()
+        astra.cmd_hook()
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(len(signals), 1)
         with open(os.path.join(self.signal_dir, signals[0])) as f:
@@ -1906,7 +1906,7 @@ class TestDownloadTgFileEdgeCases(unittest.TestCase):
         resp.json.return_value = {"result": {"file_path": ""}}
         resp.raise_for_status = MagicMock()
         mock_get.return_value = resp
-        result = tg._download_tg_file("file_id", "/tmp/test.jpg")
+        result = astra._download_tg_file("file_id", "/tmp/test.jpg")
         self.assertIsNone(result)
 
     @patch("requests.get")
@@ -1916,7 +1916,7 @@ class TestDownloadTgFileEdgeCases(unittest.TestCase):
         resp.json.return_value = {}
         resp.raise_for_status = MagicMock()
         mock_get.return_value = resp
-        result = tg._download_tg_file("file_id", "/tmp/test.jpg")
+        result = astra._download_tg_file("file_id", "/tmp/test.jpg")
         self.assertIsNone(result)
 
 
@@ -1928,7 +1928,7 @@ class TestMultiQuestionFlow(unittest.TestCase):
         self.win_idx = "4"
 
     @patch("subprocess.run")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_first_question_saves_remaining(self, mock_send, mock_run):
         """Answering first question sends second question to Telegram."""
         remaining = [{"question": "Q2?", "options": [
@@ -1937,8 +1937,8 @@ class TestMultiQuestionFlow(unittest.TestCase):
         prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
                   "free_text_at": 2, "remaining_qs": remaining,
                   "project": "myproj"}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "1")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "1")
         self.assertIn("Selected option 1", result)
         # Should have sent the second question
         msg = mock_send.call_args[0][0]
@@ -1946,15 +1946,15 @@ class TestMultiQuestionFlow(unittest.TestCase):
         self.assertIn("X", msg)
 
     @patch("subprocess.run")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.state, "save_active_prompt")
     def test_last_question_prompts_submit(self, mock_save, mock_send, mock_run):
         """Answering last question prompts 'Submit answers?'."""
         prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
                   "free_text_at": 2, "remaining_qs": [],
                   "project": "myproj"}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane(self.pane, self.win_idx, "1")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane(self.pane, self.win_idx, "1")
         msg = mock_send.call_args[0][0]
         self.assertIn("Submit answers?", msg)
         # Should save prompt with y/n shortcuts for confirmation
@@ -1968,7 +1968,7 @@ class TestBuildInlineKeyboard(unittest.TestCase):
     """Test _build_inline_keyboard helper."""
 
     def test_single_row(self):
-        result = tg._build_inline_keyboard([
+        result = astra._build_inline_keyboard([
             [("Allow", "perm_w4_1"), ("Deny", "perm_w4_3")],
         ])
         self.assertEqual(result, {"inline_keyboard": [
@@ -1977,7 +1977,7 @@ class TestBuildInlineKeyboard(unittest.TestCase):
         ]})
 
     def test_multiple_rows(self):
-        result = tg._build_inline_keyboard([
+        result = astra._build_inline_keyboard([
             [("A", "a1"), ("B", "a2"), ("C", "a3")],
             [("D", "a4")],
         ])
@@ -1986,7 +1986,7 @@ class TestBuildInlineKeyboard(unittest.TestCase):
         self.assertEqual(len(result["inline_keyboard"][1]), 1)
 
     def test_empty(self):
-        result = tg._build_inline_keyboard([])
+        result = astra._build_inline_keyboard([])
         self.assertEqual(result, {"inline_keyboard": []})
 
 
@@ -1994,57 +1994,57 @@ class TestResolveAlias(unittest.TestCase):
     """Test _resolve_alias for short command aliases."""
 
     def test_status_bare(self):
-        self.assertEqual(tg._resolve_alias("s", False), "/status")
+        self.assertEqual(astra._resolve_alias("s", False), "/status")
 
     def test_status_with_window(self):
-        self.assertEqual(tg._resolve_alias("s4", False), "/status w4")
+        self.assertEqual(astra._resolve_alias("s4", False), "/status w4")
 
     def test_status_with_window_and_lines(self):
-        self.assertEqual(tg._resolve_alias("s4 10", False), "/status w4 10")
+        self.assertEqual(astra._resolve_alias("s4 10", False), "/status w4 10")
 
     def test_focus(self):
-        self.assertEqual(tg._resolve_alias("f4", False), "/focus w4")
+        self.assertEqual(astra._resolve_alias("f4", False), "/focus w4")
 
     def test_interrupt(self):
-        self.assertEqual(tg._resolve_alias("i4", False), "/interrupt w4")
+        self.assertEqual(astra._resolve_alias("i4", False), "/interrupt w4")
 
     def test_help_alias(self):
-        self.assertEqual(tg._resolve_alias("?", False), "/help")
+        self.assertEqual(astra._resolve_alias("?", False), "/help")
 
     def test_unfocus_alias(self):
-        self.assertEqual(tg._resolve_alias("uf", False), "/unfocus")
+        self.assertEqual(astra._resolve_alias("uf", False), "/unfocus")
 
     def test_passthrough_normal_text(self):
-        self.assertEqual(tg._resolve_alias("fix the bug", False), "fix the bug")
+        self.assertEqual(astra._resolve_alias("fix the bug", False), "fix the bug")
 
     def test_passthrough_slash_command(self):
-        self.assertEqual(tg._resolve_alias("/status", False), "/status")
+        self.assertEqual(astra._resolve_alias("/status", False), "/status")
 
     def test_ambiguous_suppressed_with_active_prompt(self):
         """Only ambiguous aliases (?, uf) suppressed when prompt is active."""
-        self.assertEqual(tg._resolve_alias("?", True), "?")
-        self.assertEqual(tg._resolve_alias("uf", True), "uf")
+        self.assertEqual(astra._resolve_alias("?", True), "?")
+        self.assertEqual(astra._resolve_alias("uf", True), "uf")
 
     def test_digit_aliases_resolve_with_active_prompt(self):
         """Digit-containing aliases always resolve, even with active prompt."""
-        self.assertEqual(tg._resolve_alias("s", True), "/status")
-        self.assertEqual(tg._resolve_alias("s4", True), "/status w4")
-        self.assertEqual(tg._resolve_alias("s4 10", True), "/status w4 10")
-        self.assertEqual(tg._resolve_alias("f4", True), "/focus w4")
-        self.assertEqual(tg._resolve_alias("df4", True), "/deepfocus w4")
-        self.assertEqual(tg._resolve_alias("i4", True), "/interrupt w4")
+        self.assertEqual(astra._resolve_alias("s", True), "/status")
+        self.assertEqual(astra._resolve_alias("s4", True), "/status w4")
+        self.assertEqual(astra._resolve_alias("s4 10", True), "/status w4 10")
+        self.assertEqual(astra._resolve_alias("f4", True), "/focus w4")
+        self.assertEqual(astra._resolve_alias("df4", True), "/deepfocus w4")
+        self.assertEqual(astra._resolve_alias("i4", True), "/interrupt w4")
 
     def test_digits_not_aliased(self):
         """Pure digit replies must not be aliased."""
-        self.assertEqual(tg._resolve_alias("1", False), "1")
-        self.assertEqual(tg._resolve_alias("3", False), "3")
+        self.assertEqual(astra._resolve_alias("1", False), "1")
+        self.assertEqual(astra._resolve_alias("3", False), "3")
 
     def test_y_n_not_aliased(self):
         """y/n replies must not be aliased."""
-        self.assertEqual(tg._resolve_alias("y", False), "y")
-        self.assertEqual(tg._resolve_alias("n", False), "n")
-        self.assertEqual(tg._resolve_alias("yes", False), "yes")
-        self.assertEqual(tg._resolve_alias("no", False), "no")
+        self.assertEqual(astra._resolve_alias("y", False), "y")
+        self.assertEqual(astra._resolve_alias("n", False), "n")
+        self.assertEqual(astra._resolve_alias("yes", False), "yes")
+        self.assertEqual(astra._resolve_alias("no", False), "no")
 
 
 class TestExtractChatMessagesCallbacks(unittest.TestCase):
@@ -2058,11 +2058,11 @@ class TestExtractChatMessagesCallbacks(unittest.TestCase):
                 "data": "perm_w4_1",
                 "message": {
                     "message_id": 42,
-                    "chat": {"id": int(tg.CHAT_ID)},
+                    "chat": {"id": int(astra.CHAT_ID)},
                 },
             },
         }]}
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["text"], "")
         self.assertIsNone(result[0]["photo"])
@@ -2082,7 +2082,7 @@ class TestExtractChatMessagesCallbacks(unittest.TestCase):
                 },
             },
         }]}
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result, [])
 
     def test_mixed_callbacks_and_messages(self):
@@ -2092,15 +2092,15 @@ class TestExtractChatMessagesCallbacks(unittest.TestCase):
                 "callback_query": {
                     "id": "cb1",
                     "data": "perm_w4_1",
-                    "message": {"message_id": 10, "chat": {"id": int(tg.CHAT_ID)}},
+                    "message": {"message_id": 10, "chat": {"id": int(astra.CHAT_ID)}},
                 },
             },
             {
                 "update_id": 101,
-                "message": {"chat": {"id": int(tg.CHAT_ID)}, "text": "hello"},
+                "message": {"chat": {"id": int(astra.CHAT_ID)}, "text": "hello"},
             },
         ]}
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(len(result), 2)
         self.assertIsNotNone(result[0]["callback"])
         self.assertIsNone(result[1]["callback"])
@@ -2111,28 +2111,28 @@ class TestHandleCallback(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_callback"
+        self.signal_dir = "/tmp/astra_test_callback"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.state, "load_active_prompt")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.state, "load_active_prompt")
     def test_perm_allow(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_select.assert_called_once_with("0:4.0", 1)
         mock_answer.assert_called_once_with("cb1")
         mock_remove.assert_called_once_with(42)
@@ -2141,89 +2141,89 @@ class TestHandleCallback(unittest.TestCase):
         self.assertIn("`w4`", msg)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.state, "load_active_prompt")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.state, "load_active_prompt")
     def test_perm_deny(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_3", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_select.assert_called_once_with("0:4.0", 3)
         msg = mock_send.call_args[0][0]
         self.assertIn("Denied", msg)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.state, "load_active_prompt")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.state, "load_active_prompt")
     def test_perm_always(self, mock_load, mock_select, mock_send, mock_answer, mock_remove):
         mock_load.return_value = {"pane": "0:4.0", "total": 3}
         callback = {"id": "cb1", "data": "perm_w4_2", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_select.assert_called_once_with("0:4.0", 2)
         msg = mock_send.call_args[0][0]
         self.assertIn("Always allowed", msg)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.state, "load_active_prompt")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.state, "load_active_prompt")
     def test_perm_expired(self, mock_load, mock_answer, mock_remove):
         mock_load.return_value = None  # prompt file gone
         callback = {"id": "cb1", "data": "perm_w4_1", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         # Should call answer twice: once in main flow, once with "Prompt expired"
         self.assertEqual(mock_answer.call_count, 2)
         mock_answer.assert_any_call("cb1", "Prompt expired")
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Selected option 1")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Selected option 1")
     def test_question_select(self, mock_route, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "q_w4_1", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_route.assert_called_once_with("0:4.0", "4", "1")
         self.assertEqual(last, "4")
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_status(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_status_w4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/status w4", self.sessions, None)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_focus(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_focus_w4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/focus w4", self.sessions, None)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_sess_select(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "sess_4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/status w4", self.sessions, "4")
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
     def test_unknown_callback(self, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "unknown_xyz", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         self.assertEqual(sessions, self.sessions)
         self.assertIsNone(action)
 
@@ -2232,10 +2232,10 @@ class TestSessionsKeyboard(unittest.TestCase):
     """Test _sessions_keyboard helper."""
 
     def test_empty_sessions(self):
-        self.assertIsNone(tg._sessions_keyboard({}))
+        self.assertIsNone(astra._sessions_keyboard({}))
 
     def test_single_session(self):
-        result = tg._sessions_keyboard({"4": ("0:4.0", "myproj")})
+        result = astra._sessions_keyboard({"4": ("0:4.0", "myproj")})
         self.assertIsNotNone(result)
         buttons = result["inline_keyboard"]
         self.assertEqual(len(buttons), 1)
@@ -2244,7 +2244,7 @@ class TestSessionsKeyboard(unittest.TestCase):
         self.assertEqual(buttons[0][0]["callback_data"], "sess_4")
 
     def test_multiple_sorted(self):
-        result = tg._sessions_keyboard({
+        result = astra._sessions_keyboard({
             "5": ("0:5.0", "beta"),
             "2": ("0:2.0", "alpha"),
             "8": ("0:8.0", "gamma"),
@@ -2261,20 +2261,20 @@ class TestBuildReplyKeyboard(unittest.TestCase):
     """Test _build_reply_keyboard helper."""
 
     def test_has_keyboard_key(self):
-        result = tg.telegram._build_reply_keyboard()
+        result = astra.telegram._build_reply_keyboard()
         self.assertIn("keyboard", result)
         self.assertIsInstance(result["keyboard"], list)
 
     def test_resize_keyboard_true(self):
-        result = tg.telegram._build_reply_keyboard()
+        result = astra.telegram._build_reply_keyboard()
         self.assertTrue(result.get("resize_keyboard"))
 
     def test_is_persistent(self):
-        result = tg.telegram._build_reply_keyboard()
+        result = astra.telegram._build_reply_keyboard()
         self.assertTrue(result.get("is_persistent"))
 
     def test_buttons_are_text_dicts(self):
-        result = tg.telegram._build_reply_keyboard()
+        result = astra.telegram._build_reply_keyboard()
         for row in result["keyboard"]:
             for btn in row:
                 self.assertIn("text", btn)
@@ -2293,7 +2293,7 @@ class TestTgSendWithKeyboard(unittest.TestCase):
         mock_post.return_value = ok_resp
 
         kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
-        tg.tg_send("test", reply_markup=kb)
+        astra.tg_send("test", reply_markup=kb)
 
         payload = mock_post.call_args[1]["json"]
         self.assertEqual(payload["reply_markup"], kb)
@@ -2306,7 +2306,7 @@ class TestTgSendWithKeyboard(unittest.TestCase):
         ok_resp.raise_for_status = MagicMock()
         mock_post.return_value = ok_resp
 
-        tg.tg_send("test", reply_markup=None)
+        astra.tg_send("test", reply_markup=None)
 
         payload = mock_post.call_args[1]["json"]
         self.assertNotIn("reply_markup", payload)
@@ -2325,7 +2325,7 @@ class TestTgSendWithKeyboard(unittest.TestCase):
         mock_post.side_effect = [fail_resp, ok_resp]
 
         kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
-        tg.tg_send("bad _markdown_", reply_markup=kb)
+        astra.tg_send("bad _markdown_", reply_markup=kb)
 
         # Second call (fallback) should still have reply_markup
         fallback_payload = mock_post.call_args_list[1][1]["json"]
@@ -2336,21 +2336,21 @@ class TestTgSendWithKeyboard(unittest.TestCase):
 class TestSendLongMessageWithKeyboard(unittest.TestCase):
     """Test _send_long_message with reply_markup parameter."""
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_short_message_gets_keyboard(self, mock_send):
         kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
-        tg._send_long_message("H:\n", "short body", wid="4", reply_markup=kb)
+        astra._send_long_message("H:\n", "short body", wid="4", reply_markup=kb)
         mock_send.assert_called_once()
         _, kwargs = mock_send.call_args
         self.assertEqual(kwargs.get("reply_markup"), kb)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_chunked_keyboard_on_last_only(self, mock_send):
         """Multi-chunk: keyboard attached to last chunk only."""
         kb = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
         line = "x" * 79 + "\n"
         body = line * 100  # exceeds TG_MAX
-        tg._send_long_message("H:\n", body, wid="4", reply_markup=kb)
+        astra._send_long_message("H:\n", body, wid="4", reply_markup=kb)
         self.assertGreater(mock_send.call_count, 1)
         # All calls except last should have reply_markup=None
         for c in mock_send.call_args_list[:-1]:
@@ -2364,16 +2364,16 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
     """Test that process_signals attaches inline keyboards."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_signals_kb"
+        self.signal_dir = "/tmp/astra_test_signals_kb"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -2383,14 +2383,14 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("wants to update `t.py`", "+new=True", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.state, "save_active_prompt")
     def test_permission_has_keyboard(self, mock_save, mock_extract, mock_proj, mock_send):
         self._write_signal("permission", cmd="", message="needs permission")
-        tg.process_signals()
+        astra.process_signals()
         _, kwargs = mock_send.call_args
         kb = kwargs.get("reply_markup")
         self.assertIsNotNone(kb)
@@ -2398,13 +2398,13 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.assertIn("perm_w4_1", buttons)
         self.assertIn("perm_w4_2", buttons)  # Always allow
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_has_keyboard(self, mock_sleep, mock_run, mock_proj, mock_send):
         self._write_signal("stop")
-        tg.process_signals()
+        astra.process_signals()
         _, kwargs = mock_send.call_args
         kb = kwargs.get("reply_markup")
         self.assertIsNotNone(kb)
@@ -2412,16 +2412,16 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.assertIn("cmd_status_w4", buttons)
         self.assertIn("cmd_focus_w4", buttons)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.state, "save_active_prompt")
     def test_question_has_keyboard(self, mock_save, mock_proj, mock_send):
         questions = [{"question": "Pick?", "options": [
             {"label": "Alpha", "description": "a"},
             {"label": "Beta", "description": "b"},
         ]}]
         self._write_signal("question", questions=questions)
-        tg.process_signals()
+        astra.process_signals()
         _, kwargs = mock_send.call_args
         kb = kwargs.get("reply_markup")
         self.assertIsNotNone(kb)
@@ -2431,27 +2431,27 @@ class TestProcessSignalsWithKeyboards(unittest.TestCase):
         self.assertEqual(buttons[1]["text"], "Beta")
         self.assertEqual(buttons[1]["callback_data"], "q_w4_2")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.state, "save_active_prompt")
     def test_question_no_options_no_keyboard(self, mock_save, mock_proj, mock_send):
         """Question with no options should not have keyboard."""
         questions = [{"question": "What?", "options": []}]
         self._write_signal("question", questions=questions)
-        tg.process_signals()
+        astra.process_signals()
         _, kwargs = mock_send.call_args
         self.assertIsNone(kwargs.get("reply_markup"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("wants to update `t.py`", "big plan\ncontent here", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.state, "save_active_prompt")
     def test_permission_non_bash_uses_send_long_message(self, mock_save, mock_extract, mock_proj, mock_long, mock_send):
         """Non-bash permission with body uses _send_long_message for chunking."""
         self._write_signal("permission", cmd="", message="needs permission")
-        tg.process_signals()
+        astra.process_signals()
         mock_long.assert_called_once()
         args, kwargs = mock_long.call_args
         self.assertIn("wants to update", args[0])  # header
@@ -2466,33 +2466,33 @@ class TestAnyActivePrompt(unittest.TestCase):
     """Test _any_active_prompt helper."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_any_prompt"
+        self.signal_dir = "/tmp/astra_test_any_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_no_prompts(self):
-        self.assertFalse(tg._any_active_prompt())
+        self.assertFalse(astra._any_active_prompt())
 
     def test_has_prompt(self):
         path = os.path.join(self.signal_dir, "_active_prompt_w4.json")
         with open(path, "w") as f:
             json.dump({"pane": "0:4.0"}, f)
-        self.assertTrue(tg._any_active_prompt())
+        self.assertTrue(astra._any_active_prompt())
 
     def test_other_state_files_not_counted(self):
         path = os.path.join(self.signal_dir, "_bash_cmd_w4.json")
         with open(path, "w") as f:
             json.dump({"cmd": "echo"}, f)
-        self.assertFalse(tg._any_active_prompt())
+        self.assertFalse(astra._any_active_prompt())
 
 
 class TestSetBotCommands(unittest.TestCase):
@@ -2501,7 +2501,7 @@ class TestSetBotCommands(unittest.TestCase):
     @patch("requests.post")
     def test_registers_commands(self, mock_post):
         mock_post.return_value = MagicMock(status_code=200)
-        tg._set_bot_commands()
+        astra._set_bot_commands()
         mock_post.assert_called_once()
         url = mock_post.call_args[0][0]
         self.assertIn("setMyCommands", url)
@@ -2524,7 +2524,7 @@ class TestSetBotCommands(unittest.TestCase):
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
         """Should not raise on failure."""
-        tg._set_bot_commands()  # no exception
+        astra._set_bot_commands()  # no exception
 
 
 
@@ -2532,15 +2532,15 @@ class TestSubmitYNButtons(unittest.TestCase):
     """Test that 'Submit answers?' includes Y/N inline keyboard."""
 
     @patch("subprocess.run")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.state, "save_active_prompt")
     def test_submit_prompt_has_yn_keyboard(self, mock_save, mock_send, mock_run):
         """Last question answered — submit prompt includes inline Y/N buttons."""
         prompt = {"pane": "0:4.0", "total": 4, "ts": 0,
                   "free_text_at": 2, "remaining_qs": [],
                   "project": "myproj"}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            tg.route_to_pane("0:4.0", "4", "1")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            astra.route_to_pane("0:4.0", "4", "1")
         # Find the tg_send call with "Submit answers?"
         submit_call = None
         for c in mock_send.call_args_list:
@@ -2564,9 +2564,9 @@ class TestQuitYNButtons(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_quit_command_has_yn_keyboard(self, mock_send):
-        action, _, _ = tg._handle_command("/quit", self.sessions, "4")
+        action, _, _ = astra._handle_command("/quit", self.sessions, "4")
         self.assertEqual(action, "quit_pending")
         _, kwargs = mock_send.call_args
         kb = kwargs.get("reply_markup")
@@ -2576,22 +2576,22 @@ class TestQuitYNButtons(unittest.TestCase):
         self.assertEqual(buttons[0]["callback_data"], "quit_y")
         self.assertEqual(buttons[1]["callback_data"], "quit_n")
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_quit_y_returns_quit_action(self, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "quit_y", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, "4")
+        sessions, last, action = astra._handle_callback(callback, self.sessions, "4")
         self.assertEqual(action, "quit")
         msg = mock_send.call_args[0][0]
         self.assertIn("Bye", msg)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_quit_n_returns_none_action(self, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "quit_n", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, "4")
+        sessions, last, action = astra._handle_callback(callback, self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Cancelled", msg)
@@ -2601,11 +2601,11 @@ class TestCommandSessionsKeyboard(unittest.TestCase):
     """Test _command_sessions_keyboard helper."""
 
     def test_empty_sessions(self):
-        self.assertIsNone(tg._command_sessions_keyboard("focus", {}))
+        self.assertIsNone(astra._command_sessions_keyboard("focus", {}))
 
     def test_builds_buttons_with_cmd_prefix(self):
         sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        kb = tg._command_sessions_keyboard("focus", sessions)
+        kb = astra._command_sessions_keyboard("focus", sessions)
         self.assertIsNotNone(kb)
         buttons = [b for row in kb["inline_keyboard"] for b in row]
         self.assertEqual(buttons[0]["callback_data"], "cmd_focus_4")
@@ -2613,7 +2613,7 @@ class TestCommandSessionsKeyboard(unittest.TestCase):
 
     def test_kill_command(self):
         sessions = {"2": ("0:2.0", "proj")}
-        kb = tg._command_sessions_keyboard("kill", sessions)
+        kb = astra._command_sessions_keyboard("kill", sessions)
         buttons = [b for row in kb["inline_keyboard"] for b in row]
         self.assertEqual(buttons[0]["callback_data"], "cmd_kill_2")
 
@@ -2624,21 +2624,21 @@ class TestBareCommandSessionPicker(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_status_shows_sessions(self, mock_scan, mock_send):
         """Bare /status shows session list."""
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/status", self.sessions, None)
+        action, _, _ = astra._handle_command("/status", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Active Claude sessions", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_focus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/focus", self.sessions, "4")
+        action, _, _ = astra._handle_command("/focus", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Focus on which", msg)
@@ -2648,19 +2648,19 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_focus_4", buttons)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_focus_no_sessions(self, mock_scan, mock_send):
         mock_scan.return_value = {}
-        action, _, _ = tg._handle_command("/focus", {}, None)
+        action, _, _ = astra._handle_command("/focus", {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No Claude sessions", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_kill_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/kill", self.sessions, "4")
+        action, _, _ = astra._handle_command("/kill", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Kill which", msg)
@@ -2669,12 +2669,12 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_kill_4", buttons)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_interrupt_no_last_shows_picker(self, mock_scan, mock_send):
         """Interrupt without args and no last_win shows session picker."""
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/interrupt", self.sessions, None)
+        action, _, _ = astra._handle_command("/interrupt", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
@@ -2683,12 +2683,12 @@ class TestBareCommandSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_interrupt_4", buttons)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_interrupt_with_last_win_still_shows_picker(self, mock_scan, mock_send):
         """Bare /interrupt with multiple sessions shows picker even with last_win."""
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/interrupt", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupt which", msg)
@@ -2699,17 +2699,17 @@ class TestBareLastSessionPicker(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self._orig = dict(tg._last_messages)
+        self._orig = dict(astra._last_messages)
 
     def tearDown(self):
-        tg._last_messages.clear()
-        tg._last_messages.update(self._orig)
+        astra._last_messages.clear()
+        astra._last_messages.update(self._orig)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_last_multiple_shows_picker(self, mock_send):
-        tg._last_messages["4"] = "msg4"
-        tg._last_messages["5"] = "msg5"
-        action, _, _ = tg._handle_command("/last", self.sessions, "4")
+        astra._last_messages["4"] = "msg4"
+        astra._last_messages["5"] = "msg5"
+        action, _, _ = astra._handle_command("/last", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Last message for which", msg)
         _, kwargs = mock_send.call_args
@@ -2718,17 +2718,17 @@ class TestBareLastSessionPicker(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_last_4", buttons)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_last_single_auto_sends(self, mock_send):
-        tg._last_messages["4"] = "the message"
-        action, _, _ = tg._handle_command("/last", self.sessions, None)
+        astra._last_messages["4"] = "the message"
+        action, _, _ = astra._handle_command("/last", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "the message")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_last_none_saved(self, mock_send):
-        tg._last_messages.clear()
-        action, _, _ = tg._handle_command("/last", self.sessions, None)
+        astra._last_messages.clear()
+        action, _, _ = astra._handle_command("/last", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved messages", msg)
 
@@ -2739,30 +2739,30 @@ class TestCallbackCommandExpanded(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_interrupt_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_interrupt_4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/interrupt w4", self.sessions, None)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_kill_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_kill_4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/kill w4", self.sessions, None)
         self.assertIsNone(action)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_last_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_last_4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/last w4", self.sessions, None)
         self.assertIsNone(action)
 
@@ -2771,91 +2771,91 @@ class TestDeepFocusState(unittest.TestCase):
     """Test deepfocus state file operations."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_deepfocus"
+        self.signal_dir = "/tmp/astra_test_deepfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_save_and_load_roundtrip(self):
-        tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        state = tg._load_deepfocus_state()
+        astra._save_deepfocus_state("4", "0:4.0", "myproj")
+        state = astra._load_deepfocus_state()
         self.assertEqual(state, {"wid": "4", "pane": "0:4.0", "project": "myproj"})
 
     def test_load_missing_returns_none(self):
-        self.assertIsNone(tg._load_deepfocus_state())
+        self.assertIsNone(astra._load_deepfocus_state())
 
     def test_clear_removes_file(self):
-        tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        tg._clear_deepfocus_state()
-        self.assertIsNone(tg._load_deepfocus_state())
+        astra._save_deepfocus_state("4", "0:4.0", "myproj")
+        astra._clear_deepfocus_state()
+        self.assertIsNone(astra._load_deepfocus_state())
 
     def test_survives_clear_signals_without_state(self):
-        tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        tg._clear_signals(include_state=False)
-        self.assertIsNotNone(tg._load_deepfocus_state())
+        astra._save_deepfocus_state("4", "0:4.0", "myproj")
+        astra._clear_signals(include_state=False)
+        self.assertIsNotNone(astra._load_deepfocus_state())
 
     def test_cleared_by_clear_signals_with_state(self):
-        tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        tg._clear_signals(include_state=True)
-        self.assertIsNone(tg._load_deepfocus_state())
+        astra._save_deepfocus_state("4", "0:4.0", "myproj")
+        astra._clear_signals(include_state=True)
+        self.assertIsNone(astra._load_deepfocus_state())
 
 
 class TestSessionNames(unittest.TestCase):
     """Test session name state operations."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_names"
+        self.signal_dir = "/tmp/astra_test_names"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_save_and_load(self):
-        tg._save_session_name("4", "auth")
-        names = tg._load_session_names()
+        astra._save_session_name("4", "auth")
+        names = astra._load_session_names()
         self.assertEqual(names, {"4": "auth"})
 
     def test_multiple_names(self):
-        tg._save_session_name("4", "auth")
-        tg._save_session_name("5", "refactor")
-        names = tg._load_session_names()
+        astra._save_session_name("4", "auth")
+        astra._save_session_name("5", "refactor")
+        names = astra._load_session_names()
         self.assertEqual(names, {"4": "auth", "5": "refactor"})
 
     def test_clear_name(self):
-        tg._save_session_name("4", "auth")
-        tg._clear_session_name("4")
-        names = tg._load_session_names()
+        astra._save_session_name("4", "auth")
+        astra._clear_session_name("4")
+        names = astra._load_session_names()
         self.assertEqual(names, {})
 
     def test_load_empty(self):
-        names = tg._load_session_names()
+        names = astra._load_session_names()
         self.assertEqual(names, {})
 
     def test_survives_clear_signals_without_state(self):
-        tg._save_session_name("4", "auth")
-        tg._clear_signals(include_state=False)
-        names = tg._load_session_names()
+        astra._save_session_name("4", "auth")
+        astra._clear_signals(include_state=False)
+        names = astra._load_session_names()
         self.assertEqual(names, {"4": "auth"})
 
     def test_preserved_by_clear_signals_with_state(self):
-        tg._save_session_name("4", "auth")
-        tg._clear_signals(include_state=True)
-        names = tg._load_session_names()
+        astra._save_session_name("4", "auth")
+        astra._clear_signals(include_state=True)
+        names = astra._load_session_names()
         self.assertEqual(names, {"4": "auth"})
 
 
@@ -2863,14 +2863,14 @@ class TestDeepFocusAlias(unittest.TestCase):
     """Test df alias in _resolve_alias."""
 
     def test_df4_resolves(self):
-        self.assertEqual(tg._resolve_alias("df4", False), "/deepfocus w4")
+        self.assertEqual(astra._resolve_alias("df4", False), "/deepfocus w4")
 
     def test_df10_resolves(self):
-        self.assertEqual(tg._resolve_alias("df10", False), "/deepfocus w10")
+        self.assertEqual(astra._resolve_alias("df10", False), "/deepfocus w10")
 
     def test_resolves_with_active_prompt(self):
         """Digit-containing alias df4 resolves even with active prompt."""
-        self.assertEqual(tg._resolve_alias("df4", True), "/deepfocus w4")
+        self.assertEqual(astra._resolve_alias("df4", True), "/deepfocus w4")
 
 
 class TestDeepFocusCommand(unittest.TestCase):
@@ -2878,24 +2878,24 @@ class TestDeepFocusCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_dfcmd"
+        self.signal_dir = "/tmp/astra_test_dfcmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_deepfocus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/deepfocus", self.sessions, "4")
+        action, _, _ = astra._handle_command("/deepfocus", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Deep focus on which", msg)
         _, kwargs = mock_send.call_args
@@ -2904,36 +2904,36 @@ class TestDeepFocusCommand(unittest.TestCase):
         buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         self.assertIn("cmd_deepfocus_4", buttons)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_wn(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="some content\n")
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "/deepfocus w4", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Deep focus on `w4`", msg)
         # Should have saved deepfocus state
-        state = tg._load_deepfocus_state()
+        state = astra._load_deepfocus_state()
         self.assertIsNotNone(state)
         self.assertEqual(state["wid"], "4")
         # Should have cleared regular focus
-        self.assertIsNone(tg._load_focus_state())
+        self.assertIsNone(astra._load_focus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_clears_focus(self, mock_run, mock_send):
         """Deepfocus clears any existing focus state (mutual exclusion)."""
         mock_run.return_value = MagicMock(stdout="content\n")
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/deepfocus w4", self.sessions, None)
-        self.assertIsNone(tg._load_focus_state())
-        self.assertIsNotNone(tg._load_deepfocus_state())
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._handle_command("/deepfocus w4", self.sessions, None)
+        self.assertIsNone(astra._load_focus_state())
+        self.assertIsNotNone(astra._load_deepfocus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_deepfocus_no_session(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/deepfocus w99", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
@@ -2944,27 +2944,27 @@ class TestFocusClearsDeepfocus(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_focus_df"
+        self.signal_dir = "/tmp/astra_test_focus_df"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_focus_clears_deepfocus(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
-        tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/focus w4", self.sessions, None)
-        self.assertIsNone(tg._load_deepfocus_state())
-        self.assertIsNotNone(tg._load_focus_state())
+        astra._save_deepfocus_state("4", "0:4.0", "myproj")
+        astra._handle_command("/focus w4", self.sessions, None)
+        self.assertIsNone(astra._load_deepfocus_state())
+        self.assertIsNotNone(astra._load_focus_state())
 
 
 class TestUnfocusClearsBoth(unittest.TestCase):
@@ -2972,26 +2972,26 @@ class TestUnfocusClearsBoth(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_unfocus"
+        self.signal_dir = "/tmp/astra_test_unfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unfocus_clears_both(self, mock_send):
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._save_deepfocus_state("5", "0:5.0", "other")
-        tg._handle_command("/unfocus", self.sessions, None)
-        self.assertIsNone(tg._load_focus_state())
-        self.assertIsNone(tg._load_deepfocus_state())
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._save_deepfocus_state("5", "0:5.0", "other")
+        astra._handle_command("/unfocus", self.sessions, None)
+        self.assertIsNone(astra._load_focus_state())
+        self.assertIsNone(astra._load_deepfocus_state())
         msg = mock_send.call_args[0][0]
         self.assertIn("Focus stopped", msg)
 
@@ -3001,103 +3001,103 @@ class TestClearCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_clear_cmd"
+        self.signal_dir = "/tmp/astra_test_clear_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_all(self, mock_send):
         """Test /clear removes all transient state."""
-        tg._mark_busy("w4")
-        tg._mark_busy("w5")
-        tg.save_active_prompt("w4", "0:4.0", total=3)
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._save_smartfocus_state("5", "0:5.0", "other")
-        tg._handle_command("/clear", self.sessions, "4")
+        astra._mark_busy("w4")
+        astra._mark_busy("w5")
+        astra.save_active_prompt("w4", "0:4.0", total=3)
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._save_smartfocus_state("5", "0:5.0", "other")
+        astra._handle_command("/clear", self.sessions, "4")
         # All transient state should be gone
-        self.assertFalse(tg._is_busy("w4"))
-        self.assertFalse(tg._is_busy("w5"))
-        self.assertIsNone(tg.load_active_prompt("w4"))
-        self.assertIsNone(tg._load_focus_state())
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertFalse(astra._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w5"))
+        self.assertIsNone(astra.load_active_prompt("w4"))
+        self.assertIsNone(astra._load_focus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
         msg = mock_send.call_args[0][0]
         self.assertIn("Cleared all", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_specific_window(self, mock_send):
         """Test /clear wN only clears that window's state."""
-        tg._mark_busy("w4")
-        tg._mark_busy("w5")
-        tg.save_active_prompt("w4", "0:4.0", total=3)
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/clear w4", self.sessions, "4")
+        astra._mark_busy("w4")
+        astra._mark_busy("w5")
+        astra.save_active_prompt("w4", "0:4.0", total=3)
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._handle_command("/clear w4", self.sessions, "4")
         # w4 state cleared
-        self.assertFalse(tg._is_busy("w4"))
-        self.assertIsNone(tg.load_active_prompt("w4"))
-        self.assertIsNone(tg._load_focus_state())
+        self.assertFalse(astra._is_busy("w4"))
+        self.assertIsNone(astra.load_active_prompt("w4"))
+        self.assertIsNone(astra._load_focus_state())
         # w5 state untouched
-        self.assertTrue(tg._is_busy("w5"))
+        self.assertTrue(astra._is_busy("w5"))
         msg = mock_send.call_args[0][0]
         self.assertIn("Cleared transient state", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_preserves_queued_and_names(self, mock_send):
         """Test /clear does NOT remove queued messages or session names."""
-        tg._save_queued_msg("w4", "hello")
-        tg._save_session_name("4", "auth")
-        tg._mark_busy("w4")
-        tg._handle_command("/clear", self.sessions, "4")
+        astra._save_queued_msg("w4", "hello")
+        astra._save_session_name("4", "auth")
+        astra._mark_busy("w4")
+        astra._handle_command("/clear", self.sessions, "4")
         # Queued and names preserved
-        self.assertEqual(len(tg._load_queued_msgs("w4")), 1)
-        self.assertEqual(tg._load_session_names()["4"], "auth")
+        self.assertEqual(len(astra._load_queued_msgs("w4")), 1)
+        self.assertEqual(astra._load_session_names()["4"], "auth")
         # Busy cleared
-        self.assertFalse(tg._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w4"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_focus_only_if_matching(self, mock_send):
         """Test /clear wN only clears focus if it targets that window."""
-        tg._save_focus_state("5", "0:5.0", "other")
-        tg._mark_busy("w4")
-        tg._handle_command("/clear w4", self.sessions, "4")
+        astra._save_focus_state("5", "0:5.0", "other")
+        astra._mark_busy("w4")
+        astra._handle_command("/clear w4", self.sessions, "4")
         # Focus for w5 should be untouched
-        self.assertIsNotNone(tg._load_focus_state())
+        self.assertIsNotNone(astra._load_focus_state())
         # Busy for w4 cleared
-        self.assertFalse(tg._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w4"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_unknown_session(self, mock_send):
-        tg._handle_command("/clear w99", self.sessions, "4")
+        astra._handle_command("/clear w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_alias_all(self, mock_send):
         """Test 'c' alias resolves to /clear."""
-        resolved = tg._resolve_alias("c", has_active_prompt=False)
+        resolved = astra._resolve_alias("c", has_active_prompt=False)
         self.assertEqual(resolved, "/clear")
 
     def test_clear_alias_window(self):
         """Test 'c4' alias resolves to /clear w4."""
-        resolved = tg._resolve_alias("c4", has_active_prompt=False)
+        resolved = astra._resolve_alias("c4", has_active_prompt=False)
         self.assertEqual(resolved, "/clear w4")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_clear_preserves_god_mode(self, mock_send):
         """Test /clear does NOT remove god mode state."""
-        tg._set_god_mode("4", True)
-        tg._mark_busy("w4")
-        tg._handle_command("/clear", self.sessions, "4")
-        self.assertTrue(tg._is_god_mode_for("4"))
-        self.assertFalse(tg._is_busy("w4"))
+        astra._set_god_mode("4", True)
+        astra._mark_busy("w4")
+        astra._handle_command("/clear", self.sessions, "4")
+        self.assertTrue(astra._is_god_mode_for("4"))
+        self.assertFalse(astra._is_busy("w4"))
 
 
 class TestNameCommand(unittest.TestCase):
@@ -3105,34 +3105,34 @@ class TestNameCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_namecmd"
+        self.signal_dir = "/tmp/astra_test_namecmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_name_set(self, mock_send):
-        tg._handle_command("/name w4 auth-refactor", self.sessions, None)
+        astra._handle_command("/name w4 auth-refactor", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("named `auth-refactor`", msg)
-        names = tg._load_session_names()
+        names = astra._load_session_names()
         self.assertEqual(names["4"], "auth-refactor")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_name_clear(self, mock_send):
-        tg._save_session_name("4", "old-name")
-        tg._handle_command("/name w4", self.sessions, None)
+        astra._save_session_name("4", "old-name")
+        astra._handle_command("/name w4", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("name cleared", msg)
-        names = tg._load_session_names()
+        names = astra._load_session_names()
         self.assertNotIn("4", names)
 
 
@@ -3140,37 +3140,37 @@ class TestFormatSessionsWithNames(unittest.TestCase):
     """Test format_sessions_message includes session names."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_fmtnames"
+        self.signal_dir = "/tmp/astra_test_fmtnames"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_with_name(self):
-        tg._save_session_name("4", "auth")
+        astra._save_session_name("4", "auth")
         sessions = {"4": ("0:4.0", "myproj")}
-        msg = tg.format_sessions_message(sessions)
+        msg = astra.format_sessions_message(sessions)
         self.assertIn("`w4 [auth]`", msg)
         self.assertIn("`myproj`", msg)
 
     def test_without_name(self):
         sessions = {"4": ("0:4.0", "myproj")}
-        msg = tg.format_sessions_message(sessions)
+        msg = astra.format_sessions_message(sessions)
         self.assertNotIn("[", msg)
         self.assertIn("`w4`", msg)
 
     def test_name_in_backticks_markdown_safe(self):
         """Session names with underscores must be in backticks."""
-        tg._save_session_name("4", "my_auth")
+        astra._save_session_name("4", "my_auth")
         sessions = {"4": ("0:4.0", "proj")}
-        msg = tg.format_sessions_message(sessions)
+        msg = astra.format_sessions_message(sessions)
         self.assertIn("`w4 [my_auth]`", msg)
         # Remove code blocks and check no bare underscores
         stripped = re.sub(r'```.*?```', '', msg, flags=re.DOTALL)
@@ -3179,9 +3179,9 @@ class TestFormatSessionsWithNames(unittest.TestCase):
 
     def test_god_mode_indicator(self):
         """God mode sessions show 🔱 indicator."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         sessions = {"4": ("0:4.0", "proj"), "5": ("0:5.0", "other")}
-        msg = tg.format_sessions_message(sessions)
+        msg = astra.format_sessions_message(sessions)
         # w4 should have god mode indicator
         for line in msg.splitlines():
             if "`w4`" in line:
@@ -3191,9 +3191,9 @@ class TestFormatSessionsWithNames(unittest.TestCase):
 
     def test_god_mode_all_indicator(self):
         """God mode 'all' shows indicator on every session."""
-        tg._set_god_mode("all", True)
+        astra._set_god_mode("all", True)
         sessions = {"4": ("0:4.0", "proj"), "5": ("0:5.0", "other")}
-        msg = tg.format_sessions_message(sessions)
+        msg = astra.format_sessions_message(sessions)
         for line in msg.splitlines():
             if "`w4`" in line or "`w5`" in line:
                 self.assertIn("🔱", line)
@@ -3205,12 +3205,12 @@ class TestDeepFocusCallback(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_deepfocus_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_deepfocus_4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/deepfocus w4", self.sessions, None)
         self.assertIsNone(action)
 
@@ -3219,16 +3219,16 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
     """Test process_signals with focused_wids set."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_sig_wids"
+        self.signal_dir = "/tmp/astra_test_sig_wids"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3238,57 +3238,57 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_suppressed_by_focus_set(self, mock_sleep, mock_run, mock_proj, mock_send):
         """Stop signal suppressed when wid is in focused_wids set."""
         self._write_signal("stop")
-        tg.process_signals(focused_wids={"4"})
+        astra.process_signals(focused_wids={"4"})
         mock_send.assert_not_called()
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_not_suppressed_different_wid(self, mock_sleep, mock_run, mock_proj, mock_send):
         """Stop signal NOT suppressed when wid not in focused_wids."""
         self._write_signal("stop")
-        tg.process_signals(focused_wids={"5"})
+        astra.process_signals(focused_wids={"5"})
         mock_send.assert_called_once()
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_smartfocus_stop_no_prev_sends_full(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
         """Stop signal with smartfocus but no prev_lines sends full content."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
-        tg.process_signals()  # no smartfocus_prev passed
+        astra.process_signals()  # no smartfocus_prev passed
         # Full content via _send_long_message (content was never delivered)
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
         self.assertIn("finished", header)
         # Smartfocus should be cleared
-        self.assertIsNone(tg.state._load_smartfocus_state())
+        self.assertIsNone(astra.state._load_smartfocus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n  line2\n  new stuff\n❯ prompt"))
     @patch("time.sleep")
     def test_smartfocus_stop_with_prev_sends_tail(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
         """Stop signal with smartfocus_prev sends only new (tail) content."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         # prev_lines matches first part of response — only "new stuff" is new
         prev = ["Answer", "  line1", "  line2"]
-        tg.process_signals(smartfocus_prev=prev)
+        astra.process_signals(smartfocus_prev=prev)
         # Tail content via _send_long_message
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
@@ -3297,55 +3297,55 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         self.assertIn("new stuff", body)
         self.assertNotIn("line1", body)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
     def test_smartfocus_stop_no_new_lines_never_sent_sends_full(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
         """Stop signal with prev matching all content but never sent 👁 → full content."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         prev = ["Answer", "  line1"]
-        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
+        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
         # Content was never delivered via 👁 → send full
         mock_long.assert_called_once()
         body = mock_long.call_args[0][1]
         self.assertIn("line1", body)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_smartfocus_stop_shows_queued_messages(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
         """Stop signal with smartfocus still shows queued messages."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
-        tg.state._save_queued_msg("w4", "fix the bug")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_queued_msg("w4", "fix the bug")
         self._write_signal("stop")
-        tg.process_signals()
+        astra.process_signals()
         calls = [c[0][0] for c in mock_send.call_args_list]
         self.assertTrue(any("saved message" in c for c in calls))
         # Clean up
-        tg.state._pop_queued_msgs("w4")
+        astra.state._pop_queued_msgs("w4")
 
 
 class TestProcessSignalsWithNames(unittest.TestCase):
     """Test that process_signals includes session names in tags."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_sig_names"
+        self.signal_dir = "/tmp/astra_test_sig_names"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -3355,14 +3355,14 @@ class TestProcessSignalsWithNames(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_includes_name(self, mock_sleep, mock_run, mock_proj, mock_send):
-        tg._save_session_name("4", "auth")
+        astra._save_session_name("4", "auth")
         self._write_signal("stop")
-        tg.process_signals()
+        astra.process_signals()
         msg = mock_send.call_args[0][0]
         self.assertIn("`w4 [auth]`", msg)
 
@@ -3373,9 +3373,9 @@ class TestHelpIncludesNewCommands(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_help_has_deepfocus(self, mock_send):
-        tg._handle_command("/help", self.sessions, "4")
+        astra._handle_command("/help", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("/deepfocus", msg)
         self.assertIn("/name", msg)
@@ -3386,51 +3386,51 @@ class TestResolveName(unittest.TestCase):
     """Test _resolve_name helper for name-based session routing."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_resolve"
+        self.signal_dir = "/tmp/astra_test_resolve"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_numeric_index(self):
         """Direct numeric index returns itself."""
-        self.assertEqual(tg._resolve_name("4", self.sessions), "4")
+        self.assertEqual(astra._resolve_name("4", self.sessions), "4")
 
     def test_numeric_not_in_sessions(self):
         """Numeric index not in sessions returns None."""
-        self.assertIsNone(tg._resolve_name("99", self.sessions))
+        self.assertIsNone(astra._resolve_name("99", self.sessions))
 
     def test_name_lookup(self):
         """Name lookup returns correct index."""
-        tg._save_session_name("4", "auth")
-        self.assertEqual(tg._resolve_name("auth", self.sessions), "4")
+        astra._save_session_name("4", "auth")
+        self.assertEqual(astra._resolve_name("auth", self.sessions), "4")
 
     def test_name_case_insensitive(self):
         """Name lookup is case-insensitive."""
-        tg._save_session_name("4", "Auth")
-        self.assertEqual(tg._resolve_name("auth", self.sessions), "4")
-        self.assertEqual(tg._resolve_name("AUTH", self.sessions), "4")
+        astra._save_session_name("4", "Auth")
+        self.assertEqual(astra._resolve_name("auth", self.sessions), "4")
+        self.assertEqual(astra._resolve_name("AUTH", self.sessions), "4")
 
     def test_unknown_name(self):
         """Unknown name returns None."""
-        self.assertIsNone(tg._resolve_name("nonexistent", self.sessions))
+        self.assertIsNone(astra._resolve_name("nonexistent", self.sessions))
 
     def test_name_for_dead_session(self):
         """Name for a session not in the live sessions dict returns None."""
-        tg._save_session_name("99", "dead")
-        self.assertIsNone(tg._resolve_name("dead", self.sessions))
+        astra._save_session_name("99", "dead")
+        self.assertIsNone(astra._resolve_name("dead", self.sessions))
 
     def test_none_target(self):
         """None target returns None."""
-        self.assertIsNone(tg._resolve_name(None, self.sessions))
+        self.assertIsNone(astra._resolve_name(None, self.sessions))
 
 
 class TestNameBasedCommands(unittest.TestCase):
@@ -3438,93 +3438,93 @@ class TestNameBasedCommands(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_namecmds"
+        self.signal_dir = "/tmp/astra_test_namecmds"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        tg._save_session_name("4", "auth")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        astra._save_session_name("4", "auth")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_focus_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "/focus auth", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Focusing on `w4 [auth]`", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="content\n")
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "/deepfocus auth", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Deep focus on `w4 [auth]`", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_interrupt_by_name(self, mock_run, mock_send):
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "/interrupt auth", self.sessions, None)
         self.assertEqual(last, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Interrupted `w4 [auth]`", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_kill_by_name(self, mock_scan, mock_run, mock_send):
         mock_scan.return_value = {"5": ("0:5.0", "other")}  # w4 gone
         with patch("time.sleep"):
-            action, _, _ = tg._handle_command(
+            action, _, _ = astra._handle_command(
                 "/kill auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Killed", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_last_by_name(self, mock_send):
-        tg._last_messages["4"] = "previous msg"
-        action, _, _ = tg._handle_command(
+        astra._last_messages["4"] = "previous msg"
+        action, _, _ = astra._handle_command(
             "/last auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertEqual(msg, "previous msg")
-        tg._last_messages.pop("4", None)
+        astra._last_messages.pop("4", None)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_status_by_name(self, mock_run, mock_send):
         mock_run.return_value = MagicMock(stdout="● Answer\n  42\n❯ prompt")
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/status auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("`w4 [auth]`", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_name_rename_by_name(self, mock_send):
         """Rename a session using its current name."""
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/name auth newname", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("named `newname`", msg)
-        names = tg._load_session_names()
+        names = astra._load_session_names()
         self.assertEqual(names["4"], "newname")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unknown_name_error(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/focus nonexistent", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
@@ -3536,62 +3536,62 @@ class TestNamePrefixRouting(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_nameprefix"
+        self.signal_dir = "/tmp/astra_test_nameprefix"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        tg._save_session_name("4", "auth")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        astra._save_session_name("4", "auth")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix the bug`")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix the bug`")
     def test_name_prefix_routes(self, mock_route, mock_send):
         """'auth fix the bug' routes to session named 'auth'."""
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "auth fix the bug", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "fix the bug")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unknown_word_falls_through(self, mock_send):
         """Unknown first word with multiple sessions asks to specify."""
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "randomword hello", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Multiple sessions", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
     def test_wn_prefix_still_works(self, mock_route, mock_send):
         """w4 hello still works (backward compat)."""
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "w4 hello", self.sessions, None)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
     def test_name_case_insensitive(self, mock_route, mock_send):
         """Name prefix is case-insensitive."""
-        action, _, last = tg._handle_command(
+        action, _, last = astra._handle_command(
             "Auth fix it", self.sessions, None)
         self.assertEqual(last, "4")
         mock_route.assert_called_once_with("0:4.0", "4", "fix it")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
     def test_single_word_no_prefix(self, mock_route, mock_send):
         """Single word that isn't a name doesn't trigger name routing."""
         sessions = {"4": ("0:4.0", "myproj")}
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "hello", sessions, None)
         # Should route to single session as no-prefix fallback
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
@@ -3601,137 +3601,137 @@ class TestQueuedMessageState(unittest.TestCase):
     """Test _save_queued_msg, _load_queued_msgs, _pop_queued_msgs."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_queued"
+        self.signal_dir = "/tmp/astra_test_queued"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_save_load_cycle(self):
-        tg._save_queued_msg("w4", "hello")
-        tg._save_queued_msg("w4", "world")
-        msgs = tg._load_queued_msgs("w4")
+        astra._save_queued_msg("w4", "hello")
+        astra._save_queued_msg("w4", "world")
+        msgs = astra._load_queued_msgs("w4")
         self.assertEqual(len(msgs), 2)
         self.assertEqual(msgs[0]["text"], "hello")
         self.assertEqual(msgs[1]["text"], "world")
         self.assertIn("ts", msgs[0])
 
     def test_pop_returns_and_deletes(self):
-        tg._save_queued_msg("w4", "msg1")
-        msgs = tg._pop_queued_msgs("w4")
+        astra._save_queued_msg("w4", "msg1")
+        msgs = astra._pop_queued_msgs("w4")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["text"], "msg1")
         # File should be deleted
-        self.assertEqual(tg._load_queued_msgs("w4"), [])
+        self.assertEqual(astra._load_queued_msgs("w4"), [])
 
     def test_load_empty(self):
-        self.assertEqual(tg._load_queued_msgs("w99"), [])
+        self.assertEqual(astra._load_queued_msgs("w99"), [])
 
     def test_pop_empty(self):
-        self.assertEqual(tg._pop_queued_msgs("w99"), [])
+        self.assertEqual(astra._pop_queued_msgs("w99"), [])
 
     def test_separate_sessions(self):
-        tg._save_queued_msg("w4", "for w4")
-        tg._save_queued_msg("w5", "for w5")
-        self.assertEqual(len(tg._load_queued_msgs("w4")), 1)
-        self.assertEqual(len(tg._load_queued_msgs("w5")), 1)
+        astra._save_queued_msg("w4", "for w4")
+        astra._save_queued_msg("w5", "for w5")
+        self.assertEqual(len(astra._load_queued_msgs("w4")), 1)
+        self.assertEqual(len(astra._load_queued_msgs("w5")), 1)
 
 
 class TestSavedPromptTextState(unittest.TestCase):
     """Test _save_prompt_text and _pop_prompt_text."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_prompt_text"
+        self.signal_dir = "/tmp/astra_test_prompt_text"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_save_and_pop(self):
-        tg._save_prompt_text("w4", "partial input")
-        result = tg._pop_prompt_text("w4")
+        astra._save_prompt_text("w4", "partial input")
+        result = astra._pop_prompt_text("w4")
         self.assertEqual(result, "partial input")
         # File should be deleted
-        self.assertIsNone(tg._pop_prompt_text("w4"))
+        self.assertIsNone(astra._pop_prompt_text("w4"))
 
     def test_pop_empty(self):
-        self.assertIsNone(tg._pop_prompt_text("w99"))
+        self.assertIsNone(astra._pop_prompt_text("w99"))
 
 
 class TestPaneIdleState(unittest.TestCase):
     """Test _pane_idle_state detects idle/busy and typed text."""
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_no_text(self, mock_capture):
         mock_capture.return_value = "some output\n  ❯ \n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_with_text(self, mock_capture):
         mock_capture.return_value = "some output\n  ❯ partial command\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "partial command")
 
-    @patch.object(tg.tmux, "_get_cursor_x", return_value=7)
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_get_cursor_x", return_value=7)
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_filters_suggestion(self, mock_capture, mock_cursor):
         """Cursor at col 7 means only 'fix' is typed, rest is suggestion."""
         #                0123456789...
         mock_capture.return_value = "  ❯ fix the bug in auth\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "fix")
 
-    @patch.object(tg.tmux, "_get_cursor_x", return_value=4)
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_get_cursor_x", return_value=4)
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_cursor_at_prompt_no_text(self, mock_capture, mock_cursor):
         """Cursor right after ❯ means no typed text, even with suggestion."""
         mock_capture.return_value = "  ❯ suggest something\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_busy(self, mock_capture):
         mock_capture.return_value = "● Working on something\n  Processing files...\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertFalse(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_old_prompt_in_scrollback_is_busy(self, mock_capture):
         """Old ❯ from submitted command should not count as idle."""
         mock_capture.return_value = "❯ test\n● Working on something\n  Processing files...\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertFalse(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_after_output_is_idle(self, mock_capture):
         """New ❯ prompt after output means idle."""
         mock_capture.return_value = "● Done with task\n  Result: 42\n\n❯ \n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_with_ui_chrome_below(self, mock_capture):
         """❯ prompt followed by separator and hint lines should be idle."""
         mock_capture.return_value = (
@@ -3739,11 +3739,11 @@ class TestPaneIdleState(unittest.TestCase):
             "─────────────────────────────────\n"
             "  ⏵⏵ accept edits on (shift+tab to cycle) · esc to interrupt\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_with_text_and_chrome_below(self, mock_capture):
         """❯ with typed text followed by chrome should be idle with text."""
         mock_capture.return_value = (
@@ -3751,11 +3751,11 @@ class TestPaneIdleState(unittest.TestCase):
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "  ⏵⏵ accept edits\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "partial cmd")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_with_thinking_indicator_below(self, mock_capture):
         """❯ followed by thinking timing line should be idle."""
         mock_capture.return_value = (
@@ -3763,26 +3763,26 @@ class TestPaneIdleState(unittest.TestCase):
             "─────────────────────────────────\n"
             "* Percolating… (1m 14s · ↓ 1.8k tokens · thought for 71s)\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "")
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_busy_with_working_spinner(self, mock_capture):
         """Working spinner on last line means busy."""
         mock_capture.return_value = "❯ test\n● Doing stuff\n⏳ Working...\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertFalse(is_idle)
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_all_empty_lines(self, mock_capture):
         mock_capture.return_value = "\n\n\n"
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertFalse(is_idle)
 
-    @patch.object(tg.tmux, "_capture_pane", side_effect=Exception("tmux error"))
+    @patch.object(astra.tmux, "_capture_pane", side_effect=Exception("tmux error"))
     def test_exception_returns_busy(self, mock_capture):
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertFalse(is_idle)
         self.assertEqual(typed, "")
 
@@ -3791,51 +3791,51 @@ class TestBusyState(unittest.TestCase):
     """Test _mark_busy, _is_busy, _clear_busy state file operations."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_busy_state"
+        self.signal_dir = "/tmp/astra_test_busy_state"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_mark_and_check(self):
-        self.assertFalse(tg._is_busy("w4"))
-        tg._mark_busy("w4")
-        self.assertTrue(tg._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w4"))
+        astra._mark_busy("w4")
+        self.assertTrue(astra._is_busy("w4"))
 
     def test_clear(self):
-        tg._mark_busy("w4")
-        tg._clear_busy("w4")
-        self.assertFalse(tg._is_busy("w4"))
+        astra._mark_busy("w4")
+        astra._clear_busy("w4")
+        self.assertFalse(astra._is_busy("w4"))
 
     def test_clear_nonexistent(self):
-        tg._clear_busy("w99")  # should not raise
+        astra._clear_busy("w99")  # should not raise
 
     def test_separate_sessions(self):
-        tg._mark_busy("w4")
-        self.assertTrue(tg._is_busy("w4"))
-        self.assertFalse(tg._is_busy("w5"))
+        astra._mark_busy("w4")
+        self.assertTrue(astra._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w5"))
 
     def test_cleanup_removes_dead_sessions(self):
         """Busy files for sessions not in active_sessions are removed."""
-        tg._mark_busy("w4")
-        tg._mark_busy("w5")
+        astra._mark_busy("w4")
+        astra._mark_busy("w5")
         active = {"4": ("0:4.0", "proj")}  # w5 is gone
-        tg._cleanup_stale_busy(active)
-        self.assertTrue(tg._is_busy("w4"))
-        self.assertFalse(tg._is_busy("w5"))
+        astra._cleanup_stale_busy(active)
+        self.assertTrue(astra._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w5"))
 
     def test_cleanup_empty_sessions(self):
         """All busy files removed when no sessions active."""
-        tg._mark_busy("w4")
-        tg._cleanup_stale_busy({})
-        self.assertFalse(tg._is_busy("w4"))
+        astra._mark_busy("w4")
+        astra._cleanup_stale_busy({})
+        self.assertFalse(astra._is_busy("w4"))
 
 
 class TestRouteToPane_BusyDetection(unittest.TestCase):
@@ -3844,41 +3844,41 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
     def setUp(self):
         self.pane = "0:4.0"
         self.win_idx = "4"
-        self.signal_dir = "/tmp/tg_hook_test_route_busy"
+        self.signal_dir = "/tmp/astra_test_route_busy"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(False, ""))
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(False, ""))
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     def test_busy_queues_message(self, mock_prompt, mock_idle, mock_run):
-        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Saved", result)
         self.assertIn("busy", result)
         # Message should be queued
-        msgs = tg._load_queued_msgs("w4")
+        msgs = astra._load_queued_msgs("w4")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["text"], "hello")
         # No subprocess call (no send-keys)
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, "existing text"))
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, "existing text"))
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     def test_idle_with_text_saves_and_clears(self, mock_prompt, mock_idle, mock_run):
-        result = tg.route_to_pane(self.pane, self.win_idx, "new msg")
+        result = astra.route_to_pane(self.pane, self.win_idx, "new msg")
         self.assertIn("Sent to", result)
         # Should have saved the existing text to queued messages
-        msgs = tg._load_queued_msgs("w4")
+        msgs = astra._load_queued_msgs("w4")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["text"], "existing text")
         # Should have called Escape + send-keys
@@ -3887,77 +3887,77 @@ class TestRouteToPane_BusyDetection(unittest.TestCase):
         self.assertIn("Escape", esc_cmd)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     def test_idle_no_text_sends_normally(self, mock_prompt, mock_idle, mock_run):
-        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Sent to", result)
         # Only one subprocess call (send-keys)
         self.assertEqual(mock_run.call_count, 1)
 
     @patch("subprocess.run")
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     def test_busy_file_queues_subsequent_messages(self, mock_prompt, mock_run):
         """After sending, _busy file prevents subsequent messages when pane is busy."""
         # First call: pane idle → sends. Second call: pane busy → queues.
-        with patch.object(tg.routing, "_pane_idle_state", return_value=(True, "")):
-            result1 = tg.route_to_pane(self.pane, self.win_idx, "first")
+        with patch.object(astra.routing, "_pane_idle_state", return_value=(True, "")):
+            result1 = astra.route_to_pane(self.pane, self.win_idx, "first")
         self.assertIn("Sent to", result1)
-        self.assertTrue(tg._is_busy("w4"))
-        with patch.object(tg.routing, "_pane_idle_state", return_value=(False, "")):
-            result2 = tg.route_to_pane(self.pane, self.win_idx, "second")
+        self.assertTrue(astra._is_busy("w4"))
+        with patch.object(astra.routing, "_pane_idle_state", return_value=(False, "")):
+            result2 = astra.route_to_pane(self.pane, self.win_idx, "second")
         self.assertIn("Saved", result2)
-        msgs = tg._load_queued_msgs("w4")
+        msgs = astra._load_queued_msgs("w4")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["text"], "second")
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     def test_busy_cleared_allows_send(self, mock_prompt, mock_idle, mock_run):
         """After _clear_busy, messages send normally again."""
-        tg._mark_busy("w4")
-        tg._clear_busy("w4")
-        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        astra._mark_busy("w4")
+        astra._clear_busy("w4")
+        result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Sent to", result)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     @patch("time.sleep")
     def test_busy_self_heals_when_pane_idle(self, mock_sleep, mock_prompt, mock_idle, mock_run):
         """If busy file exists but pane is idle and grace period passed, self-heal and send."""
-        tg._mark_busy("w4")
+        astra._mark_busy("w4")
         # Pretend busy was set 10s ago (past the 5s grace period)
-        with patch.object(tg.state, "_busy_since", return_value=time.time() - 10):
-            result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        with patch.object(astra.state, "_busy_since", return_value=time.time() - 10):
+            result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Sent to", result)
         # Busy file should be re-set (cleared then re-marked by send)
-        self.assertTrue(tg._is_busy("w4"))
+        self.assertTrue(astra._is_busy("w4"))
         # Double-check delay should have been called
         mock_sleep.assert_called_with(0.5)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     def test_busy_grace_period_queues(self, mock_prompt, mock_idle, mock_run):
         """Within 5s grace period, busy file is trusted even if pane looks idle."""
-        tg._mark_busy("w4")
+        astra._mark_busy("w4")
         # busy_since is just now — within grace period
-        result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+        result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Saved", result)
 
     @patch("subprocess.run")
-    @patch.object(tg.state, "load_active_prompt", return_value=None)
+    @patch.object(astra.state, "load_active_prompt", return_value=None)
     @patch("time.sleep")
     def test_busy_self_heal_double_check_catches_transient(self, mock_sleep, mock_prompt, mock_run):
         """If first idle check passes but second fails, queue the message."""
-        tg._mark_busy("w4")
+        astra._mark_busy("w4")
         # First check: idle (transient). Second check: busy (real state).
-        with patch.object(tg.routing, "_pane_idle_state",
+        with patch.object(astra.routing, "_pane_idle_state",
                           side_effect=[(True, ""), (False, "")]):
-            with patch.object(tg.state, "_busy_since", return_value=time.time() - 10):
-                result = tg.route_to_pane(self.pane, self.win_idx, "hello")
+            with patch.object(astra.state, "_busy_since", return_value=time.time() - 10):
+                result = astra.route_to_pane(self.pane, self.win_idx, "hello")
         self.assertIn("Saved", result)
         mock_sleep.assert_called_once_with(0.5)
 
@@ -3967,46 +3967,46 @@ class TestSavedCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_saved_cmd"
+        self.signal_dir = "/tmp/astra_test_saved_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_empty(self, mock_send):
-        action, _, _ = tg._handle_command("/saved", self.sessions, None)
+        action, _, _ = astra._handle_command("/saved", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved messages", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_with_messages(self, mock_send):
-        tg._save_queued_msg("w4", "hello there")
-        action, _, _ = tg._handle_command("/saved", self.sessions, None)
+        astra._save_queued_msg("w4", "hello there")
+        action, _, _ = astra._handle_command("/saved", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("1 saved message", msg)
         self.assertIn("hello there", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_specific_session(self, mock_send):
-        tg._save_queued_msg("w4", "msg for w4")
-        action, _, _ = tg._handle_command("/saved w4", self.sessions, None)
+        astra._save_queued_msg("w4", "msg for w4")
+        action, _, _ = astra._handle_command("/saved w4", self.sessions, None)
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("msg for w4", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_specific_session_empty(self, mock_send):
-        action, _, _ = tg._handle_command("/saved w4", self.sessions, None)
+        action, _, _ = astra._handle_command("/saved w4", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved messages", msg)
 
@@ -4016,55 +4016,55 @@ class TestSavedCallbacks(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_saved_cb"
+        self.signal_dir = "/tmp/astra_test_saved_cb"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`hello`")
     def test_saved_send(self, mock_route, mock_send, mock_answer, mock_remove):
-        tg._save_queued_msg("w4", "hello")
+        astra._save_queued_msg("w4", "hello")
         callback = {"id": "cb1", "data": "saved_send_w4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_route.assert_called_once_with("0:4.0", "4", "hello")
         self.assertEqual(last, "4")
         # Queue should be empty now
-        self.assertEqual(tg._load_queued_msgs("w4"), [])
+        self.assertEqual(astra._load_queued_msgs("w4"), [])
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`a\nb`")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`a\nb`")
     def test_saved_send_multiple(self, mock_route, mock_send, mock_answer, mock_remove):
-        tg._save_queued_msg("w4", "a")
-        tg._save_queued_msg("w4", "b")
+        astra._save_queued_msg("w4", "a")
+        astra._save_queued_msg("w4", "b")
         callback = {"id": "cb1", "data": "saved_send_w4", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        astra._handle_callback(callback, self.sessions, None)
         # Should combine with newlines
         mock_route.assert_called_once_with("0:4.0", "4", "a\nb")
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_discard(self, mock_send, mock_answer, mock_remove):
-        tg._save_queued_msg("w4", "hello")
+        astra._save_queued_msg("w4", "hello")
         callback = {"id": "cb1", "data": "saved_discard_w4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Discarded", msg)
         # Queue should be empty
-        self.assertEqual(tg._load_queued_msgs("w4"), [])
+        self.assertEqual(astra._load_queued_msgs("w4"), [])
 
 
 
@@ -4072,21 +4072,21 @@ class TestSavedAlias(unittest.TestCase):
     """Test sv alias resolves to /saved."""
 
     def test_sv_alias(self):
-        resolved = tg._resolve_alias("sv", has_active_prompt=False)
+        resolved = astra._resolve_alias("sv", has_active_prompt=False)
         self.assertEqual(resolved, "/saved")
 
     def test_sv_alias_suppressed_during_prompt(self):
-        resolved = tg._resolve_alias("sv", has_active_prompt=True)
+        resolved = astra._resolve_alias("sv", has_active_prompt=True)
         self.assertEqual(resolved, "sv")
 
 
 class TestHelpIncludesSaved(unittest.TestCase):
     """Verify /saved appears in help text."""
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={})
     def test_help_has_saved(self, mock_scan, mock_send):
-        tg._handle_command("/help", {}, None)
+        astra._handle_command("/help", {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("/saved", msg)
         self.assertIn("sv", msg)
@@ -4096,110 +4096,110 @@ class TestSmartFocusState(unittest.TestCase):
     """Test smart focus state file operations."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_smartfocus"
+        self.signal_dir = "/tmp/astra_test_smartfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_save_and_load_roundtrip(self):
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        st = tg._load_smartfocus_state()
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        st = astra._load_smartfocus_state()
         self.assertEqual(st, {"wid": "4", "pane": "0:4.0", "project": "myproj"})
 
     def test_load_missing_returns_none(self):
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_clear_removes_file(self):
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        tg._clear_smartfocus_state()
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        astra._clear_smartfocus_state()
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_survives_clear_signals_without_state(self):
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        tg._clear_signals(include_state=False)
-        self.assertIsNotNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        astra._clear_signals(include_state=False)
+        self.assertIsNotNone(astra._load_smartfocus_state())
 
     def test_cleared_by_clear_signals_with_state(self):
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        tg._clear_signals(include_state=True)
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        astra._clear_signals(include_state=True)
+        self.assertIsNone(astra._load_smartfocus_state())
 
 
 class TestSmartFocusActivation(unittest.TestCase):
     """Test _maybe_activate_smartfocus logic."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_sf_activate"
+        self.signal_dir = "/tmp/astra_test_sf_activate"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_normal_send_activates(self):
         """Message sent successfully → smart focus activates."""
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "📨 Sent to `w4`:\n`fix the bug`")
-        st = tg._load_smartfocus_state()
+        st = astra._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
 
     def test_queued_does_not_activate(self):
         """Message queued (busy) → no smart focus."""
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "💾 Saved for `w4` (busy):\n`fix`")
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_prompt_reply_does_not_activate(self):
         """Prompt reply → no smart focus."""
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "📨 Selected option 1 in `w4`")
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_skips_when_focus_active_same_wid(self):
         """Manual focus on same wid → skip smart focus."""
-        tg._save_focus_state("4", "0:4.0", "myproj")
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._save_focus_state("4", "0:4.0", "myproj")
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "📨 Sent to `w4`:\n`fix`")
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_skips_when_deepfocus_active_same_wid(self):
         """Deep focus on same wid → skip smart focus."""
-        tg._save_deepfocus_state("4", "0:4.0", "myproj")
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._save_deepfocus_state("4", "0:4.0", "myproj")
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "📨 Sent to `w4`:\n`fix`")
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_activates_when_focus_on_different_wid(self):
         """Manual focus on w5, sending to w4 → smart focus activates."""
-        tg._save_focus_state("5", "0:5.0", "other")
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._save_focus_state("5", "0:5.0", "other")
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "📨 Sent to `w4`:\n`fix`")
-        st = tg._load_smartfocus_state()
+        st = astra._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
 
     def test_switching_sessions_overwrites(self):
         """Sending to w5 after w4 → smart focus moves to w5."""
-        tg._maybe_activate_smartfocus("4", "0:4.0", "projA",
+        astra._maybe_activate_smartfocus("4", "0:4.0", "projA",
                                       "📨 Sent to `w4`:\n`fix`")
-        tg._maybe_activate_smartfocus("5", "0:5.0", "projB",
+        astra._maybe_activate_smartfocus("5", "0:5.0", "projB",
                                       "📨 Sent to `w5`:\n`test`")
-        st = tg._load_smartfocus_state()
+        st = astra._load_smartfocus_state()
         self.assertEqual(st["wid"], "5")
 
 
@@ -4207,16 +4207,16 @@ class TestStopSignalClearsSmartFocus(unittest.TestCase):
     """Test that stop signal clears smart focus for matching wid."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_sf_stop"
+        self.signal_dir = "/tmp/astra_test_sf_stop"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4226,31 +4226,31 @@ class TestStopSignalClearsSmartFocus(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_matching_wid_cleared(self, mock_sleep, mock_run, mock_proj,
                                    mock_long, mock_send):
         """Stop signal for w4 clears smart focus on w4."""
-        tg._save_smartfocus_state("4", "0:4.0", "proj")
+        astra._save_smartfocus_state("4", "0:4.0", "proj")
         self._write_signal("stop", wid="w4")
-        tg.process_signals(focused_wids={"4"})
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra.process_signals(focused_wids={"4"})
+        self.assertIsNone(astra._load_smartfocus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_non_matching_wid_preserved(self, mock_sleep, mock_run, mock_proj,
                                          mock_long, mock_send):
         """Stop signal for w5 does NOT clear smart focus on w4."""
-        tg._save_smartfocus_state("4", "0:4.0", "proj")
+        astra._save_smartfocus_state("4", "0:4.0", "proj")
         self._write_signal("stop", wid="w5")
-        tg.process_signals()
-        st = tg._load_smartfocus_state()
+        astra.process_signals()
+        st = astra._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
 
@@ -4260,42 +4260,42 @@ class TestUnfocusClearsSmartFocus(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_sf_unfocus"
+        self.signal_dir = "/tmp/astra_test_sf_unfocus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unfocus_clears_smartfocus(self, mock_send):
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/unfocus", self.sessions, None)
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        astra._handle_command("/unfocus", self.sessions, None)
+        self.assertIsNone(astra._load_smartfocus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_focus_clears_smartfocus(self, mock_run, mock_send):
         """Manual /focus clears smart focus."""
         mock_run.return_value = MagicMock(stdout="content\n")
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/focus w4", self.sessions, None)
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        astra._handle_command("/focus w4", self.sessions, None)
+        self.assertIsNone(astra._load_smartfocus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_deepfocus_clears_smartfocus(self, mock_run, mock_send):
         """Manual /deepfocus clears smart focus."""
         mock_run.return_value = MagicMock(stdout="content\n")
-        tg._save_smartfocus_state("4", "0:4.0", "myproj")
-        tg._handle_command("/deepfocus w4", self.sessions, None)
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "myproj")
+        astra._handle_command("/deepfocus w4", self.sessions, None)
+        self.assertIsNone(astra._load_smartfocus_state())
 
 
 class TestSmartFocusIntegration(unittest.TestCase):
@@ -4303,42 +4303,42 @@ class TestSmartFocusIntegration(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_sf_integration"
+        self.signal_dir = "/tmp/astra_test_sf_integration"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix`")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix`")
     def test_wN_prefix_activates_smartfocus(self, mock_route, mock_send):
         """Sending 'w4 fix' activates smart focus on w4."""
-        tg._handle_command("w4 fix the bug", self.sessions, None)
-        st = tg._load_smartfocus_state()
+        astra._handle_command("w4 fix the bug", self.sessions, None)
+        st = astra._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="💾 Saved for `w4` (busy):\n`fix`")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="💾 Saved for `w4` (busy):\n`fix`")
     def test_wN_prefix_queued_no_smartfocus(self, mock_route, mock_send):
         """Queued message does NOT activate smart focus."""
-        tg._handle_command("w4 fix the bug", self.sessions, None)
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._handle_command("w4 fix the bug", self.sessions, None)
+        self.assertIsNone(astra._load_smartfocus_state())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix`")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`:\n`fix`")
     def test_default_session_activates_smartfocus(self, mock_route, mock_send):
         """Single session message activates smart focus."""
         single = {"4": ("0:4.0", "myproj")}
-        tg._handle_command("fix the bug", single, None)
-        st = tg._load_smartfocus_state()
+        astra._handle_command("fix the bug", single, None)
+        st = astra._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
 
@@ -4347,90 +4347,90 @@ class TestGodModeState(unittest.TestCase):
     """Test god mode state functions."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_god_state"
+        self.signal_dir = "/tmp/astra_test_god_state"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_default_off(self):
-        self.assertFalse(tg._is_god_mode_for("4"))
-        self.assertEqual(tg._god_mode_wids(), [])
+        self.assertFalse(astra._is_god_mode_for("4"))
+        self.assertEqual(astra._god_mode_wids(), [])
 
     def test_enable_per_session(self):
-        tg._set_god_mode("4", True)
-        self.assertTrue(tg._is_god_mode_for("4"))
-        self.assertFalse(tg._is_god_mode_for("5"))
-        self.assertEqual(tg._god_mode_wids(), ["4"])
+        astra._set_god_mode("4", True)
+        self.assertTrue(astra._is_god_mode_for("4"))
+        self.assertFalse(astra._is_god_mode_for("5"))
+        self.assertEqual(astra._god_mode_wids(), ["4"])
 
     def test_enable_all(self):
-        tg._set_god_mode("all", True)
-        self.assertTrue(tg._is_god_mode_for("4"))
-        self.assertTrue(tg._is_god_mode_for("99"))
-        self.assertIn("all", tg._god_mode_wids())
+        astra._set_god_mode("all", True)
+        self.assertTrue(astra._is_god_mode_for("4"))
+        self.assertTrue(astra._is_god_mode_for("99"))
+        self.assertIn("all", astra._god_mode_wids())
 
     def test_disable_per_session(self):
-        tg._set_god_mode("4", True)
-        tg._set_god_mode("5", True)
-        tg._set_god_mode("4", False)
-        self.assertFalse(tg._is_god_mode_for("4"))
-        self.assertTrue(tg._is_god_mode_for("5"))
+        astra._set_god_mode("4", True)
+        astra._set_god_mode("5", True)
+        astra._set_god_mode("4", False)
+        self.assertFalse(astra._is_god_mode_for("4"))
+        self.assertTrue(astra._is_god_mode_for("5"))
 
     def test_clear_god_mode(self):
-        tg._set_god_mode("4", True)
-        tg._set_god_mode("5", True)
-        tg._clear_god_mode()
-        self.assertFalse(tg._is_god_mode_for("4"))
-        self.assertFalse(tg._is_god_mode_for("5"))
-        self.assertEqual(tg._god_mode_wids(), [])
+        astra._set_god_mode("4", True)
+        astra._set_god_mode("5", True)
+        astra._clear_god_mode()
+        self.assertFalse(astra._is_god_mode_for("4"))
+        self.assertFalse(astra._is_god_mode_for("5"))
+        self.assertEqual(astra._god_mode_wids(), [])
 
     def test_disable_last_removes_file(self):
-        tg._set_god_mode("4", True)
-        tg._set_god_mode("4", False)
-        self.assertFalse(os.path.exists(tg.config.GOD_MODE_PATH))
+        astra._set_god_mode("4", True)
+        astra._set_god_mode("4", False)
+        self.assertFalse(os.path.exists(astra.config.GOD_MODE_PATH))
 
     def test_no_duplicate_wids(self):
-        tg._set_god_mode("4", True)
-        tg._set_god_mode("4", True)
-        self.assertEqual(tg._god_mode_wids(), ["4"])
+        astra._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
+        self.assertEqual(astra._god_mode_wids(), ["4"])
 
     def test_survives_clear_signals(self):
         """God mode state survives _clear_signals — stored outside signal dir."""
         # Point GOD_MODE_PATH outside signal dir (like production ~/.config/)
         ext_path = self.signal_dir + "_god_persistent"
         os.makedirs(ext_path, exist_ok=True)
-        tg.config.GOD_MODE_PATH = os.path.join(ext_path, "_god_mode.json")
+        astra.config.GOD_MODE_PATH = os.path.join(ext_path, "_god_mode.json")
         try:
-            tg._set_god_mode("4", True)
-            tg._clear_signals(include_state=True)
-            self.assertTrue(tg._is_god_mode_for("4"))
+            astra._set_god_mode("4", True)
+            astra._clear_signals(include_state=True)
+            self.assertTrue(astra._is_god_mode_for("4"))
         finally:
             import shutil
             shutil.rmtree(ext_path, ignore_errors=True)
-            tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+            astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
 
 class TestGodModeAutoAccept(unittest.TestCase):
     """Test permission auto-accept in god mode."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_god_accept"
+        self.signal_dir = "/tmp/astra_test_god_accept"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4442,75 +4442,75 @@ class TestGodModeAutoAccept(unittest.TestCase):
         with open(path, "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to run bash", "ls -la", ["1. Yes", "2. Always", "3. Deny"], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("wants to run bash", "ls -la", ["1. Yes", "2. Always", "3. Deny"], ""))
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_mode_auto_accepts(self, mock_send, mock_proj, mock_extract, mock_select):
         """Permission in god-mode session is auto-accepted."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         self._write_signal("permission", "w4", cmd="ls -la")
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         mock_select.assert_called_once_with("0:4.0", 1)
         msg = mock_send.call_args[0][0]
         self.assertIn("Auto-allowed", msg)
         self.assertIn("ls -la", msg)
         # No active prompt should be saved
-        self.assertIsNone(tg.state.load_active_prompt("w4"))
+        self.assertIsNone(astra.state.load_active_prompt("w4"))
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to run bash", "rm -rf /", ["1. Yes", "2. Always", "3. Deny"], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("wants to run bash", "rm -rf /", ["1. Yes", "2. Always", "3. Deny"], ""))
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.state, "save_active_prompt")
     def test_non_god_session_normal_flow(self, mock_save_prompt, mock_send, mock_proj, mock_extract, mock_select):
         """Permission in non-god session follows normal flow."""
-        tg._set_god_mode("5", True)  # god mode for w5, not w4
+        astra._set_god_mode("5", True)  # god mode for w5, not w4
         self._write_signal("permission", "w4", cmd="rm -rf /")
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         mock_select.assert_not_called()
         mock_save_prompt.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("needs permission", msg)
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("wants to edit", "file.py", ["1. Yes", "2. Always", "3. Deny"], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("wants to edit", "file.py", ["1. Yes", "2. Always", "3. Deny"], ""))
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_all_accepts_any_session(self, mock_send, mock_proj, mock_extract, mock_select):
         """God mode 'all' auto-accepts for any session."""
-        tg._set_god_mode("all", True)
+        astra._set_god_mode("all", True)
         self._write_signal("permission", "w7", pane="0:7.0")
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         mock_select.assert_called_once_with("0:7.0", 1)
         msg = mock_send.call_args[0][0]
         self.assertIn("Auto-allowed", msg)
 
-    @patch.object(tg.content, "_extract_pane_permission", return_value=("", "", [], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.content, "_extract_pane_permission", return_value=("", "", [], ""))
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_mode_receipt_has_header_when_no_cmd(self, mock_send, mock_proj, mock_extract):
         """Receipt uses perm_header when no bash_cmd."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         self._write_signal("permission", "w4")
-        with patch.object(tg.routing, "_select_option"):
-            tg.signals.process_signals()
+        with patch.object(astra.routing, "_select_option"):
+            astra.signals.process_signals()
         msg = mock_send.call_args[0][0]
         self.assertIn("Auto-allowed", msg)
         self.assertIn("permission", msg)
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("wants to execute plan", "", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.state, "save_active_prompt")
     def test_plan_permission_not_auto_accepted_in_god_mode(self, mock_save_prompt, mock_send, mock_proj, mock_extract, mock_select):
         """ExitPlanMode permission (message contains 'plan') is NOT auto-accepted in god mode."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         self._write_signal("permission", "w4",
                            message="Claude has written up a plan and is ready to execute. Would you like to proceed?")
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         mock_select.assert_not_called()
         mock_save_prompt.assert_called_once()
         msg = mock_send.call_args[0][0]
@@ -4522,118 +4522,118 @@ class TestGodModeCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_god_cmd"
+        self.signal_dir = "/tmp/astra_test_god_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_god_shows_status_off(self, mock_send, mock_scan):
-        tg._handle_command("/god", self.sessions, None)
+        astra._handle_command("/god", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("off", msg)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_god_shows_status_on(self, mock_send, mock_scan):
-        tg._set_god_mode("4", True)
-        tg._handle_command("/god", self.sessions, None)
+        astra._set_god_mode("4", True)
+        astra._handle_command("/god", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("on", msg)
         self.assertIn("w4", msg)
 
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    @patch.object(tg.commands, "_enable_accept_edits")
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.commands, "_enable_accept_edits")
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_w4_enables(self, mock_send, mock_scan, mock_accept, mock_idle):
-        tg._handle_command("/god w4", self.sessions, None)
-        self.assertTrue(tg._is_god_mode_for("4"))
+        astra._handle_command("/god w4", self.sessions, None)
+        self.assertTrue(astra._is_god_mode_for("4"))
         msg = mock_send.call_args[0][0]
         self.assertIn("on", msg)
         mock_accept.assert_called_once_with("0:4.0")
 
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(False, ""))
-    @patch.object(tg.commands, "_enable_accept_edits")
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(False, ""))
+    @patch.object(astra.commands, "_enable_accept_edits")
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_w4_busy_skips_accept_edits(self, mock_send, mock_scan, mock_accept, mock_idle):
-        tg._handle_command("/god w4", self.sessions, None)
-        self.assertTrue(tg._is_god_mode_for("4"))
+        astra._handle_command("/god w4", self.sessions, None)
+        self.assertTrue(astra._is_god_mode_for("4"))
         mock_accept.assert_not_called()
 
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
-    @patch.object(tg.commands, "_enable_accept_edits")
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.commands, "_enable_accept_edits")
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_all_enables(self, mock_send, mock_scan, mock_accept, mock_idle):
-        tg._handle_command("/god all", self.sessions, None)
-        self.assertTrue(tg._is_god_mode_for("4"))
-        self.assertTrue(tg._is_god_mode_for("5"))
+        astra._handle_command("/god all", self.sessions, None)
+        self.assertTrue(astra._is_god_mode_for("4"))
+        self.assertTrue(astra._is_god_mode_for("5"))
         # Should cycle accept-edits for all idle sessions
         self.assertEqual(mock_accept.call_count, 2)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_off_disables_all(self, mock_send, mock_scan):
-        tg._set_god_mode("4", True)
-        tg._set_god_mode("5", True)
-        tg._handle_command("/god off", self.sessions, None)
-        self.assertFalse(tg._is_god_mode_for("4"))
-        self.assertFalse(tg._is_god_mode_for("5"))
+        astra._set_god_mode("4", True)
+        astra._set_god_mode("5", True)
+        astra._handle_command("/god off", self.sessions, None)
+        self.assertFalse(astra._is_god_mode_for("4"))
+        self.assertFalse(astra._is_god_mode_for("5"))
         msg = mock_send.call_args[0][0]
         self.assertIn("off", msg)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_off_w4(self, mock_send, mock_scan):
-        tg._set_god_mode("4", True)
-        tg._set_god_mode("5", True)
-        tg._handle_command("/god off w4", self.sessions, None)
-        self.assertFalse(tg._is_god_mode_for("4"))
-        self.assertTrue(tg._is_god_mode_for("5"))
+        astra._set_god_mode("4", True)
+        astra._set_god_mode("5", True)
+        astra._handle_command("/god off w4", self.sessions, None)
+        self.assertFalse(astra._is_god_mode_for("4"))
+        self.assertTrue(astra._is_god_mode_for("5"))
 
     def test_alias_g4(self):
-        self.assertEqual(tg._resolve_alias("g4", False), "/god w4")
+        self.assertEqual(astra._resolve_alias("g4", False), "/god w4")
 
     def test_alias_ga(self):
-        self.assertEqual(tg._resolve_alias("ga", False), "/god all")
+        self.assertEqual(astra._resolve_alias("ga", False), "/god all")
 
     def test_alias_goff(self):
-        self.assertEqual(tg._resolve_alias("goff", False), "/god off")
+        self.assertEqual(astra._resolve_alias("goff", False), "/god off")
 
     def test_alias_g4_with_active_prompt(self):
         """g4 alias always resolves, even with active prompt."""
-        self.assertEqual(tg._resolve_alias("g4", True), "/god w4")
+        self.assertEqual(astra._resolve_alias("g4", True), "/god w4")
 
     def test_alias_ga_suppressed_with_active_prompt(self):
         """ga is ambiguous during prompts."""
-        self.assertEqual(tg._resolve_alias("ga", True), "ga")
+        self.assertEqual(astra._resolve_alias("ga", True), "ga")
 
 
 class TestGodModeAcceptEditsOnStop(unittest.TestCase):
     """Test accept-edits cycling on stop signal for god mode sessions."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_god_stop"
+        self.signal_dir = "/tmp/astra_test_god_stop"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4645,35 +4645,35 @@ class TestGodModeAcceptEditsOnStop(unittest.TestCase):
         with open(path, "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.commands, "_enable_accept_edits")
-    @patch.object(tg.content, "_has_response_start", return_value=True)
-    @patch.object(tg.content, "clean_pane_content", return_value="done")
-    @patch.object(tg.tmux, "_capture_pane", return_value="● done\n❯")
-    @patch.object(tg.tmux, "_get_pane_width", return_value=80)
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(astra.commands, "_enable_accept_edits")
+    @patch.object(astra.content, "_has_response_start", return_value=True)
+    @patch.object(astra.content, "clean_pane_content", return_value="done")
+    @patch.object(astra.tmux, "_capture_pane", return_value="● done\n❯")
+    @patch.object(astra.tmux, "_get_pane_width", return_value=80)
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "_send_long_message")
     @patch("time.sleep")
     def test_stop_triggers_accept_edits_for_god_session(self, mock_sleep, mock_long,
                                                          mock_proj, mock_pw, mock_cap,
                                                          mock_clean, mock_has, mock_accept):
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         self._write_signal("stop", "w4")
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         mock_accept.assert_called_once_with("0:4.0")
 
-    @patch.object(tg.commands, "_enable_accept_edits")
-    @patch.object(tg.content, "_has_response_start", return_value=True)
-    @patch.object(tg.content, "clean_pane_content", return_value="done")
-    @patch.object(tg.tmux, "_capture_pane", return_value="● done\n❯")
-    @patch.object(tg.tmux, "_get_pane_width", return_value=80)
-    @patch.object(tg.tmux, "get_pane_project", return_value="myproj")
-    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(astra.commands, "_enable_accept_edits")
+    @patch.object(astra.content, "_has_response_start", return_value=True)
+    @patch.object(astra.content, "clean_pane_content", return_value="done")
+    @patch.object(astra.tmux, "_capture_pane", return_value="● done\n❯")
+    @patch.object(astra.tmux, "_get_pane_width", return_value=80)
+    @patch.object(astra.tmux, "get_pane_project", return_value="myproj")
+    @patch.object(astra.telegram, "_send_long_message")
     @patch("time.sleep")
     def test_stop_no_accept_edits_without_god(self, mock_sleep, mock_long,
                                                mock_proj, mock_pw, mock_cap,
                                                mock_clean, mock_has, mock_accept):
         self._write_signal("stop", "w4")
-        tg.signals.process_signals()
+        astra.signals.process_signals()
         mock_accept.assert_not_called()
 
 
@@ -4681,37 +4681,37 @@ class TestEnableAcceptEdits(unittest.TestCase):
     """Test _enable_accept_edits helper."""
 
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "_capture_pane", return_value="some output\n⏵⏵ accept edits on")
+    @patch.object(astra.tmux, "_capture_pane", return_value="some output\n⏵⏵ accept edits on")
     def test_already_on(self, mock_cap, mock_run):
         """No BTab sent if accept edits already on."""
-        tg._enable_accept_edits("0:4.0")
+        astra._enable_accept_edits("0:4.0")
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "_capture_pane", side_effect=[
+    @patch.object(astra.tmux, "_capture_pane", side_effect=[
         "some output\n⏵⏵ auto-accept",
         "some output\n⏵⏵ accept edits on",
     ])
     def test_cycles_once(self, mock_cap, mock_run):
         """Sends BTab once to cycle to accept edits on."""
-        tg._enable_accept_edits("0:4.0")
+        astra._enable_accept_edits("0:4.0")
         self.assertEqual(mock_run.call_count, 1)
 
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "_capture_pane", return_value="some output\n⏵⏵ auto-accept")
+    @patch.object(astra.tmux, "_capture_pane", return_value="some output\n⏵⏵ auto-accept")
     def test_max_cycles(self, mock_cap, mock_run):
         """Stops after 5 cycles even if not found."""
-        tg._enable_accept_edits("0:4.0")
+        astra._enable_accept_edits("0:4.0")
         self.assertEqual(mock_run.call_count, 5)
 
 
 class TestHelpIncludesGod(unittest.TestCase):
     """Test /help includes /god command."""
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_help_has_god(self, mock_send, mock_scan):
-        tg._handle_command("/help", {}, None)
+        astra._handle_command("/help", {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("/god", msg)
         self.assertIn("g4", msg)
@@ -4723,90 +4723,90 @@ class TestIsUiChrome(unittest.TestCase):
     """Test _is_ui_chrome pattern matching."""
 
     def test_empty_string(self):
-        self.assertTrue(tg._is_ui_chrome(""))
+        self.assertTrue(astra._is_ui_chrome(""))
 
     def test_separator_thin(self):
-        self.assertTrue(tg._is_ui_chrome("────────────────"))
+        self.assertTrue(astra._is_ui_chrome("────────────────"))
 
     def test_separator_thick(self):
-        self.assertTrue(tg._is_ui_chrome("━━━━━━━━━━━━━━━━"))
+        self.assertTrue(astra._is_ui_chrome("━━━━━━━━━━━━━━━━"))
 
     def test_accept_edits_on(self):
-        self.assertTrue(tg._is_ui_chrome("⏵⏵ accept edits on"))
+        self.assertTrue(astra._is_ui_chrome("⏵⏵ accept edits on"))
 
     def test_paused_indicator(self):
-        self.assertTrue(tg._is_ui_chrome("⏸ paused"))
+        self.assertTrue(astra._is_ui_chrome("⏸ paused"))
 
     def test_context_left(self):
-        self.assertTrue(tg._is_ui_chrome("Context left until auto-compact: 50%"))
+        self.assertTrue(astra._is_ui_chrome("Context left until auto-compact: 50%"))
 
     def test_working_emoji(self):
-        self.assertTrue(tg._is_ui_chrome("⏳ Working..."))
+        self.assertTrue(astra._is_ui_chrome("⏳ Working..."))
 
     def test_working_asterisk(self):
-        self.assertTrue(tg._is_ui_chrome("* Working..."))
+        self.assertTrue(astra._is_ui_chrome("* Working..."))
 
     def test_shortcut_hint(self):
-        self.assertTrue(tg._is_ui_chrome("✻ esc for shortcuts"))
+        self.assertTrue(astra._is_ui_chrome("✻ esc for shortcuts"))
 
     def test_ctrl_background(self):
-        self.assertTrue(tg._is_ui_chrome("ctrl+b to run in background"))
+        self.assertTrue(astra._is_ui_chrome("ctrl+b to run in background"))
 
     def test_thinking_with_timing(self):
-        self.assertTrue(tg._is_ui_chrome("* Percolating… (1m 14s · ↓ 1.8k tokens)"))
+        self.assertTrue(astra._is_ui_chrome("* Percolating… (1m 14s · ↓ 1.8k tokens)"))
 
     def test_thinking_spinner(self):
-        self.assertTrue(tg._is_ui_chrome("⠐ Thinking…"))
+        self.assertTrue(astra._is_ui_chrome("⠐ Thinking…"))
 
     def test_working_spinner(self):
-        self.assertTrue(tg._is_ui_chrome("✶ Working…"))
+        self.assertTrue(astra._is_ui_chrome("✶ Working…"))
 
     def test_more_lines(self):
-        self.assertTrue(tg._is_ui_chrome("+12 more lines (ctrl+e to expand)"))
+        self.assertTrue(astra._is_ui_chrome("+12 more lines (ctrl+e to expand)"))
 
     def test_normal_text(self):
-        self.assertFalse(tg._is_ui_chrome("Hello world"))
+        self.assertFalse(astra._is_ui_chrome("Hello world"))
 
     def test_prompt(self):
-        self.assertFalse(tg._is_ui_chrome("❯ test"))
+        self.assertFalse(astra._is_ui_chrome("❯ test"))
 
     def test_bullet(self):
-        self.assertFalse(tg._is_ui_chrome("● Response text"))
+        self.assertFalse(astra._is_ui_chrome("● Response text"))
 
     def test_status_bar_esc_to_interrupt(self):
-        self.assertTrue(tg._is_ui_chrome("1 file +2 -2 · esc to interrupt"))
+        self.assertTrue(astra._is_ui_chrome("1 file +2 -2 · esc to interrupt"))
 
     def test_status_bar_multiple_files(self):
-        self.assertTrue(tg._is_ui_chrome("3 files +50 -10 · esc to interrupt"))
+        self.assertTrue(astra._is_ui_chrome("3 files +50 -10 · esc to interrupt"))
 
     def test_status_bar_file_count_no_interrupt(self):
-        self.assertTrue(tg._is_ui_chrome("1 file +2 -2"))
+        self.assertTrue(astra._is_ui_chrome("1 file +2 -2"))
 
     def test_short_separator_not_chrome(self):
         """Separators need at least 3 chars."""
-        self.assertFalse(tg._is_ui_chrome("──"))
+        self.assertFalse(astra._is_ui_chrome("──"))
 
     def test_thinking_three_dots(self):
         """Spinner with ... (three dots) instead of … (Unicode ellipsis)."""
-        self.assertTrue(tg._is_ui_chrome("❊ Infusing... (thinking)"))
+        self.assertTrue(astra._is_ui_chrome("❊ Infusing... (thinking)"))
 
     def test_spinner_three_dots(self):
-        self.assertTrue(tg._is_ui_chrome("⠐ Thinking..."))
+        self.assertTrue(astra._is_ui_chrome("⠐ Thinking..."))
 
     def test_tool_progress_ctrl_o(self):
         """Tool progress line with (ctrl+o to expand)."""
-        self.assertTrue(tg._is_ui_chrome("● Reading 1 file... (ctrl+o to expand)"))
+        self.assertTrue(astra._is_ui_chrome("● Reading 1 file... (ctrl+o to expand)"))
 
     def test_tool_progress_unicode_ellipsis(self):
-        self.assertTrue(tg._is_ui_chrome("● Reading 1 file… (ctrl+o to expand)"))
+        self.assertTrue(astra._is_ui_chrome("● Reading 1 file… (ctrl+o to expand)"))
 
     def test_tool_progress_without_bullet(self):
         """Tool progress without ● prefix should still be UI chrome."""
-        self.assertTrue(tg._is_ui_chrome("Reading 2 files… (ctrl+o to expand)"))
+        self.assertTrue(astra._is_ui_chrome("Reading 2 files… (ctrl+o to expand)"))
 
     def test_response_bullet_not_filtered(self):
         """Regular response bullet should NOT be filtered."""
-        self.assertFalse(tg._is_ui_chrome("● All 3 images received."))
+        self.assertFalse(astra._is_ui_chrome("● All 3 images received."))
 
 
 class TestFilterToolCalls(unittest.TestCase):
@@ -4818,7 +4818,7 @@ class TestFilterToolCalls(unittest.TestCase):
             "  ⎿  hello",
             "● The result is 42.",
         ]
-        result = tg._filter_tool_calls(lines)
+        result = astra._filter_tool_calls(lines)
         self.assertEqual(result, ["● The result is 42."])
 
     def test_preserves_text_bullets(self):
@@ -4826,7 +4826,7 @@ class TestFilterToolCalls(unittest.TestCase):
             "● Here is the answer",
             "  The result is 42.",
         ]
-        result = tg._filter_tool_calls(lines)
+        result = astra._filter_tool_calls(lines)
         self.assertEqual(result, lines)
 
     def test_multiple_tool_calls(self):
@@ -4837,15 +4837,15 @@ class TestFilterToolCalls(unittest.TestCase):
             "  on main branch",
             "● Summary of changes",
         ]
-        result = tg._filter_tool_calls(lines)
+        result = astra._filter_tool_calls(lines)
         self.assertEqual(result, ["● Summary of changes"])
 
     def test_empty_input(self):
-        self.assertEqual(tg._filter_tool_calls([]), [])
+        self.assertEqual(astra._filter_tool_calls([]), [])
 
     def test_no_tool_bullets(self):
         lines = ["normal line", "another line"]
-        result = tg._filter_tool_calls(lines)
+        result = astra._filter_tool_calls(lines)
         self.assertEqual(result, lines)
 
 
@@ -4853,16 +4853,16 @@ class TestGodModeQuestionNotAutoAccepted(unittest.TestCase):
     """Test that god mode does NOT auto-accept AskUserQuestion signals."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_god_question"
+        self.signal_dir = "/tmp/astra_test_god_question"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4872,18 +4872,18 @@ class TestGodModeQuestionNotAutoAccepted(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.state, "save_active_prompt")
     def test_question_not_auto_accepted(self, mock_save, mock_send, mock_proj, mock_select):
         """AskUserQuestion should always show the question, even in god mode."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         questions = [{"question": "Pick one?", "options": [
             {"label": "A", "description": "first"},
         ]}]
         self._write_signal("question", questions=questions)
-        tg.process_signals()
+        astra.process_signals()
         # Should NOT auto-accept
         mock_select.assert_not_called()
         # Should show the question normally
@@ -4900,12 +4900,12 @@ class TestGodModeCallback(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {"4": ("0:4.0", "myproj")}, "4"))
     def test_cmd_god_callback(self, mock_cmd, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "cmd_god_4", "message_id": 42}
-        sessions, last, action = tg._handle_callback(callback, self.sessions, None)
+        sessions, last, action = astra._handle_callback(callback, self.sessions, None)
         mock_cmd.assert_called_once_with("/god w4", self.sessions, None)
         self.assertIsNone(action)
 
@@ -4915,23 +4915,23 @@ class TestGodModeUnknownArg(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_god_unknown"
+        self.signal_dir = "/tmp/astra_test_god_unknown"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unknown_arg(self, mock_send, mock_scan):
-        tg._handle_command("/god xyz123", self.sessions, None)
+        astra._handle_command("/god xyz123", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
@@ -4940,16 +4940,16 @@ class TestProcessSignalsClearsBusy(unittest.TestCase):
     """Test that stop signal clears busy state."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_stop_busy"
+        self.signal_dir = "/tmp/astra_test_stop_busy"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4959,32 +4959,32 @@ class TestProcessSignalsClearsBusy(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_clears_busy(self, mock_sleep, mock_run, mock_proj, mock_send):
-        tg._mark_busy("w4")
-        self.assertTrue(tg._is_busy("w4"))
+        astra._mark_busy("w4")
+        self.assertTrue(astra._is_busy("w4"))
         self._write_signal("stop")
-        tg.process_signals()
-        self.assertFalse(tg._is_busy("w4"))
+        astra.process_signals()
+        self.assertFalse(astra._is_busy("w4"))
 
 
 class TestProcessSignalsCorruptedJson(unittest.TestCase):
     """Test signal processing with corrupted signal files."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_corrupt_sig"
+        self.signal_dir = "/tmp/astra_test_corrupt_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -4993,7 +4993,7 @@ class TestProcessSignalsCorruptedJson(unittest.TestCase):
         fpath = os.path.join(self.signal_dir, f"{time.time():.6f}_test.json")
         with open(fpath, "w") as f:
             f.write("{corrupt json{{")
-        tg.process_signals()  # should not raise
+        astra.process_signals()  # should not raise
         self.assertFalse(os.path.exists(fpath))
 
     def test_empty_json_file_removed(self):
@@ -5001,7 +5001,7 @@ class TestProcessSignalsCorruptedJson(unittest.TestCase):
         fpath = os.path.join(self.signal_dir, f"{time.time():.6f}_test.json")
         with open(fpath, "w") as f:
             f.write("")
-        tg.process_signals()
+        astra.process_signals()
         self.assertFalse(os.path.exists(fpath))
 
 
@@ -5009,20 +5009,20 @@ class TestProcessSignalNoPane(unittest.TestCase):
     """Test stop signal with empty pane."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_no_pane"
+        self.signal_dir = "/tmp/astra_test_no_pane"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("time.sleep")
     def test_stop_without_pane(self, mock_sleep, mock_send):
         """Stop signal with no pane sends fallback message."""
@@ -5030,7 +5030,7 @@ class TestProcessSignalNoPane(unittest.TestCase):
         fname = f"{time.time():.6f}_test.json"
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
-        tg.process_signals()
+        astra.process_signals()
         msg = mock_send.call_args[0][0]
         self.assertIn("could not capture pane", msg)
 
@@ -5039,25 +5039,25 @@ class TestProcessSignalsReturnValue(unittest.TestCase):
     """Test process_signals return value."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_sig_return"
+        self.signal_dir = "/tmp/astra_test_sig_return"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_no_signals_returns_none(self):
-        result = tg.process_signals()
+        result = astra.process_signals()
         self.assertIsNone(result)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● done\n❯"))
     @patch("time.sleep")
     def test_returns_last_wid(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -5065,12 +5065,12 @@ class TestProcessSignalsReturnValue(unittest.TestCase):
         fname = f"{time.time():.6f}_test.json"
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
-        result = tg.process_signals()
+        result = astra.process_signals()
         self.assertEqual(result, "7")
 
     def test_nonexistent_dir_returns_none(self):
-        tg.config.SIGNAL_DIR = "/tmp/tg_hook_nonexistent_xyz_123"
-        result = tg.process_signals()
+        astra.config.SIGNAL_DIR = "/tmp/astra_nonexistent_xyz_123"
+        result = astra.process_signals()
         self.assertIsNone(result)
 
 
@@ -5078,21 +5078,21 @@ class TestProcessSignalsMultiple(unittest.TestCase):
     """Test processing multiple signal files in order."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_multi_sig"
+        self.signal_dir = "/tmp/astra_test_multi_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● done\n❯"))
     @patch("time.sleep")
     def test_processes_all_signals(self, mock_sleep, mock_run, mock_proj, mock_send):
@@ -5102,7 +5102,7 @@ class TestProcessSignalsMultiple(unittest.TestCase):
             fname = f"1000000.{i:06d}_test.json"
             with open(os.path.join(self.signal_dir, fname), "w") as f:
                 json.dump(signal, f)
-        result = tg.process_signals()
+        result = astra.process_signals()
         self.assertEqual(result, "5")  # last wid
         # Both signals should be processed (2 tg_send calls)
         self.assertEqual(mock_send.call_count, 2)
@@ -5115,37 +5115,37 @@ class TestAutofocusState(unittest.TestCase):
     """Test autofocus state management."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_af_state"
+        self.signal_dir = "/tmp/astra_test_af_state"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_default_enabled(self):
-        self.assertTrue(tg._is_autofocus_enabled())
+        self.assertTrue(astra._is_autofocus_enabled())
 
     def test_disable(self):
-        tg._set_autofocus(False)
-        self.assertFalse(tg._is_autofocus_enabled())
+        astra._set_autofocus(False)
+        self.assertFalse(astra._is_autofocus_enabled())
 
     def test_reenable(self):
-        tg._set_autofocus(False)
-        tg._set_autofocus(True)
-        self.assertTrue(tg._is_autofocus_enabled())
+        astra._set_autofocus(False)
+        astra._set_autofocus(True)
+        self.assertTrue(astra._is_autofocus_enabled())
 
     def test_disabled_blocks_smartfocus(self):
         """When autofocus is off, _maybe_activate_smartfocus does nothing."""
-        tg._set_autofocus(False)
-        tg._maybe_activate_smartfocus("4", "0:4.0", "proj",
+        astra._set_autofocus(False)
+        astra._maybe_activate_smartfocus("4", "0:4.0", "proj",
                                       "📨 Sent to `w4`:\n`fix`")
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
 
 class TestAutofocusCommand(unittest.TestCase):
@@ -5153,80 +5153,80 @@ class TestAutofocusCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_af_cmd"
+        self.signal_dir = "/tmp/astra_test_af_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_toggle_off(self, mock_send):
         """Toggle from default on to off."""
-        tg._handle_command("/autofocus", self.sessions, None)
+        astra._handle_command("/autofocus", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("off", msg)
-        self.assertFalse(tg._is_autofocus_enabled())
+        self.assertFalse(astra._is_autofocus_enabled())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_toggle_on(self, mock_send):
         """Toggle from off to on."""
-        tg._set_autofocus(False)
-        tg._handle_command("/autofocus", self.sessions, None)
+        astra._set_autofocus(False)
+        astra._handle_command("/autofocus", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("on", msg)
-        self.assertTrue(tg._is_autofocus_enabled())
+        self.assertTrue(astra._is_autofocus_enabled())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_explicit_on(self, mock_send):
-        tg._set_autofocus(False)
-        tg._handle_command("/autofocus on", self.sessions, None)
+        astra._set_autofocus(False)
+        astra._handle_command("/autofocus on", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("on", msg)
-        self.assertTrue(tg._is_autofocus_enabled())
+        self.assertTrue(astra._is_autofocus_enabled())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_explicit_off(self, mock_send):
-        tg._handle_command("/autofocus off", self.sessions, None)
+        astra._handle_command("/autofocus off", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("off", msg)
-        self.assertFalse(tg._is_autofocus_enabled())
+        self.assertFalse(astra._is_autofocus_enabled())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_off_clears_smartfocus(self, mock_send):
         """Turning off autofocus clears any active smart focus."""
-        tg._save_smartfocus_state("4", "0:4.0", "proj")
-        tg._handle_command("/autofocus off", self.sessions, None)
-        self.assertIsNone(tg._load_smartfocus_state())
+        astra._save_smartfocus_state("4", "0:4.0", "proj")
+        astra._handle_command("/autofocus off", self.sessions, None)
+        self.assertIsNone(astra._load_smartfocus_state())
 
     def test_af_alias(self):
-        self.assertEqual(tg._resolve_alias("af", False), "/autofocus")
+        self.assertEqual(astra._resolve_alias("af", False), "/autofocus")
 
     def test_af_alias_suppressed_during_prompt(self):
-        self.assertEqual(tg._resolve_alias("af", True), "af")
+        self.assertEqual(astra._resolve_alias("af", True), "af")
 
 
 class TestEnableAcceptEditsEdgeCases(unittest.TestCase):
     """Test _enable_accept_edits edge cases."""
 
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "_capture_pane", side_effect=Exception("tmux error"))
+    @patch.object(astra.tmux, "_capture_pane", side_effect=Exception("tmux error"))
     def test_capture_exception_returns(self, mock_cap, mock_run):
         """Exception during capture_pane returns without error."""
-        tg._enable_accept_edits("0:4.0")
+        astra._enable_accept_edits("0:4.0")
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "_capture_pane", return_value="no mode indicator here")
+    @patch.object(astra.tmux, "_capture_pane", return_value="no mode indicator here")
     def test_no_mode_line_sends_btab(self, mock_cap, mock_run):
         """No ⏵⏵ line found → sends BTab."""
-        tg._enable_accept_edits("0:4.0")
+        astra._enable_accept_edits("0:4.0")
         self.assertEqual(mock_run.call_count, 5)  # max cycles
 
 
@@ -5234,16 +5234,16 @@ class TestPermissionContextInMessage(unittest.TestCase):
     """Test that response context appears in permission messages."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_perm_ctx"
+        self.signal_dir = "/tmp/astra_test_perm_ctx"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5253,15 +5253,15 @@ class TestPermissionContextInMessage(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("wants to run bash", "", ["1. Yes", "2. No"], "I'll run git status to check"))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.state, "save_active_prompt")
     def test_context_in_bash_permission(self, mock_save, mock_extract, mock_proj, mock_send):
         """Response context appears in bash permission message."""
         self._write_signal("permission", cmd="git status")
-        tg.process_signals()
+        astra.process_signals()
         msg = mock_send.call_args[0][0]
         self.assertIn("I'll run git status to check", msg)
         self.assertIn("git status", msg)
@@ -5271,24 +5271,24 @@ class TestQueuedMessagesPersistence(unittest.TestCase):
     """Test queued messages survive _clear_signals(include_state=True)."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_queued_persist"
+        self.signal_dir = "/tmp/astra_test_queued_persist"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_survives_clear_signals_with_state(self):
         """Queued messages persist through _clear_signals(include_state=True)."""
-        tg._save_queued_msg("w4", "important message")
-        tg._clear_signals(include_state=True)
-        msgs = tg._load_queued_msgs("w4")
+        astra._save_queued_msg("w4", "important message")
+        astra._clear_signals(include_state=True)
+        msgs = astra._load_queued_msgs("w4")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["text"], "important message")
 
@@ -5297,16 +5297,16 @@ class TestStopSignalQueuedMessages(unittest.TestCase):
     """Test stop signal shows queued message notification."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_stop_queue"
+        self.signal_dir = "/tmp/astra_test_stop_queue"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5316,15 +5316,15 @@ class TestStopSignalQueuedMessages(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
     @patch("time.sleep")
     def test_stop_shows_queued_messages(self, mock_sleep, mock_run, mock_proj, mock_send):
         """Stop signal with queued messages shows notification."""
-        tg._save_queued_msg("w4", "pending msg")
+        astra._save_queued_msg("w4", "pending msg")
         self._write_signal("stop")
-        tg.process_signals()
+        astra.process_signals()
         # Should have 2 tg_send calls: stop message + queued notification
         self.assertEqual(mock_send.call_count, 2)
         queued_msg = mock_send.call_args_list[1][0][0]
@@ -5336,16 +5336,16 @@ class TestGodModeFocusedWidsInteraction(unittest.TestCase):
     """Test god mode works correctly with focused_wids suppression."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_god_focus"
+        self.signal_dir = "/tmp/astra_test_god_focus"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5355,16 +5355,16 @@ class TestGodModeFocusedWidsInteraction(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("", "", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_permission_auto_accepted_while_focused(self, mock_send, mock_proj, mock_extract, mock_select):
         """Permission auto-accepted even when stop signals would be suppressed by focus."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         self._write_signal("permission", cmd="git status")
-        tg.process_signals(focused_wids={"4"})
+        astra.process_signals(focused_wids={"4"})
         mock_select.assert_called_once_with("%20", 1)
         msg = mock_send.call_args[0][0]
         self.assertIn("Auto-allowed", msg)
@@ -5375,30 +5375,30 @@ class TestSavedCommandByName(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_saved_name"
+        self.signal_dir = "/tmp/astra_test_saved_name"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        tg._save_session_name("4", "auth")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        astra._save_session_name("4", "auth")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_by_name(self, mock_send):
-        tg._save_queued_msg("w4", "queued msg")
-        tg._handle_command("/saved auth", self.sessions, None)
+        astra._save_queued_msg("w4", "queued msg")
+        astra._handle_command("/saved auth", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("queued msg", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_saved_nonexistent_name(self, mock_send):
-        tg._handle_command("/saved nonexistent", self.sessions, None)
+        astra._handle_command("/saved nonexistent", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
@@ -5409,18 +5409,18 @@ class TestStatusCommand(unittest.TestCase):
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
     def test_status_with_explicit_lines(self, mock_run, mock_send):
         """Status with explicit line count uses that count."""
         mock_run.return_value = MagicMock(stdout="line1\nline2\nline3\n❯ prompt")
-        tg._handle_command("/status w4 5", self.sessions, None)
+        astra._handle_command("/status w4 5", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("`myproj`", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_status_nonexistent_session(self, mock_send):
-        tg._handle_command("/status w99", self.sessions, None)
+        astra._handle_command("/status w99", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
@@ -5428,26 +5428,26 @@ class TestStatusCommand(unittest.TestCase):
 class TestSendLongMessageWithFooter(unittest.TestCase):
     """Test _send_long_message footer parameter."""
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_footer_appended(self, mock_send):
-        tg._send_long_message("H:\n", "body", wid="4", footer="1. Yes\n2. No")
+        astra._send_long_message("H:\n", "body", wid="4", footer="1. Yes\n2. No")
         msg = mock_send.call_args[0][0]
         self.assertIn("```", msg)
         self.assertIn("1. Yes", msg)
         self.assertIn("2. No", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_no_footer(self, mock_send):
-        tg._send_long_message("H:\n", "body", wid="4")
+        astra._send_long_message("H:\n", "body", wid="4")
         msg = mock_send.call_args[0][0]
         self.assertTrue(msg.endswith("```"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_chunked_footer_on_last(self, mock_send):
         """Footer only appears after the last chunk."""
         line = "x" * 79 + "\n"
         body = line * 100
-        tg._send_long_message("H:\n", body, wid="4", footer="opts")
+        astra._send_long_message("H:\n", body, wid="4", footer="opts")
         last_msg = mock_send.call_args_list[-1][0][0]
         self.assertIn("opts", last_msg)
         # Earlier chunks should not have footer
@@ -5459,16 +5459,16 @@ class TestClearSignalsPreservation(unittest.TestCase):
     """Test _clear_signals preserves the right files."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_clear_sig"
+        self.signal_dir = "/tmp/astra_test_clear_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5484,7 +5484,7 @@ class TestClearSignalsPreservation(unittest.TestCase):
         for fname in ["_focus.json", "_busy_w4.json", "_active_prompt_w4.json"]:
             with open(os.path.join(self.signal_dir, fname), "w") as f:
                 json.dump({}, f)
-        tg._clear_signals(include_state=True)
+        astra._clear_signals(include_state=True)
         # Preserved
         self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_queued_w4.json")))
         self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_names.json")))
@@ -5501,7 +5501,7 @@ class TestClearSignalsPreservation(unittest.TestCase):
         # Regular signal
         with open(os.path.join(self.signal_dir, "123.json"), "w") as f:
             json.dump({}, f)
-        tg._clear_signals(include_state=False)
+        astra._clear_signals(include_state=False)
         self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_focus.json")))
         self.assertTrue(os.path.exists(os.path.join(self.signal_dir, "_busy_w4.json")))
         self.assertFalse(os.path.exists(os.path.join(self.signal_dir, "123.json")))
@@ -5511,41 +5511,41 @@ class TestWidLabel(unittest.TestCase):
     """Test _wid_label formatting."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_wid_label"
+        self.signal_dir = "/tmp/astra_test_wid_label"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_unnamed(self):
-        self.assertEqual(tg._wid_label("4"), "`w4`")
+        self.assertEqual(astra._wid_label("4"), "`w4`")
 
     def test_named(self):
-        tg._save_session_name("4", "auth")
-        self.assertEqual(tg._wid_label("4"), "`w4 [auth]`")
+        astra._save_session_name("4", "auth")
+        self.assertEqual(astra._wid_label("4"), "`w4 [auth]`")
 
 
 class TestGodModeAutoAcceptNonBash(unittest.TestCase):
     """Test god mode auto-accept for non-bash permissions (edit, write)."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_god_nonbash"
+        self.signal_dir = "/tmp/astra_test_god_nonbash"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5555,16 +5555,16 @@ class TestGodModeAutoAcceptNonBash(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.routing, "_select_option")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.routing, "_select_option")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("wants to update `file.py`", "+new=True", ["1. Yes", "2. No"], ""))
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_edit_auto_accepted(self, mock_send, mock_proj, mock_extract, mock_select):
         """Non-bash edit permission auto-accepted in god mode."""
-        tg._set_god_mode("4", True)
+        astra._set_god_mode("4", True)
         self._write_signal("permission", cmd="")
-        tg.process_signals()
+        astra.process_signals()
         mock_select.assert_called_once_with("%20", 1)
         msg = mock_send.call_args[0][0]
         self.assertIn("Auto-allowed", msg)
@@ -5575,16 +5575,16 @@ class TestPermissionOptionsFirstOptionInjection(unittest.TestCase):
     """Test that '1. Yes' is injected when options don't start with it."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_opt_inject"
+        self.signal_dir = "/tmp/astra_test_opt_inject"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5594,15 +5594,15 @@ class TestPermissionOptionsFirstOptionInjection(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
-    @patch.object(tg.content, "_extract_pane_permission",
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
                   return_value=("", "", ["2. Yes, always", "3. No (esc)"], ""))
-    @patch.object(tg.state, "save_active_prompt")
+    @patch.object(astra.state, "save_active_prompt")
     def test_injects_yes_option(self, mock_save, mock_extract, mock_proj, mock_send):
         """When options don't start with 1., inject '1. Yes'."""
         self._write_signal("permission", cmd="echo test")
-        tg.process_signals()
+        astra.process_signals()
         msg = mock_send.call_args[0][0]
         self.assertIn("1. Yes", msg)
 
@@ -5611,16 +5611,16 @@ class TestRouteToPane_PromptPaneOverride(unittest.TestCase):
     """Test that active prompt uses prompt's pane, not routing pane."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_prompt_pane"
+        self.signal_dir = "/tmp/astra_test_prompt_pane"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -5629,8 +5629,8 @@ class TestRouteToPane_PromptPaneOverride(unittest.TestCase):
         """When prompt has a pane, use it for selection, not the routing pane."""
         prompt = {"pane": "%99", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            tg.route_to_pane("0:4.0", "4", "y")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            astra.route_to_pane("0:4.0", "4", "y")
         cmd_str = mock_run.call_args[0][0][2]
         self.assertIn("%99", cmd_str)
         self.assertNotIn("0:4.0", cmd_str)
@@ -5640,27 +5640,27 @@ class TestRouteToPane_StalePromptDiscarded(unittest.TestCase):
     """Test that prompts with stale session:window.pane references are discarded."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_stale_prompt"
+        self.signal_dir = "/tmp/astra_test_stale_prompt"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     @patch("subprocess.run")
-    @patch.object(tg.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     def test_stale_session_pane_discarded(self, mock_idle, mock_run):
         """Prompt with old session name (0:4.0) is discarded when current is main:4.0."""
         prompt = {"pane": "0:4.0", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane("main:4.0", "4", "hello")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane("main:4.0", "4", "hello")
         # Message should be sent normally, not treated as prompt answer
         self.assertIn("Sent to", result)
 
@@ -5669,8 +5669,8 @@ class TestRouteToPane_StalePromptDiscarded(unittest.TestCase):
         """Prompt with matching session:window.pane is used normally."""
         prompt = {"pane": "main:4.0", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane("main:4.0", "4", "y")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane("main:4.0", "4", "y")
         self.assertIn("Selected option", result)
 
     @patch("subprocess.run")
@@ -5678,8 +5678,8 @@ class TestRouteToPane_StalePromptDiscarded(unittest.TestCase):
         """Prompt with %N pane ID format is always used (no colon = not stale)."""
         prompt = {"pane": "%20", "total": 3, "ts": 0,
                   "shortcuts": {"y": 1, "n": 3}}
-        with patch.object(tg.state, "load_active_prompt", return_value=prompt):
-            result = tg.route_to_pane("main:4.0", "4", "y")
+        with patch.object(astra.state, "load_active_prompt", return_value=prompt):
+            result = astra.route_to_pane("main:4.0", "4", "y")
         self.assertIn("Selected option", result)
 
 
@@ -5687,27 +5687,27 @@ class TestBusySince(unittest.TestCase):
     """Test _busy_since timestamp retrieval."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_busy_since"
+        self.signal_dir = "/tmp/astra_test_busy_since"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_returns_none_when_not_busy(self):
-        self.assertIsNone(tg._busy_since("w99"))
+        self.assertIsNone(astra._busy_since("w99"))
 
     def test_returns_timestamp(self):
         before = time.time()
-        tg._mark_busy("w4")
+        astra._mark_busy("w4")
         after = time.time()
-        ts = tg._busy_since("w4")
+        ts = astra._busy_since("w4")
         self.assertIsNotNone(ts)
         self.assertGreaterEqual(ts, before)
         self.assertLessEqual(ts, after)
@@ -5718,37 +5718,37 @@ class TestSavedCallbackEdgeCases(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_saved_edge"
+        self.signal_dir = "/tmp/astra_test_saved_edge"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_send_empty_queue(self, mock_send, mock_answer, mock_remove):
         """saved_send with empty queue shows message."""
         callback = {"id": "cb1", "data": "saved_send_w4", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)
+        astra._handle_callback(callback, self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("No saved messages to send", msg)
 
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_send_dead_session(self, mock_send, mock_answer, mock_remove):
         """saved_send for session no longer in sessions shows warning."""
-        tg._save_queued_msg("w5", "msg")
+        astra._save_queued_msg("w5", "msg")
         callback = {"id": "cb1", "data": "saved_send_w5", "message_id": 42}
-        tg._handle_callback(callback, self.sessions, None)  # w5 not in sessions
+        astra._handle_callback(callback, self.sessions, None)  # w5 not in sessions
         msg = mock_send.call_args[0][0]
         self.assertIn("no longer active", msg)
 
@@ -5761,7 +5761,7 @@ class TestFormatQuestionMsg(unittest.TestCase):
             {"label": "A", "description": "first"},
             {"label": "B", "description": "second"},
         ]}
-        msg = tg._format_question_msg(" `w4`", "myproj", q)
+        msg = astra._format_question_msg(" `w4`", "myproj", q)
         self.assertIn("Which one?", msg)
         self.assertIn("1. A — first", msg)
         self.assertIn("2. B — second", msg)
@@ -5772,13 +5772,13 @@ class TestFormatQuestionMsg(unittest.TestCase):
         q = {"question": "Pick?", "options": [
             {"label": "X"},
         ]}
-        msg = tg._format_question_msg("", "proj", q)
+        msg = astra._format_question_msg("", "proj", q)
         self.assertIn("1. X", msg)
         self.assertNotIn("—", msg)
 
     def test_project_in_backticks(self):
         q = {"question": "Q?", "options": []}
-        msg = tg._format_question_msg("", "my_proj", q)
+        msg = astra._format_question_msg("", "my_proj", q)
         self.assertIn("`my_proj`", msg)
 
 
@@ -5787,14 +5787,14 @@ class TestSelectOption(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_option_1_no_down(self, mock_run):
-        tg._select_option("0:4.0", 1)
+        astra._select_option("0:4.0", 1)
         cmd = mock_run.call_args[0][0][2]
         self.assertNotIn("Down", cmd)
         self.assertIn("Enter", cmd)
 
     @patch("subprocess.run")
     def test_option_3_two_downs(self, mock_run):
-        tg._select_option("0:4.0", 3)
+        astra._select_option("0:4.0", 3)
         cmd = mock_run.call_args[0][0][2]
         self.assertEqual(cmd.count("Down"), 2)
         self.assertIn("sleep 0.1", cmd)
@@ -5806,17 +5806,17 @@ class TestCleanPaneStatus(unittest.TestCase):
 
     def test_keeps_working_indicator(self):
         raw = "● Working\n⏳ Working...\n❯ prompt"
-        result = tg.clean_pane_status(raw)
+        result = astra.clean_pane_status(raw)
         self.assertIn("Working...", result)
 
     def test_keeps_thinking_timing(self):
         raw = "● Task\n* Percolating… (1m 14s · ↓ 1.8k tokens)\n❯ prompt"
-        result = tg.clean_pane_status(raw)
+        result = astra.clean_pane_status(raw)
         self.assertIn("Percolating", result)
 
     def test_still_filters_separator(self):
         raw = "● Task\n────────────\n❯ prompt"
-        result = tg.clean_pane_status(raw)
+        result = astra.clean_pane_status(raw)
         self.assertNotIn("────", result)
 
 
@@ -5825,36 +5825,36 @@ class TestGodModeGodOffByName(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_god_off_name"
+        self.signal_dir = "/tmp/astra_test_god_off_name"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
-        tg._save_session_name("4", "auth")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        astra._save_session_name("4", "auth")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_off_by_name(self, mock_send, mock_scan):
-        tg._set_god_mode("4", True)
-        tg._handle_command("/god off auth", self.sessions, None)
-        self.assertFalse(tg._is_god_mode_for("4"))
+        astra._set_god_mode("4", True)
+        astra._handle_command("/god off auth", self.sessions, None)
+        self.assertFalse(astra._is_god_mode_for("4"))
         msg = mock_send.call_args[0][0]
         self.assertIn("off", msg)
 
-    @patch.object(tg.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions", return_value={"4": ("0:4.0", "myproj")})
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_god_by_name(self, mock_send, mock_scan):
         """Enable god mode using session name."""
-        with patch.object(tg.routing, "_pane_idle_state", return_value=(False, "")):
-            tg._handle_command("/god auth", self.sessions, None)
-        self.assertTrue(tg._is_god_mode_for("4"))
+        with patch.object(astra.routing, "_pane_idle_state", return_value=(False, "")):
+            astra._handle_command("/god auth", self.sessions, None)
+        self.assertTrue(astra._is_god_mode_for("4"))
         msg = mock_send.call_args[0][0]
         self.assertIn("on", msg)
 
@@ -5868,43 +5868,43 @@ class TestPollUpdates(unittest.TestCase):
         resp.json.return_value = {"result": [{"update_id": 100}]}
         resp.raise_for_status = MagicMock()
         mock_get.return_value = resp
-        data, offset = tg._poll_updates(0, timeout=1)
+        data, offset = astra._poll_updates(0, timeout=1)
         self.assertIsNotNone(data)
         self.assertEqual(offset, 101)
 
     @patch("requests.get", side_effect=Exception("network error"))
     def test_error_returns_none(self, mock_get):
-        data, offset = tg._poll_updates(50, timeout=1)
+        data, offset = astra._poll_updates(50, timeout=1)
         self.assertIsNone(data)
         self.assertEqual(offset, 50)
 
     @patch("requests.get", side_effect=KeyboardInterrupt)
     def test_keyboard_interrupt_propagates(self, mock_get):
         with self.assertRaises(KeyboardInterrupt):
-            tg._poll_updates(0, timeout=1)
+            astra._poll_updates(0, timeout=1)
 
 
 class TestWriteSignal(unittest.TestCase):
     """Test write_signal creates correct signal files."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_write_sig"
+        self.signal_dir = "/tmp/astra_test_write_sig"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
     def test_creates_signal_file(self, mock_wid):
         os.environ["TMUX_PANE"] = "%20"
-        tg.write_signal("stop", {"cwd": "/home/user/myproj"})
+        astra.write_signal("stop", {"cwd": "/home/user/myproj"})
         files = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         self.assertEqual(len(files), 1)
         with open(os.path.join(self.signal_dir, files[0])) as f:
@@ -5914,10 +5914,10 @@ class TestWriteSignal(unittest.TestCase):
         self.assertEqual(sig["pane"], "%20")
         self.assertEqual(sig["project"], "myproj")
 
-    @patch.object(tg.tmux, "get_window_id", return_value="w4")
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
     def test_extra_fields(self, mock_wid):
         os.environ["TMUX_PANE"] = "%20"
-        tg.write_signal("permission", {"cwd": "/tmp/p"}, cmd="echo hi")
+        astra.write_signal("permission", {"cwd": "/tmp/p"}, cmd="echo hi")
         files = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
         with open(os.path.join(self.signal_dir, files[0])) as f:
             sig = json.load(f)
@@ -5927,27 +5927,27 @@ class TestWriteSignal(unittest.TestCase):
 class TestPaneIdleStateChromeOrder(unittest.TestCase):
     """Test _pane_idle_state with various chrome patterns below prompt."""
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_above_context_line(self, mock_capture):
         """Prompt above 'Context left until...' line is idle."""
         mock_capture.return_value = (
             "❯ \n"
             "Context left until auto-compact: 33%\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_above_more_lines(self, mock_capture):
         """Prompt above '+N more lines' indicator is idle."""
         mock_capture.return_value = (
             "❯ \n"
             "+12 more lines (ctrl+e to expand)\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_above_status_bar(self, mock_capture):
         """Prompt above separator + status bar (esc to interrupt) is idle."""
         mock_capture.return_value = (
@@ -5955,10 +5955,10 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
             "─────────────────────────────────────────\n"
             "  1 file +2 -2 · esc to interrupt\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
 
-    @patch.object(tg.tmux, "_capture_pane")
+    @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_above_status_bar_no_interrupt(self, mock_capture):
         """Prompt above separator + file count status bar is idle."""
         mock_capture.return_value = (
@@ -5966,7 +5966,7 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
             "─────────────────────────────────────────\n"
             "  3 files +50 -10\n"
         )
-        is_idle, typed = tg._pane_idle_state("0:4.0")
+        is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
 
 
@@ -5985,7 +5985,7 @@ class TestGetImageDimensions(unittest.TestCase):
             f.write(sig + ihdr)
             path = f.name
         try:
-            w, h = tg._get_image_dimensions(path)
+            w, h = astra._get_image_dimensions(path)
             self.assertEqual((w, h), (1920, 1080))
         finally:
             os.remove(path)
@@ -5998,7 +5998,7 @@ class TestGetImageDimensions(unittest.TestCase):
             f.write(header)
             path = f.name
         try:
-            w, h = tg._get_image_dimensions(path)
+            w, h = astra._get_image_dimensions(path)
             self.assertEqual((w, h), (800, 600))
         finally:
             os.remove(path)
@@ -6015,7 +6015,7 @@ class TestGetImageDimensions(unittest.TestCase):
             f.write(jpeg)
             path = f.name
         try:
-            w, h = tg._get_image_dimensions(path)
+            w, h = astra._get_image_dimensions(path)
             self.assertEqual((w, h), (3072, 2048))
         finally:
             os.remove(path)
@@ -6027,14 +6027,14 @@ class TestGetImageDimensions(unittest.TestCase):
             f.write(b"just some text")
             path = f.name
         try:
-            w, h = tg._get_image_dimensions(path)
+            w, h = astra._get_image_dimensions(path)
             self.assertEqual((w, h), (0, 0))
         finally:
             os.remove(path)
 
     def test_missing_file(self):
         """Missing file returns (0, 0)."""
-        w, h = tg._get_image_dimensions("/nonexistent/file.png")
+        w, h = astra._get_image_dimensions("/nonexistent/file.png")
         self.assertEqual((w, h), (0, 0))
 
 
@@ -6055,7 +6055,7 @@ class TestTgSendDocument(unittest.TestCase):
             path = f.name
 
         try:
-            msg_id = tg.tg_send_document(path, "test doc")
+            msg_id = astra.tg_send_document(path, "test doc")
             self.assertEqual(msg_id, 50)
             call_kwargs = mock_post.call_args
             self.assertIn("sendDocument", call_kwargs[0][0])
@@ -6079,7 +6079,7 @@ class TestTgSendDocument(unittest.TestCase):
             path = f.name
 
         try:
-            tg.tg_send_document(path)
+            astra.tg_send_document(path)
             call_kwargs = mock_post.call_args
             self.assertNotIn("caption", call_kwargs[1]["data"])
             self.assertNotIn("parse_mode", call_kwargs[1]["data"])
@@ -6105,7 +6105,7 @@ class TestTgSendDocument(unittest.TestCase):
             path = f.name
 
         try:
-            msg_id = tg.tg_send_document(path, "bad_markdown")
+            msg_id = astra.tg_send_document(path, "bad_markdown")
             self.assertEqual(msg_id, 52)
             second_call = mock_post.call_args_list[1]
             self.assertNotIn("parse_mode", second_call[1]["data"])
@@ -6116,16 +6116,16 @@ class TestTgSendDocument(unittest.TestCase):
 class TestTgSendPhotoAutoDetect(unittest.TestCase):
     """Test tg_send_photo auto-detects large images and routes to sendDocument."""
 
-    @patch.object(tg.telegram, "tg_send_document", return_value=60)
-    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(1920, 1080))
+    @patch.object(astra.telegram, "tg_send_document", return_value=60)
+    @patch.object(astra.telegram, "_get_image_dimensions", return_value=(1920, 1080))
     def test_large_image_delegates_to_document(self, mock_dims, mock_doc):
         """Image >1280px delegates to tg_send_document."""
-        msg_id = tg.tg_send_photo("/fake/large.png", "hi")
+        msg_id = astra.tg_send_photo("/fake/large.png", "hi")
         self.assertEqual(msg_id, 60)
         mock_doc.assert_called_once_with("/fake/large.png", "hi", "")
 
     @patch("requests.post")
-    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(800, 600))
+    @patch.object(astra.telegram, "_get_image_dimensions", return_value=(800, 600))
     def test_small_image_uses_send_photo(self, mock_dims, mock_post):
         """Image <=1280px uses sendPhoto as before."""
         resp = MagicMock()
@@ -6140,14 +6140,14 @@ class TestTgSendPhotoAutoDetect(unittest.TestCase):
             path = f.name
 
         try:
-            msg_id = tg.tg_send_photo(path)
+            msg_id = astra.tg_send_photo(path)
             self.assertEqual(msg_id, 61)
             self.assertIn("sendPhoto", mock_post.call_args[0][0])
         finally:
             os.remove(path)
 
     @patch("requests.post")
-    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(0, 0))
+    @patch.object(astra.telegram, "_get_image_dimensions", return_value=(0, 0))
     def test_dimension_failure_uses_send_photo(self, mock_dims, mock_post):
         """Dimension check failure (0, 0) falls through to sendPhoto."""
         resp = MagicMock()
@@ -6162,7 +6162,7 @@ class TestTgSendPhotoAutoDetect(unittest.TestCase):
             path = f.name
 
         try:
-            msg_id = tg.tg_send_photo(path)
+            msg_id = astra.tg_send_photo(path)
             self.assertEqual(msg_id, 62)
             self.assertIn("sendPhoto", mock_post.call_args[0][0])
         finally:
@@ -6172,7 +6172,7 @@ class TestTgSendPhotoAutoDetect(unittest.TestCase):
 class TestCmdSendDoc(unittest.TestCase):
     """Test cmd_send_doc CLI command."""
 
-    @patch.object(tg.telegram, "tg_send_document")
+    @patch.object(astra.telegram, "tg_send_document")
     def test_send_doc_success(self, mock_doc):
         """Existing file sends document."""
         import tempfile
@@ -6180,7 +6180,7 @@ class TestCmdSendDoc(unittest.TestCase):
             f.write(b"data")
             path = f.name
         try:
-            tg.cmd_send_doc(path, "caption")
+            astra.cmd_send_doc(path, "caption")
             mock_doc.assert_called_once_with(path, "caption")
         finally:
             os.remove(path)
@@ -6188,7 +6188,7 @@ class TestCmdSendDoc(unittest.TestCase):
     def test_send_doc_file_not_found(self):
         """Missing file exits with error."""
         with self.assertRaises(SystemExit) as ctx:
-            tg.cmd_send_doc("/nonexistent/file.pdf")
+            astra.cmd_send_doc("/nonexistent/file.pdf")
         self.assertEqual(ctx.exception.code, 1)
 
 
@@ -6196,7 +6196,7 @@ class TestTgSendPhotoMimeType(unittest.TestCase):
     """Test tg_send_photo uses correct MIME type for non-PNG images."""
 
     @patch("requests.post")
-    @patch.object(tg.telegram, "_get_image_dimensions", return_value=(640, 480))
+    @patch.object(astra.telegram, "_get_image_dimensions", return_value=(640, 480))
     def test_jpeg_mime_type(self, mock_dims, mock_post):
         """JPEG file gets image/jpeg MIME type."""
         resp = MagicMock()
@@ -6211,7 +6211,7 @@ class TestTgSendPhotoMimeType(unittest.TestCase):
             path = f.name
 
         try:
-            tg.tg_send_photo(path)
+            astra.tg_send_photo(path)
             files_arg = mock_post.call_args[1]["files"]
             mime = files_arg["photo"][2]
             self.assertEqual(mime, "image/jpeg")
@@ -6233,7 +6233,7 @@ class TestDetectInterrupted(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertTrue(tg._detect_interrupted(raw))
+        self.assertTrue(astra._detect_interrupted(raw))
 
     def test_interrupted_mid_response(self):
         """Detects interrupted state during normal response."""
@@ -6243,7 +6243,7 @@ class TestDetectInterrupted(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertTrue(tg._detect_interrupted(raw))
+        self.assertTrue(astra._detect_interrupted(raw))
 
     def test_normal_completion_not_interrupted(self):
         """Normal completion is not detected as interrupted."""
@@ -6252,7 +6252,7 @@ class TestDetectInterrupted(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertFalse(tg._detect_interrupted(raw))
+        self.assertFalse(astra._detect_interrupted(raw))
 
     def test_word_interrupted_in_response(self):
         """The word 'interrupted' in normal text without · is not a match."""
@@ -6261,7 +6261,7 @@ class TestDetectInterrupted(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertFalse(tg._detect_interrupted(raw))
+        self.assertFalse(astra._detect_interrupted(raw))
 
     def test_busy_pane_not_interrupted(self):
         """Pane without ❯ prompt is not interrupted."""
@@ -6272,7 +6272,7 @@ class TestDetectInterrupted(unittest.TestCase):
         )
         # No ❯ prompt at the end — end stays at len(lines),
         # so the lines-before-end check won't match
-        self.assertFalse(tg._detect_interrupted(raw))
+        self.assertFalse(astra._detect_interrupted(raw))
 
     def test_old_interrupt_not_detected(self):
         """Interrupt marker from earlier in history (not near last ❯) is ignored."""
@@ -6288,23 +6288,23 @@ class TestDetectInterrupted(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertFalse(tg._detect_interrupted(raw))
+        self.assertFalse(astra._detect_interrupted(raw))
 
 
 class TestSmartfocusColdStart(unittest.TestCase):
     """Test stop message includes full content when smartfocus never sent a 👁 update."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_sf_cold"
+        self.signal_dir = "/tmp/astra_test_sf_cold"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
@@ -6314,77 +6314,77 @@ class TestSmartfocusColdStart(unittest.TestCase):
         with open(os.path.join(self.signal_dir, fname), "w") as f:
             json.dump(signal, f)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  the full response\n❯ prompt"))
     @patch("time.sleep")
     def test_no_prev_lines_sends_full_content(self, mock_sleep, mock_run, mock_proj,
                                                mock_kb, mock_long, mock_send):
         """Smartfocus stop with no prev_lines (very fast) sends full content."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         # smartfocus_prev is empty (no iterations captured), smartfocus_has_sent=False
-        tg.process_signals(smartfocus_prev=[], smartfocus_has_sent=False)
+        astra.process_signals(smartfocus_prev=[], smartfocus_has_sent=False)
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
         self.assertIn("finished", header)
         body = mock_long.call_args[0][1]
         self.assertIn("the full response", body)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
     def test_prev_matches_but_never_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
                                                      mock_kb, mock_long, mock_send):
         """Smartfocus stop: prev matches all content, never sent 👁 → send full response."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         # prev_lines matches entire cleaned content — diff is empty
         prev = ["Answer", "  line1"]
-        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
+        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
         # Full content should be sent via _send_long_message
         mock_long.assert_called_once()
         body = mock_long.call_args[0][1]
         self.assertIn("line1", body)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
     def test_prev_matches_already_sent_sends_short(self, mock_sleep, mock_run, mock_proj,
                                                     mock_kb, mock_long, mock_send):
         """Smartfocus stop: prev matches all content, already sent 👁 → short 'finished'."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         prev = ["Answer", "  line1"]
-        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
+        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
         # Only short notification, no long message
         mock_long.assert_not_called()
         calls = [c[0][0] for c in mock_send.call_args_list]
         self.assertTrue(any("finished" in c for c in calls))
 
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.telegram, "_send_long_message")
-    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
-    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Here is my analysis of the images:\n  Image 1 shows a dog.\n  Image 2 shows a cat.\n❯ prompt"))
     @patch("time.sleep")
     def test_prev_noise_already_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
                                                  mock_kb, mock_long, mock_send):
         """Smartfocus stop: prev is noise (old response), already sent 👁 → send full response."""
-        tg.state._save_smartfocus_state("4", "%20", "proj")
+        astra.state._save_smartfocus_state("4", "%20", "proj")
         self._write_signal("stop")
         # prev_lines is completely different noise (old response content)
         prev = ["● Old response from previous task", "  completely unrelated content"]
-        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
+        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
         # Content differs significantly — should send full response
         mock_long.assert_called_once()
         body = mock_long.call_args[0][1]
@@ -6395,91 +6395,91 @@ class TestPhotoAutofocus(unittest.TestCase):
     """Test photo handler activates smartfocus and respects busy state."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_photo_af"
+        self.signal_dir = "/tmp/astra_test_photo_af"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        self._orig_god_mode_path = tg.config.GOD_MODE_PATH
-        tg.config.SIGNAL_DIR = self.signal_dir
-        tg.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_photo_confirm_activates_smartfocus(self):
         """Photo confirm message triggers smartfocus activation."""
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "📷 Photo sent to `w4` (`myproj`):\n`/tmp/photo.jpg`")
-        st = tg._load_smartfocus_state()
+        st = astra._load_smartfocus_state()
         self.assertIsNotNone(st)
         self.assertEqual(st["wid"], "4")
 
     def test_photo_saved_does_not_activate(self):
         """Busy photo (saved) does NOT trigger smartfocus."""
-        tg._maybe_activate_smartfocus("4", "0:4.0", "myproj",
+        astra._maybe_activate_smartfocus("4", "0:4.0", "myproj",
                                       "💾 Photo saved for `w4` (busy):\n`/tmp/photo.jpg`")
-        self.assertIsNone(tg._load_smartfocus_state())
+        self.assertIsNone(astra._load_smartfocus_state())
 
 
 class TestNotificationConfig(unittest.TestCase):
     """Test notification config persistence and _is_silent."""
 
     def setUp(self):
-        self.signal_dir = "/tmp/tg_hook_test_noti"
+        self.signal_dir = "/tmp/astra_test_noti"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        tg.config.SIGNAL_DIR = self.signal_dir
-        self._orig_noti_path = tg.state.NOTIFICATION_CONFIG_PATH
-        tg.state.NOTIFICATION_CONFIG_PATH = os.path.join(self.signal_dir, "_noti.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        astra.config.SIGNAL_DIR = self.signal_dir
+        self._orig_noti_path = astra.state.NOTIFICATION_CONFIG_PATH
+        astra.state.NOTIFICATION_CONFIG_PATH = os.path.join(self.signal_dir, "_noti.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.state.NOTIFICATION_CONFIG_PATH = self._orig_noti_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.state.NOTIFICATION_CONFIG_PATH = self._orig_noti_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
     def test_default_loud_set(self):
         """Default loud categories are 1 (permission) and 2 (stop)."""
-        loud = tg._load_notification_config()
+        loud = astra._load_notification_config()
         self.assertEqual(loud, {1, 2})
 
     def test_is_silent_default(self):
         """Permission/stop are loud by default, others are silent."""
-        self.assertFalse(tg._is_silent(1))  # permission = loud
-        self.assertFalse(tg._is_silent(2))  # stop = loud
-        self.assertTrue(tg._is_silent(3))   # question = silent
-        self.assertTrue(tg._is_silent(4))   # error = silent
-        self.assertTrue(tg._is_silent(5))   # interrupt = silent
-        self.assertTrue(tg._is_silent(6))   # monitor = silent
-        self.assertTrue(tg._is_silent(7))   # confirm = silent
+        self.assertFalse(astra._is_silent(1))  # permission = loud
+        self.assertFalse(astra._is_silent(2))  # stop = loud
+        self.assertTrue(astra._is_silent(3))   # question = silent
+        self.assertTrue(astra._is_silent(4))   # error = silent
+        self.assertTrue(astra._is_silent(5))   # interrupt = silent
+        self.assertTrue(astra._is_silent(6))   # monitor = silent
+        self.assertTrue(astra._is_silent(7))   # confirm = silent
 
     def test_save_and_load(self):
         """Save/load round-trips correctly."""
-        tg._save_notification_config({1, 3, 5})
-        loud = tg._load_notification_config()
+        astra._save_notification_config({1, 3, 5})
+        loud = astra._load_notification_config()
         self.assertEqual(loud, {1, 3, 5})
 
     def test_save_empty(self):
         """Save empty set (all silent)."""
-        tg._save_notification_config(set())
-        self.assertEqual(tg._load_notification_config(), set())
-        self.assertTrue(tg._is_silent(1))
-        self.assertTrue(tg._is_silent(2))
+        astra._save_notification_config(set())
+        self.assertEqual(astra._load_notification_config(), set())
+        self.assertTrue(astra._is_silent(1))
+        self.assertTrue(astra._is_silent(2))
 
     def test_save_all(self):
         """Save all categories as loud."""
-        all_cats = set(tg.state._NOTIFICATION_CATEGORIES.keys())
-        tg._save_notification_config(all_cats)
+        all_cats = set(astra.state._NOTIFICATION_CATEGORIES.keys())
+        astra._save_notification_config(all_cats)
         for cat in all_cats:
-            self.assertFalse(tg._is_silent(cat))
+            self.assertFalse(astra._is_silent(cat))
 
     def test_corrupt_file_returns_default(self):
         """Corrupt JSON returns default."""
-        with open(tg.state.NOTIFICATION_CONFIG_PATH, "w") as f:
+        with open(astra.state.NOTIFICATION_CONFIG_PATH, "w") as f:
             f.write("not json")
-        self.assertEqual(tg._load_notification_config(), {1, 2})
+        self.assertEqual(astra._load_notification_config(), {1, 2})
 
 
 class TestNotificationCommand(unittest.TestCase):
@@ -6487,56 +6487,56 @@ class TestNotificationCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj")}
-        self.signal_dir = "/tmp/tg_hook_test_noti_cmd"
+        self.signal_dir = "/tmp/astra_test_noti_cmd"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig_signal_dir = tg.config.SIGNAL_DIR
-        tg.config.SIGNAL_DIR = self.signal_dir
-        self._orig_noti_path = tg.state.NOTIFICATION_CONFIG_PATH
-        tg.state.NOTIFICATION_CONFIG_PATH = os.path.join(self.signal_dir, "_noti.json")
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        astra.config.SIGNAL_DIR = self.signal_dir
+        self._orig_noti_path = astra.state.NOTIFICATION_CONFIG_PATH
+        astra.state.NOTIFICATION_CONFIG_PATH = os.path.join(self.signal_dir, "_noti.json")
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig_signal_dir
-        tg.state.NOTIFICATION_CONFIG_PATH = self._orig_noti_path
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.state.NOTIFICATION_CONFIG_PATH = self._orig_noti_path
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_notification_shows_config(self, mock_send):
-        action, _, _ = tg._handle_command("/notification", self.sessions, "4")
+        action, _, _ = astra._handle_command("/notification", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Notification categories", msg)
         self.assertIn("permission", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_set_digits(self, mock_send):
-        tg._handle_command("/notification 1234", self.sessions, "4")
-        loud = tg._load_notification_config()
+        astra._handle_command("/notification 1234", self.sessions, "4")
+        loud = astra._load_notification_config()
         self.assertEqual(loud, {1, 2, 3, 4})
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_set_all(self, mock_send):
-        tg._handle_command("/notification all", self.sessions, "4")
-        loud = tg._load_notification_config()
-        self.assertEqual(loud, set(tg.state._NOTIFICATION_CATEGORIES.keys()))
+        astra._handle_command("/notification all", self.sessions, "4")
+        loud = astra._load_notification_config()
+        self.assertEqual(loud, set(astra.state._NOTIFICATION_CATEGORIES.keys()))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_set_off(self, mock_send):
-        tg._handle_command("/notification off", self.sessions, "4")
-        loud = tg._load_notification_config()
+        astra._handle_command("/notification off", self.sessions, "4")
+        loud = astra._load_notification_config()
         self.assertEqual(loud, set())
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_invalid_arg(self, mock_send):
-        tg._handle_command("/notification foo", self.sessions, "4")
+        astra._handle_command("/notification foo", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("Usage", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_ignores_invalid_digits(self, mock_send):
         """Digits not in category map (0, 8, 9) are ignored."""
-        tg._handle_command("/notification 089", self.sessions, "4")
-        loud = tg._load_notification_config()
+        astra._handle_command("/notification 089", self.sessions, "4")
+        loud = astra._load_notification_config()
         self.assertEqual(loud, set())  # 0, 8, 9 not in categories
 
 
@@ -6544,29 +6544,29 @@ class TestNotificationAlias(unittest.TestCase):
     """Test noti alias resolves to /notification."""
 
     def test_bare_noti(self):
-        result = tg._resolve_alias("noti", False)
+        result = astra._resolve_alias("noti", False)
         self.assertEqual(result, "/notification")
 
     def test_noti_with_args(self):
-        result = tg._resolve_alias("noti 123", False)
+        result = astra._resolve_alias("noti 123", False)
         self.assertEqual(result, "/notification 123")
 
     def test_noti_all(self):
-        result = tg._resolve_alias("noti all", False)
+        result = astra._resolve_alias("noti all", False)
         self.assertEqual(result, "/notification all")
 
     def test_noti_off(self):
-        result = tg._resolve_alias("noti off", False)
+        result = astra._resolve_alias("noti off", False)
         self.assertEqual(result, "/notification off")
 
     def test_noti_suppressed_during_prompt(self):
         """Bare noti is suppressed during active prompt (ambiguous)."""
-        result = tg._resolve_alias("noti", True)
+        result = astra._resolve_alias("noti", True)
         self.assertEqual(result, "noti")
 
     def test_noti_with_args_during_prompt(self):
         """noti with args always resolves (unambiguous)."""
-        result = tg._resolve_alias("noti 12", True)
+        result = astra._resolve_alias("noti 12", True)
         self.assertEqual(result, "/notification 12")
 
 
@@ -6579,7 +6579,7 @@ class TestSilentParameter(unittest.TestCase):
             status_code=200,
             json=lambda: {"result": {"message_id": 1}},
         )
-        tg.tg_send("test", silent=True)
+        astra.tg_send("test", silent=True)
         payload = mock_post.call_args[1]["json"]
         self.assertTrue(payload.get("disable_notification"))
 
@@ -6589,7 +6589,7 @@ class TestSilentParameter(unittest.TestCase):
             status_code=200,
             json=lambda: {"result": {"message_id": 1}},
         )
-        tg.tg_send("test", silent=False)
+        astra.tg_send("test", silent=False)
         payload = mock_post.call_args[1]["json"]
         self.assertNotIn("disable_notification", payload)
 
@@ -6605,13 +6605,13 @@ class TestSilentParameter(unittest.TestCase):
                 raise_for_status=lambda: None,
             ),
         ]
-        tg.tg_send("test", silent=True)
+        astra.tg_send("test", silent=True)
         payload = mock_post.call_args_list[1][1]["json"]
         self.assertTrue(payload.get("disable_notification"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_send_long_message_passes_silent(self, mock_send):
-        tg._send_long_message("Header\n", "body text", "w4", silent=True)
+        astra._send_long_message("Header\n", "body text", "w4", silent=True)
         _, kwargs = mock_send.call_args
         self.assertTrue(kwargs.get("silent"))
 
@@ -6619,9 +6619,9 @@ class TestSilentParameter(unittest.TestCase):
 class TestHelpIncludesNotification(unittest.TestCase):
     """Test /help mentions /notification."""
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_help_includes_notification(self, mock_send):
-        tg._handle_command("/help", {"4": ("0:4.0", "myproj")}, "4")
+        astra._handle_command("/help", {"4": ("0:4.0", "myproj")}, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("/notification", msg)
         self.assertIn("noti", msg)
@@ -6631,7 +6631,7 @@ class TestMediaGroupId(unittest.TestCase):
     """Test media_group_id extraction in _extract_chat_messages."""
 
     def _make_update(self, msg_fields):
-        return {"result": [{"update_id": 1, "message": {"chat": {"id": int(tg.CHAT_ID)}, **msg_fields}}]}
+        return {"result": [{"update_id": 1, "message": {"chat": {"id": int(astra.CHAT_ID)}, **msg_fields}}]}
 
     def test_photo_with_media_group_id(self):
         data = self._make_update({
@@ -6639,20 +6639,20 @@ class TestMediaGroupId(unittest.TestCase):
             "caption": "w4 describe",
             "media_group_id": "album123",
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertEqual(result[0]["media_group_id"], "album123")
 
     def test_photo_without_media_group_id(self):
         data = self._make_update({
             "photo": [{"file_id": "abc", "width": 800, "height": 800}],
         })
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertIsNone(result[0]["media_group_id"])
 
     def test_text_message_no_media_group_id(self):
         """Text messages don't have media_group_id key at all."""
         data = self._make_update({"text": "hello"})
-        result = tg._extract_chat_messages(data)
+        result = astra._extract_chat_messages(data)
         self.assertNotIn("media_group_id", result[0])
 
 
@@ -6661,7 +6661,7 @@ class TestMergeAlbumPhotos(unittest.TestCase):
 
     def test_single_photo_passes_through(self):
         msgs = [{"text": "hello", "photo": "abc", "media_group_id": None, "callback": None}]
-        result = tg._merge_album_photos(msgs)
+        result = astra._merge_album_photos(msgs)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["photo"], "abc")
         self.assertNotIn("photos", result[0])
@@ -6672,7 +6672,7 @@ class TestMergeAlbumPhotos(unittest.TestCase):
             {"text": "", "photo": "id2", "media_group_id": "album1", "callback": None},
             {"text": "", "photo": "id3", "media_group_id": "album1", "callback": None},
         ]
-        result = tg._merge_album_photos(msgs)
+        result = astra._merge_album_photos(msgs)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["photos"], ["id1", "id2", "id3"])
         self.assertEqual(result[0]["text"], "describe these")
@@ -6683,7 +6683,7 @@ class TestMergeAlbumPhotos(unittest.TestCase):
             {"text": "", "photo": "id1", "media_group_id": "album1", "callback": None},
             {"text": "w4 check these", "photo": "id2", "media_group_id": "album1", "callback": None},
         ]
-        result = tg._merge_album_photos(msgs)
+        result = astra._merge_album_photos(msgs)
         self.assertEqual(result[0]["text"], "w4 check these")
 
     def test_mixed_album_and_single(self):
@@ -6693,7 +6693,7 @@ class TestMergeAlbumPhotos(unittest.TestCase):
             {"text": "", "photo": "a2", "media_group_id": "grp1", "callback": None},
             {"text": "text msg", "photo": None, "callback": None},
         ]
-        result = tg._merge_album_photos(msgs)
+        result = astra._merge_album_photos(msgs)
         self.assertEqual(len(result), 3)
         # First: single photo (no photos list)
         self.assertEqual(result[0]["photo"], "s1")
@@ -6711,7 +6711,7 @@ class TestMergeAlbumPhotos(unittest.TestCase):
             {"text": "", "photo": "a2", "media_group_id": "grp1", "callback": None},
             {"text": "", "photo": "b2", "media_group_id": "grp2", "callback": None},
         ]
-        result = tg._merge_album_photos(msgs)
+        result = astra._merge_album_photos(msgs)
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["photos"], ["a1", "a2"])
         self.assertEqual(result[0]["text"], "first")
@@ -6719,14 +6719,14 @@ class TestMergeAlbumPhotos(unittest.TestCase):
         self.assertEqual(result[1]["text"], "second")
 
     def test_empty_list(self):
-        self.assertEqual(tg._merge_album_photos([]), [])
+        self.assertEqual(astra._merge_album_photos([]), [])
 
     def test_text_only_messages_pass_through(self):
         msgs = [
             {"text": "hello", "photo": None, "callback": None},
             {"text": "world", "photo": None, "callback": None},
         ]
-        result = tg._merge_album_photos(msgs)
+        result = astra._merge_album_photos(msgs)
         self.assertEqual(len(result), 2)
 
 
@@ -6761,11 +6761,11 @@ class TestDetectCompacting(unittest.TestCase):
             "  More details about the task.\n"
             "⠙ Compacting conversation…\n"
         )
-        self.assertTrue(tg._detect_compacting(raw))
+        self.assertTrue(astra._detect_compacting(raw))
 
     def test_compacting_lowercase(self):
         raw = "⠐ compacting context…\n"
-        self.assertTrue(tg._detect_compacting(raw))
+        self.assertTrue(astra._detect_compacting(raw))
 
     def test_compacted_not_detected(self):
         """Past tense 'compacted' should not match."""
@@ -6774,7 +6774,7 @@ class TestDetectCompacting(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertFalse(tg._detect_compacting(raw))
+        self.assertFalse(astra._detect_compacting(raw))
 
     def test_normal_pane_not_compacting(self):
         raw = (
@@ -6782,7 +6782,7 @@ class TestDetectCompacting(unittest.TestCase):
             "\n"
             "❯ \n"
         )
-        self.assertFalse(tg._detect_compacting(raw))
+        self.assertFalse(astra._detect_compacting(raw))
 
     def test_compacting_with_status_bar(self):
         raw = (
@@ -6790,7 +6790,7 @@ class TestDetectCompacting(unittest.TestCase):
             "⠋ Compacting conversation…  1m 23s\n"
             "Context left until auto-compact: 5%\n"
         )
-        self.assertTrue(tg._detect_compacting(raw))
+        self.assertTrue(astra._detect_compacting(raw))
 
 
 class TestRestartCommand(unittest.TestCase):
@@ -6798,20 +6798,20 @@ class TestRestartCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
-        self.signal_dir = "/tmp/tg_hook_test_restart"
+        self.signal_dir = "/tmp/astra_test_restart"
         os.makedirs(self.signal_dir, exist_ok=True)
-        self._orig = tg.config.SIGNAL_DIR
-        tg.config.SIGNAL_DIR = self.signal_dir
+        self._orig = astra.config.SIGNAL_DIR
+        astra.config.SIGNAL_DIR = self.signal_dir
 
     def tearDown(self):
-        tg.config.SIGNAL_DIR = self._orig
+        astra.config.SIGNAL_DIR = self._orig
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
-    @patch.object(tg.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
     def test_restart_success(self, mock_cwd, mock_scan, mock_run, mock_send):
         """Restart kills, clears state, relaunches, reports success."""
         # First scan: session gone (killed). Second scan: session back (restarted).
@@ -6820,11 +6820,11 @@ class TestRestartCommand(unittest.TestCase):
             {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")},  # after relaunch: w4 back
         ]
         # Create state files that should be cleaned up
-        tg._mark_busy("w4")
-        tg.save_active_prompt("w4", "0:4.0", total=3)
+        astra._mark_busy("w4")
+        astra.save_active_prompt("w4", "0:4.0", total=3)
 
         with patch("time.sleep"):
-            action, sessions, last = tg._handle_command(
+            action, sessions, last = astra._handle_command(
                 "/restart w4", self.sessions, "5")
         self.assertIsNone(action)
         self.assertEqual(last, "4")
@@ -6843,26 +6843,26 @@ class TestRestartCommand(unittest.TestCase):
         self.assertIn("claude -c", cmd_str2)
         self.assertIn("/home/user/myproj", cmd_str2)
         # State files should be cleaned
-        self.assertFalse(tg._is_busy("w4"))
+        self.assertFalse(astra._is_busy("w4"))
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
-    @patch.object(tg.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
     def test_restart_kill_fails(self, mock_cwd, mock_scan, mock_run, mock_send):
         """Restart aborts if session is still running after kill."""
         mock_scan.return_value = self.sessions  # w4 still there
         with patch("time.sleep"):
-            action, sessions, last = tg._handle_command(
+            action, sessions, last = astra._handle_command(
                 "/restart w4", self.sessions, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("still running", msg)
         self.assertIn("restart aborted", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch("subprocess.run")
-    @patch.object(tg.tmux, "scan_claude_sessions")
-    @patch.object(tg.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
     def test_restart_relaunch_fails(self, mock_cwd, mock_scan, mock_run, mock_send):
         """Restart warns if session doesn't come back after relaunch."""
         mock_scan.side_effect = [
@@ -6870,24 +6870,24 @@ class TestRestartCommand(unittest.TestCase):
             {"5": ("0:5.0", "other")},  # after relaunch: w4 still gone
         ]
         with patch("time.sleep"):
-            action, sessions, last = tg._handle_command(
+            action, sessions, last = astra._handle_command(
                 "/restart w4", self.sessions, "5")
         msg = mock_send.call_args[0][0]
         self.assertIn("did not restart", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_restart_nonexistent_session(self, mock_send):
-        action, _, _ = tg._handle_command(
+        action, _, _ = astra._handle_command(
             "/restart w99", self.sessions, "4")
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
-    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_restart_shows_picker(self, mock_scan, mock_send):
         """Bare /restart shows session picker."""
         mock_scan.return_value = self.sessions
-        action, _, _ = tg._handle_command("/restart", self.sessions, "4")
+        action, _, _ = astra._handle_command("/restart", self.sessions, "4")
         self.assertIsNone(action)
         msg = mock_send.call_args[0][0]
         self.assertIn("Restart which", msg)
@@ -6901,24 +6901,24 @@ class TestRestartAlias(unittest.TestCase):
     """Test r4 alias resolves to /restart w4."""
 
     def test_r4_alias(self):
-        result = tg._resolve_alias("r4", False)
+        result = astra._resolve_alias("r4", False)
         self.assertEqual(result, "/restart w4")
 
     def test_r4_alias_with_active_prompt(self):
         """Digit aliases always resolve even during prompts."""
-        result = tg._resolve_alias("r4", True)
+        result = astra._resolve_alias("r4", True)
         self.assertEqual(result, "/restart w4")
 
 
 class TestRestartCallback(unittest.TestCase):
     """Test restart command callback from inline keyboard."""
 
-    @patch.object(tg.commands, "_handle_command", return_value=(None, {}, "4"))
-    @patch.object(tg.telegram, "_answer_callback_query")
-    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.commands, "_handle_command", return_value=(None, {}, "4"))
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
     def test_cmd_restart_callback(self, mock_remove, mock_answer, mock_cmd):
         callback = {"id": "cb1", "data": "cmd_restart_4", "message_id": 100}
-        sessions, last, action = tg._handle_callback(
+        sessions, last, action = astra._handle_callback(
             callback, {"4": ("0:4.0", "proj")}, None)
         mock_cmd.assert_called_once_with("/restart w4", {"4": ("0:4.0", "proj")}, None)
 
@@ -6926,9 +6926,9 @@ class TestRestartCallback(unittest.TestCase):
 class TestHelpIncludesRestart(unittest.TestCase):
     """Test help text includes /restart."""
 
-    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_help_mentions_restart(self, mock_send):
-        tg._handle_command("/help", {"4": ("0:4.0", "proj")}, None)
+        astra._handle_command("/help", {"4": ("0:4.0", "proj")}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("/restart", msg)
         self.assertIn("r4", msg)

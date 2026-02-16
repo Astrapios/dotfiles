@@ -9,7 +9,7 @@ import time
 
 import requests
 
-from tg_hook import config, telegram, tmux, state, content, commands, signals, routing
+from astra import config, telegram, tmux, state, content, commands, signals, routing
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_ERROR = 4
@@ -184,7 +184,7 @@ def cmd_listen():
                 _reload_after = None
                 config._log("listen", "Reloading...")
                 telegram.tg_send("🔄 Reloading...", silent=state._is_silent(_CAT_CONFIRM))
-                _restart_cmd = "import sys; sys.argv=['tg-hook','listen']; from tg_hook.cli import main; main()"
+                _restart_cmd = "import sys; sys.argv=['astra','listen']; from astra.cli import main; main()"
                 os.execv(sys.executable, [sys.executable, "-c", _restart_cmd])
         except OSError:
             pass
@@ -245,7 +245,7 @@ def cmd_listen():
         # --- Interrupt detection (no hook fires on Esc interrupt) ---
         if time.time() - last_interrupt_check > 5:
             last_interrupt_check = time.time()
-            from tg_hook import routing
+            from astra import routing
             for idx, (pane, project) in sessions.items():
                 wid = f"w{idx}"
                 try:

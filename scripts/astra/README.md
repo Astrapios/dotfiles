@@ -1,6 +1,8 @@
-# tg-hook
+# Astra
 
 Telegram bridge for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Control and monitor Claude Code sessions from your phone via a Telegram bot.
+
+Named after Astrapios, the Lightning-Bringer — the script watches for signals and carries them between worlds.
 
 ## What it does
 
@@ -13,15 +15,15 @@ Telegram bridge for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 ## Architecture
 
 ```
-Claude Code hooks ──► tg-hook hook ──► signal files ──► tg-hook listen ──► Telegram Bot
-                         (stdin)        (/tmp/tg_hook_signals/)              (polling)
-                                                                                │
-                                                                          Your phone
-                                                                          Telegram app
+Claude Code hooks ──► astra hook ──► signal files ──► astra listen ──► Telegram Bot
+                       (stdin)        (/tmp/astra_signals/)              (polling)
+                                                                            │
+                                                                      Your phone
+                                                                      Telegram app
 ```
 
-- **`tg-hook hook`** — Called by Claude Code hooks (Stop, Notification, PreToolUse). Reads JSON from stdin, writes signal files
-- **`tg-hook listen`** — Single daemon that polls Telegram for your messages and processes signal files. Routes messages to the right tmux pane, handles permissions, monitors output
+- **`astra hook`** — Called by Claude Code hooks (Stop, Notification, PreToolUse). Reads JSON from stdin, writes signal files
+- **`astra listen`** — Single daemon that polls Telegram for your messages and processes signal files. Routes messages to the right tmux pane, handles permissions, monitors output
 - Signal files decouple the hook calls (which run inside Claude's process) from the Telegram communication
 
 ## Setup
@@ -40,7 +42,7 @@ Claude Code hooks ──► tg-hook hook ──► signal files ──► tg-hoo
 
 ### 3. Save credentials
 
-Create `~/.config/tg_hook.env`:
+Create `~/.config/astra.env`:
 
 ```
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
@@ -52,22 +54,22 @@ TELEGRAM_CHAT_ID=your-chat-id
 Requires [pixi](https://pixi.sh) (conda-based Python environment manager).
 
 ```bash
-cd scripts/tg-hook
+cd scripts/astra
 pixi install
 ```
 
-This installs `tg-hook` as an editable package with its dependencies (Python 3.11+, requests).
+This installs `astra` as an editable package with its dependencies (Python 3.11+, requests).
 
-### 5. Make `tg-hook` available in PATH
+### 5. Make `astra` available in PATH
 
-Create a wrapper script (e.g. `~/bin/tg-hook`):
+Create a wrapper script (e.g. `~/bin/astra`):
 
 ```sh
 #!/bin/sh
-exec pixi run -m /path/to/scripts/tg-hook/pixi.toml tg-hook "$@"
+exec pixi run -m /path/to/scripts/astra/pixi.toml astra "$@"
 ```
 
-Make it executable: `chmod +x ~/bin/tg-hook`
+Make it executable: `chmod +x ~/bin/astra`
 
 ### 6. Configure Claude Code hooks
 
@@ -76,18 +78,18 @@ Copy or symlink `claude_settings.json` to `~/.claude/settings.json` (or merge wi
 ```json
 {
   "env": {
-    "CLAUDE_TG_HOOKS": "1"
+    "CLAUDE_ASTRA": "1"
   },
   "hooks": {
     "Notification": [
-      { "matcher": "", "hooks": [{ "type": "command", "command": "tg-hook hook" }] }
+      { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }
     ],
     "Stop": [
-      { "matcher": "", "hooks": [{ "type": "command", "command": "tg-hook hook" }] }
+      { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }
     ],
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "tg-hook hook" }] },
-      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "tg-hook hook" }] }
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "astra hook" }] },
+      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "astra hook" }] }
     ]
   }
 }
@@ -96,7 +98,7 @@ Copy or symlink `claude_settings.json` to `~/.claude/settings.json` (or merge wi
 ### 7. Start the listener
 
 ```bash
-tg-hook listen
+astra listen
 ```
 
 Run Claude Code in a tmux session. The listener auto-detects Claude panes and starts routing.
@@ -104,13 +106,13 @@ Run Claude Code in a tmux session. The listener auto-detects Claude panes and st
 ## CLI commands
 
 ```
-tg-hook listen              Start the Telegram listener daemon
-tg-hook hook                Read Claude hook JSON from stdin (called by hooks)
-tg-hook notify <message>    Send a one-shot notification
-tg-hook ask <question>      Send a question, wait for reply, print to stdout
-tg-hook send-photo <path> [caption]  Send a photo to Telegram
-tg-hook send-doc <path> [caption]    Send a file as a document to Telegram
-tg-hook help                Show help
+astra listen              Start the Telegram listener daemon
+astra hook                Read Claude hook JSON from stdin (called by hooks)
+astra notify <message>    Send a one-shot notification
+astra ask <question>      Send a question, wait for reply, print to stdout
+astra send-photo <path> [caption]  Send a photo to Telegram
+astra send-doc <path> [caption]    Send a file as a document to Telegram
+astra help                Show help
 ```
 
 ## Telegram commands
@@ -205,23 +207,23 @@ Categories:
 | 6 | 🔍 Focus/monitoring updates | silent |
 | 7 | 📨 Confirmations (sent, saved, reload) | silent |
 
-Config persists in `~/.config/tg_hook_notifications.json`.
+Config persists in `~/.config/astra_notifications.json`.
 
 ## Tests
 
 ```bash
-cd scripts/tg-hook
+cd scripts/astra
 pixi run test
 ```
 
 ## Project structure
 
 ```
-scripts/tg-hook/
+scripts/astra/
 ├── pixi.toml              # Pixi project config
 ├── pyproject.toml          # Python package config
-├── src/tg_hook/
-│   ├── __init__.py         # Re-exports for backward compat
+├── src/astra/
+│   ├── __init__.py         # Re-exports for convenience
 │   ├── cli.py              # CLI entry point (main, notify, ask, hook)
 │   ├── commands.py         # Telegram command handling (/status, /god, etc.)
 │   ├── config.py           # Environment loading, constants
@@ -233,5 +235,5 @@ scripts/tg-hook/
 │   ├── telegram.py         # Telegram Bot API wrapper
 │   └── tmux.py             # tmux session scanning and pane interaction
 └── tests/
-    └── test_tg_hook.py     # Unit tests
+    └── test_astra.py       # Unit tests
 ```

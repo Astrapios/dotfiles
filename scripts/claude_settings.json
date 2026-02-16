@@ -1,6 +1,6 @@
 {
   "env": {
-    "CLAUDE_TG_HOOKS": "1"
+    "CLAUDE_ASTRA": "1"
   },
   "hooks": {
     "Notification": [
@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tg-hook hook"
+            "command": "astra hook"
           }
         ]
       }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tg-hook hook"
+            "command": "astra hook"
           }
         ]
       }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tg-hook hook"
+            "command": "astra hook"
           }
         ]
       },
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tg-hook hook"
+            "command": "astra hook"
           }
         ]
       },
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tg-hook hook"
+            "command": "astra hook"
           }
         ]
       }

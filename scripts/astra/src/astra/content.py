@@ -2,7 +2,7 @@
 import difflib
 import re
 
-from tg_hook import tmux
+from astra import tmux
 
 
 def _extract_pane_permission(pane: str) -> tuple[str, str, list[str], str]:
@@ -67,7 +67,7 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str], str]:
             context_lines.append(s)
     context = "\n".join(context_lines).strip()
 
-    # Extract tool + file from ● header (e.g. "● Update(scripts/tg-hook)")
+    # Extract tool + file from ● header (e.g. "● Update(scripts/astra)")
     header = ""
     hdr_file = ""
     for line in lines[start:first_opt_idx]:

@@ -5,7 +5,7 @@ import os
 import re
 import time
 
-from tg_hook import config, telegram, tmux, content, state, routing
+from astra import config, telegram, tmux, content, state, routing
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_PERMISSION = 1
@@ -170,7 +170,7 @@ def process_signals(focused_wids: set[str] | None = None,
 
             # God mode: ensure accept-edits is on when session becomes idle
             if pane and w_idx and state._is_god_mode_for(w_idx):
-                from tg_hook import commands  # deferred to avoid circular
+                from astra import commands  # deferred to avoid circular
                 commands._enable_accept_edits(pane)
 
         elif event == "permission":

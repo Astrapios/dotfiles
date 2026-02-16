@@ -3,7 +3,7 @@ import json
 import os
 import sys
 
-from tg_hook import config, telegram, state, tmux, listener
+from astra import config, telegram, state, tmux, listener
 
 
 def cmd_notify(message: str):
@@ -92,9 +92,9 @@ def cmd_hook():
 
 def cmd_help():
     """Print CLI usage information."""
-    print("""tg-hook — Telegram bridge for Claude Code
+    print("""astra — Telegram bridge for Claude Code
 
-Usage: tg-hook <command> [args...]
+Usage: astra <command> [args...]
 
 Commands:
   listen              Start the Telegram listener daemon
@@ -108,11 +108,11 @@ Commands:
 Setup:
   1. Create a Telegram bot via @BotFather, get the token
   2. Get your chat ID (send a message to the bot, check getUpdates)
-  3. Save credentials to ~/.config/tg_hook.env:
+  3. Save credentials to ~/.config/astra.env:
        TELEGRAM_BOT_TOKEN=your-bot-token
        TELEGRAM_CHAT_ID=your-chat-id
   4. Configure Claude Code hooks (see claude_settings.json)
-  5. Run: tg-hook listen
+  5. Run: astra listen
 
 Telegram commands (inside listener):
   /status [wN]        List sessions or show session output
@@ -151,7 +151,7 @@ def main():
         return
 
     if not config.BOT or not config.CHAT_ID:
-        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (env or ~/.config/tg_hook.env)", file=sys.stderr)
+        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (env or ~/.config/astra.env)", file=sys.stderr)
         sys.exit(1)
 
     if command == "notify":
@@ -162,14 +162,14 @@ def main():
         cmd_ask(question)
     elif command == "send-photo":
         if len(sys.argv) < 3:
-            print("Usage: tg-hook send-photo <path> [caption]", file=sys.stderr)
+            print("Usage: astra send-photo <path> [caption]", file=sys.stderr)
             sys.exit(1)
         path = sys.argv[2]
         caption = sys.argv[3] if len(sys.argv) > 3 else ""
         cmd_send_photo(path, caption)
     elif command == "send-doc":
         if len(sys.argv) < 3:
-            print("Usage: tg-hook send-doc <path> [caption]", file=sys.stderr)
+            print("Usage: astra send-doc <path> [caption]", file=sys.stderr)
             sys.exit(1)
         path = sys.argv[2]
         caption = sys.argv[3] if len(sys.argv) > 3 else ""
@@ -178,5 +178,5 @@ def main():
         listener.cmd_listen()
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
-        print("Run 'tg-hook help' for usage information.")
+        print("Run 'astra help' for usage information.")
         sys.exit(1)

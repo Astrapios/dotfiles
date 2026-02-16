@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import time
 
-from tg_hook import config, telegram, tmux, state, content, routing
+from astra import config, telegram, tmux, state, content, routing
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_ERROR = 4

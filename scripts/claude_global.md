@@ -15,7 +15,7 @@
 When the user asks you to show, send, or share an image, figure, chart, screenshot, or any visual file to Telegram, use:
 
 ```bash
-tg-hook send-photo /path/to/file.png "optional caption"
+astra send-photo /path/to/file.png "optional caption"
 ```
 
 Images larger than 1280px are automatically sent as documents to preserve full resolution.
@@ -23,5 +23,5 @@ Images larger than 1280px are automatically sent as documents to preserve full r
 To send any file (PDF, log, archive, etc.) as a document:
 
 ```bash
-tg-hook send-doc /path/to/file.ext "optional caption"
+astra send-doc /path/to/file.ext "optional caption"
 ```

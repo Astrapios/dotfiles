@@ -1,12 +1,19 @@
 # Changelog
 
-All notable changes to tg-hook are documented here.
+All notable changes to astra (formerly tg-hook) are documented here.
 
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
 ## 0.10.0
 
+- **Rename tg-hook → astra** (after Astrapios, the Lightning-Bringer)
+  - CLI command: `tg-hook` → `astra`
+  - Python package: `tg_hook` → `astra`
+  - Directory: `scripts/tg-hook/` → `scripts/astra/`
+  - Env var: `CLAUDE_TG_HOOKS` → `CLAUDE_ASTRA`
+  - Config files: `~/.config/tg_hook.env` → `~/.config/astra.env` (old paths still work as fallback)
+  - Signal dir: `/tmp/tg_hook_signals/` → `/tmp/astra_signals/`
 - Add `/restart wN` command — kills a Claude session and relaunches with `claude -c` (continue last conversation) in the same pane
 - Alias: `r4` → `/restart w4`
 - Auto-compact detection — listener detects when Claude is auto-compacting context and sends ⏳/✅ notifications to Telegram

@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 
-from tg_hook import config, telegram, state
+from astra import config, telegram, state
 
 
 def get_window_id() -> str | None:

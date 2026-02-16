@@ -7,7 +7,7 @@ import time
 
 import requests
 
-from tg_hook import config
+from astra import config
 
 
 def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,

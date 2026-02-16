@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import time
 
-from tg_hook import config, telegram, state, signals, tmux
+from astra import config, telegram, state, signals, tmux
 
 
 def _select_option(pane: str, n: int):

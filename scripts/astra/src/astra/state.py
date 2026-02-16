@@ -4,12 +4,12 @@ import os
 import re
 import time
 
-from tg_hook import config
+from astra import config
 
 
 def write_signal(event: str, data: dict, **extra):
     """Write a signal file for the listen loop to process."""
-    from tg_hook import tmux  # deferred to avoid circular import
+    from astra import tmux  # deferred to avoid circular import
 
     os.makedirs(config.SIGNAL_DIR, exist_ok=True)
     pane = os.environ.get("TMUX_PANE", "")
@@ -81,7 +81,7 @@ def load_active_prompt(wid: str) -> dict | None:
 
 def _pane_has_prompt(pane: str) -> bool:
     """Check if a tmux pane still shows a permission/question dialog."""
-    from tg_hook import tmux  # deferred to avoid circular import
+    from astra import tmux  # deferred to avoid circular import
 
     try:
         raw = tmux._capture_pane(pane, 10)
@@ -99,7 +99,7 @@ def _cleanup_stale_prompts():
     Uses idle detection (❯ prompt visible) instead of _pane_has_prompt,
     which fails for ExitPlanMode and other non-numbered dialogs.
     """
-    from tg_hook import routing  # deferred to avoid circular import
+    from astra import routing  # deferred to avoid circular import
 
     if not os.path.isdir(config.SIGNAL_DIR):
         return
@@ -473,7 +473,9 @@ def _clear_all_transient_state():
     _clear_smartfocus_state()
 
 
-NOTIFICATION_CONFIG_PATH = os.path.expanduser("~/.config/tg_hook_notifications.json")
+_noti_new = os.path.expanduser("~/.config/astra_notifications.json")
+_noti_old = os.path.expanduser("~/.config/tg_hook_notifications.json")
+NOTIFICATION_CONFIG_PATH = _noti_new if os.path.exists(_noti_new) else (_noti_old if os.path.exists(_noti_old) else _noti_new)
 
 # Category definitions:
 # 1=permission, 2=stop, 3=question/plan, 4=error, 5=interrupt, 6=monitor, 7=confirm

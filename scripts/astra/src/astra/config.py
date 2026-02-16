@@ -19,14 +19,17 @@ def _load_env_file(path: str) -> dict[str, str]:
     return env
 
 
-_creds = _load_env_file("~/.config/tg_hook.env")
+_creds = _load_env_file("~/.config/astra.env") or _load_env_file("~/.config/tg_hook.env")
 
 BOT = os.environ.get("TELEGRAM_BOT_TOKEN", "") or _creds.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "") or _creds.get("TELEGRAM_CHAT_ID", "")
-TG_HOOKS_ENABLED = os.environ.get("CLAUDE_TG_HOOKS", "") == "1"
+TG_HOOKS_ENABLED = os.environ.get("CLAUDE_ASTRA", "") == "1"
 TG_MAX = 4096  # Telegram message character limit
-SIGNAL_DIR = "/tmp/tg_hook_signals"
-GOD_MODE_PATH = os.path.expanduser("~/.config/tg_hook_god_mode.json")
+SIGNAL_DIR = "/tmp/astra_signals"
+
+_god_new = os.path.expanduser("~/.config/astra_god_mode.json")
+_god_old = os.path.expanduser("~/.config/tg_hook_god_mode.json")
+GOD_MODE_PATH = _god_new if os.path.exists(_god_new) else (_god_old if os.path.exists(_god_old) else _god_new)
 
 
 def _log(tag: str, msg: str):

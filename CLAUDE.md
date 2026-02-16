@@ -14,26 +14,26 @@ Personal dotfiles repo with shell/editor/tmux configs and a Telegram bridge for 
 ./install.zsh -y       # Non-interactive (auto-yes)
 
 # Tests
-cd scripts/tg-hook && pixi run test # Run tg-hook unit tests
+cd scripts/astra && pixi run test # Run astra unit tests
 
-# tg-hook usage
-tg-hook listen         # Start Telegram listener daemon
-tg-hook hook           # Called by Claude hooks (reads stdin)
-tg-hook notify "msg"   # One-shot notification
-tg-hook ask "question" # Ask and wait for reply
+# astra usage
+astra listen         # Start Telegram listener daemon
+astra hook           # Called by Claude hooks (reads stdin)
+astra notify "msg"   # One-shot notification
+astra ask "question" # Ask and wait for reply
 ```
 
 ## Architecture
 
-### Telegram Bridge (`scripts/tg-hook/`)
+### Telegram Bridge (`scripts/astra/`)
 
-A pip-installable Python package bridging Claude Code sessions to Telegram. Structured as `src/tg_hook/` with modules: `config`, `telegram`, `tmux`, `state`, `content`, `routing`, `signals`, `commands`, `listener`, `cli`. Managed as a pixi project with editable install (`scripts/tg-hook/pixi.toml`). Invoked via `tg-hook <cmd>` (`~/bin/tg-hook` wrapper delegates to `pixi run -m`).
+A pip-installable Python package bridging Claude Code sessions to Telegram. Structured as `src/astra/` with modules: `config`, `telegram`, `tmux`, `state`, `content`, `routing`, `signals`, `commands`, `listener`, `cli`. Managed as a pixi project with editable install (`scripts/astra/pixi.toml`). Invoked via `astra <cmd>` (`~/bin/astra` wrapper delegates to `pixi run -m`).
 
-**Module import pattern:** Submodules import peers as objects (`from tg_hook import config, telegram`) and call `telegram.tg_send(msg)`. This enables mock patching via `patch.object(tg.<module>, "func")`. The `__init__.py` re-exports everything for backward compat.
+**Module import pattern:** Submodules import peers as objects (`from astra import config, telegram`) and call `telegram.tg_send(msg)`. This enables mock patching via `patch.object(astra.<module>, "func")`. The `__init__.py` re-exports everything for backward compat.
 
 **Signal-based architecture:**
-- Claude hooks (configured in `scripts/claude_settings.json`) invoke `tg-hook hook` which writes JSON signal files to `/tmp/tg_hook_signals/`
-- `tg-hook listen` is the only process that talks to Telegram. It polls for signals and user messages in a single loop
+- Claude hooks (configured in `scripts/claude_settings.json`) invoke `astra hook` which writes JSON signal files to `/tmp/astra_signals/`
+- `astra listen` is the only process that talks to Telegram. It polls for signals and user messages in a single loop
 - State files prefixed with `_` (e.g., `_active_prompt_w4.json`, `_bash_cmd_w4.json`) persist across signal cleanup and auto-reload
 
 **Key subsystems:**
@@ -49,7 +49,7 @@ A pip-installable Python package bridging Claude Code sessions to Telegram. Stru
 
 ### Versioning
 
-tg-hook uses semver pre-1.0. **On every commit touching `scripts/tg-hook/`**, check whether a version bump is needed and include it in the same commit:
+astra uses semver pre-1.0. **On every commit touching `scripts/astra/`**, check whether a version bump is needed and include it in the same commit:
 - **MINOR** (0.X.0): new user-facing feature — new CLI command, new Telegram command, new public API function
 - **PATCH** (0.0.X): bug fixes, refactors, test-only or docs-only changes
 
@@ -57,16 +57,16 @@ Always update both `pyproject.toml` version and `CHANGELOG.md` together with the
 
 ### Credentials
 
-Telegram secrets stored in `~/.config/tg_hook.env` (not tracked). Hook activation requires env var `CLAUDE_TG_HOOKS=1` (set in `claude_settings.json`).
+Telegram secrets stored in `~/.config/astra.env` (not tracked). Hook activation requires env var `CLAUDE_ASTRA=1` (set in `claude_settings.json`).
 
 ### Documentation
 
-When adding new commands, aliases, or user-facing features to tg-hook, update all three places:
-1. `scripts/tg-hook/README.md` — user-facing documentation
-2. `tg-hook help` output in `src/tg_hook/cli.py` (`cmd_help()`)
-3. Telegram `/help` output in `src/tg_hook/commands.py` (`_handle_command` help section)
+When adding new commands, aliases, or user-facing features to astra, update all three places:
+1. `scripts/astra/README.md` — user-facing documentation
+2. `astra help` output in `src/astra/cli.py` (`cmd_help()`)
+3. Telegram `/help` output in `src/astra/commands.py` (`_handle_command` help section)
 
-Also update `_set_bot_commands` in `src/tg_hook/telegram.py` if adding a new `/command`, and the `_ALIASES` dict / alias regexes in `commands.py` if adding short aliases.
+Also update `_set_bot_commands` in `src/astra/telegram.py` if adding a new `/command`, and the `_ALIASES` dict / alias regexes in `commands.py` if adding short aliases.
 
 ### Personal Pixi Tools (`~/pixi_tools/`)
 

@@ -1,13 +1,13 @@
 """
-Telegram bridge for Claude Code hooks.
+Astra — Telegram bridge for Claude Code hooks.
 
 Usage:
-  tg-hook notify "message"        - Send a message, don't wait
-  tg-hook ask "question"          - Send a message, wait for reply, print it to stdout
-  tg-hook send-photo path [caption] - Send a photo to Telegram
-  tg-hook send-doc path [caption]   - Send a file as a document to Telegram
-  tg-hook hook                    - Read hook JSON from stdin, write signal for listen
-  tg-hook listen                  - Auto-detect Claude sessions, route messages by wN prefix
+  astra notify "message"        - Send a message, don't wait
+  astra ask "question"          - Send a message, wait for reply, print it to stdout
+  astra send-photo path [caption] - Send a photo to Telegram
+  astra send-doc path [caption]   - Send a file as a document to Telegram
+  astra hook                    - Read hook JSON from stdin, write signal for listen
+  astra listen                  - Auto-detect Claude sessions, route messages by wN prefix
 """
 
 # Import submodules in dependency order (no circular imports at module level)
@@ -22,8 +22,8 @@ from . import commands
 from . import listener
 from . import cli
 
-# Re-export everything for backward compatibility with tests
-# (allows `import tg_hook as tg; tg.tg_send(...)`)
+# Re-export everything for convenience
+# (allows `import astra; astra.tg_send(...)`)
 
 # config
 from .config import (
