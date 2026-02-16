@@ -148,6 +148,17 @@ class TestFilterNoise(unittest.TestCase):
         result = tg._filter_noise(raw)
         self.assertEqual(result, ["line one", "line two", "line three"])
 
+    def test_removes_prompt_line(self):
+        """Prompt lines (❯) should never appear in response content."""
+        raw = "response text\n❯ summarize what the problem was\nmore response"
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["response text", "more response"])
+
+    def test_removes_empty_prompt(self):
+        raw = "response text\n❯\nmore response"
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["response text", "more response"])
+
     def test_removes_spinner_three_dots(self):
         """Filter spinner lines using ... (three dots) not just … (Unicode)."""
         raw = "hello\n❊ Infusing... (thinking)\nworld"

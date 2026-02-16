@@ -115,6 +115,9 @@ def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
     filtered = []
     for line in lines:
         s = line.strip()
+        # Prompt lines are never response content
+        if s.startswith("❯"):
+            continue
         if re.match(r'^[─━]{3,}$', s):
             continue
         if s.startswith(("⏵⏵ ", "⏸ ")):

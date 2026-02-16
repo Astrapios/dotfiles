@@ -15,6 +15,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - Fix smartfocus noise: filter spinner lines with `...` (three dots), not just `…` (Unicode ellipsis)
 - Fix smartfocus noise: filter tool progress lines like `● Reading 1 file... (ctrl+o to expand)`
 - Increase send-keys Enter delay from 0.1s to 0.3s for text messages and single photos to prevent stuck prompts
+- Fix smartfocus echoing user's prompt: filter `❯` lines in `_filter_noise` so prompt text never leaks into response content
 
 ## 0.8.0
 
