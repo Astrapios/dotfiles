@@ -134,8 +134,8 @@ def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
             # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
             if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
                 continue
-            # Tool progress lines (e.g. "● Reading 1 file… (ctrl+o to expand)")
-            if s.startswith("●") and re.search(r'\(ctrl\+', s):
+            # Tool progress lines (e.g. "Reading 1 file… (ctrl+o to expand)")
+            if re.search(r'\(ctrl\+\w to \w+\)', s):
                 continue
         if re.match(r'^\+\d+ more lines \(', s):
             continue
@@ -191,12 +191,14 @@ def clean_pane_content(raw: str, event: str, pane_width: int = 0) -> str:
             if lines[i].strip().startswith("❯"):
                 end = i
                 break
-        start = 0
+        start = -1
         for i in range(end - 1, -1, -1):
             s = lines[i].strip()
             if s.startswith("●") and not re.match(r'^● \w+\(', s):
                 start = i
                 break
+        if start < 0:
+            return ""  # No response boundary found
         lines = lines[start:end]
     filtered = _filter_noise("\n".join(lines))
     if pane_width:

@@ -1,4 +1,5 @@
 """Signal processing and question formatting."""
+import difflib
 import json
 import os
 import re
@@ -116,8 +117,15 @@ def process_signals(focused_wids: set[str] | None = None,
                         else:
                             telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
                     elif smartfocus_has_sent:
-                        # No new lines but 👁 already delivered content
-                        telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
+                        # No new lines — check if 👁 delivered the real content
+                        # or just noise (e.g. instruction echoes, tool progress)
+                        sm = difflib.SequenceMatcher(None, smartfocus_prev, cur_lines)
+                        if sm.ratio() < 0.3:
+                            # Content is very different from what smartfocus sent — send full response
+                            header = f"✅{tag} (`{project}`) finished:\n\n"
+                            telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=_stop_silent)
+                        else:
+                            telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
                     else:
                         # No new lines AND never sent any 👁 — send full response
                         header = f"✅{tag} (`{project}`) finished:\n\n"

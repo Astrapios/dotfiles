@@ -41,8 +41,8 @@ def _is_ui_chrome(s: str) -> bool:
     # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
     if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
         return True
-    # Tool progress lines (e.g. "● Reading 1 file… (ctrl+o to expand)")
-    if s.startswith("●") and re.search(r'\(ctrl\+', s):
+    # Tool progress lines (e.g. "Reading 1 file… (ctrl+o to expand)")
+    if re.search(r'\(ctrl\+\w to \w+\)', s):
         return True
     if re.match(r'^\+\d+ more lines \(', s):
         return True

@@ -171,6 +171,12 @@ class TestFilterNoise(unittest.TestCase):
         result = tg._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
+    def test_removes_tool_progress_without_bullet(self):
+        """Filter tool progress without ● prefix (e.g. 'Reading 2 files…')."""
+        raw = "hello\nReading 2 files… (ctrl+o to expand)\nworld"
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["hello", "world"])
+
     def test_keeps_response_bullet(self):
         """Response bullets should NOT be filtered."""
         raw = "● All 3 images received.\nHere are the descriptions."
@@ -207,6 +213,19 @@ class TestCleanPaneContent(unittest.TestCase):
         result = tg.clean_pane_content(raw, "stop")
         self.assertIn("The answer is 42", result)
         self.assertNotIn("Bash(echo", result)
+
+    def test_stop_no_text_bullet_returns_empty(self):
+        """When no text ● is found, return empty to prevent garbage capture."""
+        raw = textwrap.dedent("""\
+            /tmp/tg_photo_1.jpg — testing
+            ● Read(/tmp/tg_photo_0.jpg)
+              ⎿  (image data)
+            ● Read(/tmp/tg_photo_1.jpg)
+              ⎿  (image data)
+            ⠐ Thinking…
+        """)
+        result = tg.clean_pane_content(raw, "stop")
+        self.assertEqual(result, "")
 
     def test_non_stop_event_returns_all(self):
         raw = "line 1\nline 2\nline 3"
@@ -4714,6 +4733,10 @@ class TestIsUiChrome(unittest.TestCase):
     def test_tool_progress_unicode_ellipsis(self):
         self.assertTrue(tg._is_ui_chrome("● Reading 1 file… (ctrl+o to expand)"))
 
+    def test_tool_progress_without_bullet(self):
+        """Tool progress without ● prefix should still be UI chrome."""
+        self.assertTrue(tg._is_ui_chrome("Reading 2 files… (ctrl+o to expand)"))
+
     def test_response_bullet_not_filtered(self):
         """Regular response bullet should NOT be filtered."""
         self.assertFalse(tg._is_ui_chrome("● All 3 images received."))
@@ -6279,6 +6302,26 @@ class TestSmartfocusColdStart(unittest.TestCase):
         mock_long.assert_not_called()
         calls = [c[0][0] for c in mock_send.call_args_list]
         self.assertTrue(any("finished" in c for c in calls))
+
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.telegram, "_send_long_message")
+    @patch.object(tg.telegram, "_build_inline_keyboard", return_value=None)
+    @patch.object(tg.tmux, "get_pane_project", return_value="proj")
+    @patch("subprocess.run", return_value=MagicMock(stdout="● Here is my analysis of the images:\n  Image 1 shows a dog.\n  Image 2 shows a cat.\n❯ prompt"))
+    @patch("time.sleep")
+    def test_prev_noise_already_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
+                                                 mock_kb, mock_long, mock_send):
+        """Smartfocus stop: prev is noise (old response), already sent 👁 → send full response."""
+        tg.state._save_smartfocus_state("4", "%20", "proj")
+        self._write_signal("stop")
+        # prev_lines is completely different noise (old response content)
+        prev = ["● Old response from previous task", "  completely unrelated content"]
+        tg.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
+        # Content differs significantly — should send full response
+        mock_long.assert_called_once()
+        body = mock_long.call_args[0][1]
+        self.assertIn("Image 1 shows a dog", body)
 
 
 class TestPhotoAutofocus(unittest.TestCase):

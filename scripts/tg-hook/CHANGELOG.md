@@ -13,9 +13,11 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - Fix album Enter not sent: increase delay before Enter for multi-photo instructions (0.5s vs 0.1s)
 - Fix album instruction format: use `Read these images: path1, path2` with comma separators for clarity
 - Fix smartfocus noise: filter spinner lines with `...` (three dots), not just `…` (Unicode ellipsis)
-- Fix smartfocus noise: filter tool progress lines like `● Reading 1 file... (ctrl+o to expand)`
+- Fix smartfocus noise: filter tool progress lines like `Reading 1 file… (ctrl+o to expand)` regardless of `●` prefix
 - Increase send-keys Enter delay from 0.1s to 0.3s for text messages and single photos to prevent stuck prompts
 - Fix smartfocus echoing user's prompt: filter `❯` lines in `_filter_noise` so prompt text never leaks into response content
+- Fix smartfocus capturing garbage when no response boundary exists: `clean_pane_content("stop")` returns empty instead of including unrelated content
+- Fix empty stop message when smartfocus sent noise: detect low-overlap prev vs response and send full content
 
 ## 0.8.0
 
