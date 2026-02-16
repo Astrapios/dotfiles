@@ -54,6 +54,14 @@ exec pixi run -m $SCRIPT_PATH/scripts/astra/pixi.toml astra "\$@"
 WRAPPER
 chmod +x ~/bin/astra
 
+# Systemd user service for astra listener
+echo "  installing astra systemd service..."
+mkdir -p ~/.config/systemd/user
+cp $SCRIPT_PATH/scripts/astra/astra.service ~/.config/systemd/user/astra.service
+systemctl --user daemon-reload
+systemctl --user enable astra
+echo "  astra service enabled (start with: systemctl --user start astra)"
+
 # Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md

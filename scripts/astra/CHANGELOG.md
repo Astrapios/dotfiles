@@ -5,6 +5,18 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.11.0
+
+- Add systemd user service for auto-start and crash recovery (`astra.service`)
+- Add lock file (`/tmp/astra_listener.lock`) to prevent duplicate listener instances — uses `fcntl.flock`, inherited across `os.execv` auto-reload, auto-released on exit/crash
+- `install.zsh` now installs and enables the astra systemd service
+
+## 0.10.1
+
+- **Fix idle detection failing on unrecognized hint lines** — status lines like `? for shortcuts` below the `❯` prompt weren't recognized as UI chrome, causing `_pane_idle_state` to return False for idle sessions (messages got queued instead of delivered)
+- **Fix idle detection returning True for busy sessions** — `esc to interrupt` below the prompt now correctly signals that Claude is actively running
+- **Fix stale busy files after listener auto-reload** — `_busy_` files are now cleared at startup alongside prompt files, preventing messages from being queued indefinitely when stop signals are lost during reload
+
 ## 0.10.0
 
 - **Rename tg-hook → astra** (after Astrapios, the Lightning-Bringer)

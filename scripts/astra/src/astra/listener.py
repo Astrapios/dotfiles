@@ -1,4 +1,5 @@
 """Main daemon loop."""
+import fcntl
 import os
 import pathlib
 import re
@@ -108,11 +109,23 @@ def _build_file_instruction(files: list[dict], user_text: str = "") -> str:
 
 def cmd_listen():
     """Poll Telegram and auto-route messages to Claude sessions by wN prefix."""
+    # Acquire exclusive lock to prevent duplicate listeners.
+    # fcntl.flock is inherited across os.execv (auto-reload) and auto-released on exit/crash.
+    lock_fd = open("/tmp/astra_listener.lock", "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("Another astra listener is already running. Stop it first.")
+        sys.exit(1)
+    lock_fd.write(str(os.getpid()))
+    lock_fd.flush()
+
     state._clear_signals()
-    # Clear stale prompt state — after restart, no in-memory context to handle them
+    # Clear stale state — after restart, no in-memory context to handle prompts
+    # and stop signals that would clear busy files are lost during reload
     if os.path.isdir(config.SIGNAL_DIR):
         for f in os.listdir(config.SIGNAL_DIR):
-            if f.startswith(("_active_prompt_", "_bash_cmd_")):
+            if f.startswith(("_active_prompt_", "_bash_cmd_", "_busy_")):
                 try:
                     os.remove(os.path.join(config.SIGNAL_DIR, f))
                 except OSError:

@@ -3737,7 +3737,7 @@ class TestPaneIdleState(unittest.TestCase):
         mock_capture.return_value = (
             "❯ \n"
             "─────────────────────────────────\n"
-            "  ⏵⏵ accept edits on (shift+tab to cycle) · esc to interrupt\n"
+            "  ⏵⏵ accept edits on (shift+tab to cycle) · ctrl+t to hide tasks\n"
         )
         is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
@@ -5948,15 +5948,15 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
         self.assertTrue(is_idle)
 
     @patch.object(astra.tmux, "_capture_pane")
-    def test_prompt_above_status_bar(self, mock_capture):
-        """Prompt above separator + status bar (esc to interrupt) is idle."""
+    def test_busy_with_esc_to_interrupt(self, mock_capture):
+        """❯ with 'esc to interrupt' below means Claude is running — NOT idle."""
         mock_capture.return_value = (
             "❯ \n"
             "─────────────────────────────────────────\n"
             "  1 file +2 -2 · esc to interrupt\n"
         )
         is_idle, typed = astra._pane_idle_state("0:4.0")
-        self.assertTrue(is_idle)
+        self.assertFalse(is_idle)
 
     @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_above_status_bar_no_interrupt(self, mock_capture):
@@ -5965,6 +5965,17 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
             "❯ \n"
             "─────────────────────────────────────────\n"
             "  3 files +50 -10\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_prompt_above_shortcuts_hint(self, mock_capture):
+        """Prompt above '? for shortcuts' hint line is idle."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "  ? for shortcuts\n"
         )
         is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)

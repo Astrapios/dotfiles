@@ -51,6 +51,11 @@ def _is_ui_chrome(s: str) -> bool:
         return True
     if re.match(r'^\d+ files? [+-]', s):
         return True
+    # Hint lines below prompt: "? for shortcuts", "↵ to send", etc.
+    if s in ("? for shortcuts", "\u21b5 to send"):
+        return True
+    if re.match(r'^(\?|↵|⏎)\s', s):
+        return True
     return False
 
 
@@ -62,17 +67,24 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
     in earlier lines are correctly ignored.
     typed_text is any text on the same line after ❯ (locally typed input).
     Uses cursor position to exclude grayed-out auto-suggestions.
+    Also checks for "esc to interrupt" below the prompt — if present,
+    Claude is actively running and the pane is NOT idle.
     """
     try:
         raw = tmux._capture_pane(pane, 15)
     except Exception:
         return False, ""
+    saw_esc_to_interrupt = False
     for line in reversed(raw.splitlines()):
         s = line.strip()
+        if "esc to interrupt" in s:
+            saw_esc_to_interrupt = True
         if _is_ui_chrome(s):
             continue
         m = re.match(r'^(\s*❯\s*)(.*)', line)
         if m:
+            if saw_esc_to_interrupt:
+                return False, ""
             # Use cursor position to exclude auto-suggestions
             cursor_x = tmux._get_cursor_x(pane)
             if cursor_x is not None:
@@ -180,11 +192,13 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
 
     # Check pane idle state (always authoritative)
     is_idle, typed_text = _pane_idle_state(pane)
+    busy = state._is_busy(wid)
+    config._log("route", f"idle={is_idle}, busy={busy}, pane={pane!r}, wid={wid}")
 
     # Busy guard: file-based, but pane overrides if session is genuinely idle
     # Grace period: don't self-heal within 5s of marking busy (race between
     # sending Enter and Claude starting to process)
-    if state._is_busy(wid):
+    if busy:
         busy_ts = state._busy_since(wid)
         recently_sent = busy_ts and (time.time() - busy_ts < 5)
         if is_idle and not recently_sent:

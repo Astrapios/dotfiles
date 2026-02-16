@@ -1,0 +1,17 @@
+[Unit]
+Description=Astra Telegram bridge for Claude Code
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/home/ubuntu/.pixi/bin/pixi run -m /home/ubuntu/.dotfiles/scripts/astra/pixi.toml astra listen
+Restart=on-failure
+RestartSec=5
+# Auto-reload uses os.execv (same PID, not a restart).
+# Generous burst limit handles rapid crash loops during development.
+StartLimitBurst=20
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=default.target
