@@ -175,7 +175,8 @@ def cmd_listen():
         pass
 
     telegram._set_bot_commands()
-    telegram.tg_send(tmux.format_sessions_message(sessions),
+    statuses = routing._get_session_statuses(sessions)
+    telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses),
                      reply_markup=telegram._build_reply_keyboard())
     god_wids = state._god_mode_wids()
     config._log("listen", f"Found {len(sessions)} Claude session(s).")
@@ -234,7 +235,8 @@ def cmd_listen():
                     smartfocus_pane_width = 0
                     smartfocus_prev_lines = []
                     smartfocus_has_sent = False
-                    telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions),
+                    statuses = routing._get_session_statuses(sessions)
+                    telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions, statuses=statuses),
                                      reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
                 elif text.lower() == "/quit":

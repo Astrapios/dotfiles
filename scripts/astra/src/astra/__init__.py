@@ -75,7 +75,7 @@ from .content import (
 # routing
 from .routing import (
     _select_option, route_to_pane, _pane_idle_state,
-    _is_ui_chrome,
+    _get_session_statuses, _is_ui_chrome,
 )
 
 # signals

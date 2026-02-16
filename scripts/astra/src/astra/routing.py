@@ -96,6 +96,26 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _get_session_statuses(sessions: dict[str, tuple[str, str]]) -> dict[str, str]:
+    """Return {idx: "idle"|"busy"|"interrupted"} for each session."""
+    from astra import content
+    statuses: dict[str, str] = {}
+    for idx, (pane, _project) in sessions.items():
+        idle, _ = _pane_idle_state(pane)
+        if idle:
+            try:
+                raw = tmux._capture_pane(pane, 15)
+                if content._detect_interrupted(raw):
+                    statuses[idx] = "interrupted"
+                else:
+                    statuses[idx] = "idle"
+            except Exception:
+                statuses[idx] = "idle"
+        else:
+            statuses[idx] = "busy"
+    return statuses
+
+
 def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     """Route a message to a tmux pane, handling active prompts.
 

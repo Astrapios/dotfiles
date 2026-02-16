@@ -128,10 +128,15 @@ def scan_claude_sessions() -> dict[str, tuple[str, str]]:
     return sessions
 
 
-def format_sessions_message(sessions: dict[str, tuple[str, str]]) -> str:
-    """Format a sessions map into a Telegram message."""
+def format_sessions_message(sessions: dict[str, tuple[str, str]],
+                            statuses: dict[str, str] | None = None) -> str:
+    """Format a sessions map into a Telegram message.
+
+    statuses: optional dict of {idx: "idle"|"busy"|"interrupted"} for each session.
+    """
     if not sessions:
         return "⚠️ No Claude sessions found in tmux."
+    _status_icons = {"idle": "🟢", "busy": "🟡", "interrupted": "🔴"}
     names = state._load_session_names()
     lines = ["📋 *Active Claude sessions:*"]
     for idx in sorted(sessions, key=int):
@@ -139,7 +144,10 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]]) -> str:
         name = names.get(idx, "")
         label = f"`w{idx} [{name}]`" if name else f"`w{idx}`"
         god = " ⚡" if state._is_god_mode_for(idx) else ""
-        lines.append(f"  {label} — `{project}` (`{target}`){god}")
+        status_icon = ""
+        if statuses and idx in statuses:
+            status_icon = f" {_status_icons.get(statuses[idx], '')}"
+        lines.append(f"  {label} — `{project}`{status_icon}{god}")
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)
 
