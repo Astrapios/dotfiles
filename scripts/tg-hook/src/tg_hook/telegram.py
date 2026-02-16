@@ -357,6 +357,7 @@ def _extract_chat_messages(data: dict) -> list[dict]:
       - "text": str (message text or caption)
       - "photo": str | None (file_id of largest photo, if present)
       - "callback": dict | None ({"id", "data", "message_id"} for button presses)
+      - "media_group_id": str | None (shared ID for album photos)
     """
     messages = []
     for upd in data.get("result", []):
@@ -398,6 +399,7 @@ def _extract_chat_messages(data: dict) -> list[dict]:
                 "photo": best.get("file_id"),
                 "callback": None,
                 "reply_wid": reply_wid,
+                "media_group_id": msg.get("media_group_id"),
             })
         elif text:
             messages.append({"text": text.strip(), "photo": None,

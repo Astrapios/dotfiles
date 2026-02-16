@@ -5,6 +5,14 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.8.1
+
+- Batch album photos into a single `Read path1 path2 path3 — caption` instruction so Claude sees all images at once
+- Photos sharing the same `media_group_id` are merged before processing
+- Fix filename collision for simultaneous photos: use microsecond-precision timestamps with index suffix
+- Fix album Enter not sent: increase delay before Enter for multi-photo instructions (0.5s vs 0.1s)
+- Fix album instruction format: use `Read these images: path1, path2` with comma separators for clarity
+
 ## 0.8.0
 
 - Add notification control: `/notification` command to configure which message categories buzz your phone

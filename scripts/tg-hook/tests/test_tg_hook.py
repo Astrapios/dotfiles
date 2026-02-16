@@ -6470,5 +6470,130 @@ class TestHelpIncludesNotification(unittest.TestCase):
         self.assertIn("noti", msg)
 
 
+class TestMediaGroupId(unittest.TestCase):
+    """Test media_group_id extraction in _extract_chat_messages."""
+
+    def _make_update(self, msg_fields):
+        return {"result": [{"update_id": 1, "message": {"chat": {"id": int(tg.CHAT_ID)}, **msg_fields}}]}
+
+    def test_photo_with_media_group_id(self):
+        data = self._make_update({
+            "photo": [{"file_id": "abc", "width": 800, "height": 800}],
+            "caption": "w4 describe",
+            "media_group_id": "album123",
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["media_group_id"], "album123")
+
+    def test_photo_without_media_group_id(self):
+        data = self._make_update({
+            "photo": [{"file_id": "abc", "width": 800, "height": 800}],
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertIsNone(result[0]["media_group_id"])
+
+    def test_text_message_no_media_group_id(self):
+        """Text messages don't have media_group_id key at all."""
+        data = self._make_update({"text": "hello"})
+        result = tg._extract_chat_messages(data)
+        self.assertNotIn("media_group_id", result[0])
+
+
+class TestMergeAlbumPhotos(unittest.TestCase):
+    """Test _merge_album_photos groups album photos correctly."""
+
+    def test_single_photo_passes_through(self):
+        msgs = [{"text": "hello", "photo": "abc", "media_group_id": None, "callback": None}]
+        result = tg._merge_album_photos(msgs)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["photo"], "abc")
+        self.assertNotIn("photos", result[0])
+
+    def test_album_photos_merged(self):
+        msgs = [
+            {"text": "describe these", "photo": "id1", "media_group_id": "album1", "callback": None},
+            {"text": "", "photo": "id2", "media_group_id": "album1", "callback": None},
+            {"text": "", "photo": "id3", "media_group_id": "album1", "callback": None},
+        ]
+        result = tg._merge_album_photos(msgs)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["photos"], ["id1", "id2", "id3"])
+        self.assertEqual(result[0]["text"], "describe these")
+
+    def test_album_caption_from_later_message(self):
+        """If the first photo has no caption but a later one does, use it."""
+        msgs = [
+            {"text": "", "photo": "id1", "media_group_id": "album1", "callback": None},
+            {"text": "w4 check these", "photo": "id2", "media_group_id": "album1", "callback": None},
+        ]
+        result = tg._merge_album_photos(msgs)
+        self.assertEqual(result[0]["text"], "w4 check these")
+
+    def test_mixed_album_and_single(self):
+        msgs = [
+            {"text": "single", "photo": "s1", "media_group_id": None, "callback": None},
+            {"text": "album", "photo": "a1", "media_group_id": "grp1", "callback": None},
+            {"text": "", "photo": "a2", "media_group_id": "grp1", "callback": None},
+            {"text": "text msg", "photo": None, "callback": None},
+        ]
+        result = tg._merge_album_photos(msgs)
+        self.assertEqual(len(result), 3)
+        # First: single photo (no photos list)
+        self.assertEqual(result[0]["photo"], "s1")
+        self.assertNotIn("photos", result[0])
+        # Second: merged album
+        self.assertEqual(result[1]["photos"], ["a1", "a2"])
+        self.assertEqual(result[1]["text"], "album")
+        # Third: text message
+        self.assertEqual(result[2]["text"], "text msg")
+
+    def test_two_separate_albums(self):
+        msgs = [
+            {"text": "first", "photo": "a1", "media_group_id": "grp1", "callback": None},
+            {"text": "second", "photo": "b1", "media_group_id": "grp2", "callback": None},
+            {"text": "", "photo": "a2", "media_group_id": "grp1", "callback": None},
+            {"text": "", "photo": "b2", "media_group_id": "grp2", "callback": None},
+        ]
+        result = tg._merge_album_photos(msgs)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["photos"], ["a1", "a2"])
+        self.assertEqual(result[0]["text"], "first")
+        self.assertEqual(result[1]["photos"], ["b1", "b2"])
+        self.assertEqual(result[1]["text"], "second")
+
+    def test_empty_list(self):
+        self.assertEqual(tg._merge_album_photos([]), [])
+
+    def test_text_only_messages_pass_through(self):
+        msgs = [
+            {"text": "hello", "photo": None, "callback": None},
+            {"text": "world", "photo": None, "callback": None},
+        ]
+        result = tg._merge_album_photos(msgs)
+        self.assertEqual(len(result), 2)
+
+
+class TestAlbumPhotoInstruction(unittest.TestCase):
+    """Test that album photos produce a multi-path Read instruction."""
+
+    def test_album_instruction_format(self):
+        """Verify the instruction format for multiple photo paths."""
+        paths = ["/tmp/tg_photo_1.jpg", "/tmp/tg_photo_2.jpg", "/tmp/tg_photo_3.jpg"]
+        remaining_text = "describe these"
+        instruction = "Read these images: " + ", ".join(paths)
+        if remaining_text:
+            instruction += f" — {remaining_text}"
+        self.assertEqual(
+            instruction,
+            "Read these images: /tmp/tg_photo_1.jpg, /tmp/tg_photo_2.jpg, /tmp/tg_photo_3.jpg — describe these"
+        )
+
+    def test_single_photo_instruction_unchanged(self):
+        """Single photo still produces Read <path> format."""
+        paths = ["/tmp/tg_photo_1.jpg"]
+        instruction = f"Read {paths[0]}"
+        self.assertEqual(instruction, "Read /tmp/tg_photo_1.jpg")
+
+
 if __name__ == "__main__":
     unittest.main()

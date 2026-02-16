@@ -23,6 +23,35 @@ _file_mtimes: dict[pathlib.Path, float] = {}
 _reload_after: float | None = None
 
 
+def _merge_album_photos(messages: list[dict]) -> list[dict]:
+    """Merge photo messages sharing a media_group_id into a single entry.
+
+    Album photos arrive as separate messages with the same media_group_id.
+    This merges them so the first message accumulates all file_ids in a
+    'photos' list, and non-album messages pass through unchanged.
+    """
+    groups: dict[str, int] = {}  # media_group_id -> index in result
+    result: list[dict] = []
+    for msg in messages:
+        mgid = msg.get("media_group_id")
+        if mgid and msg.get("photo"):
+            if mgid in groups:
+                # Append photo to existing album entry
+                result[groups[mgid]]["photos"].append(msg["photo"])
+                # Keep caption from whichever message has one
+                if msg.get("text") and not result[groups[mgid]]["text"]:
+                    result[groups[mgid]]["text"] = msg["text"]
+            else:
+                # First photo in this album
+                groups[mgid] = len(result)
+                merged = dict(msg)
+                merged["photos"] = [msg["photo"]]
+                result.append(merged)
+        else:
+            result.append(msg)
+    return result
+
+
 def _init_file_mtimes():
     """Initialize file modification times for auto-reload detection."""
     global _file_mtimes
@@ -364,7 +393,7 @@ def cmd_listen():
             time.sleep(2)
             continue
 
-        for chat_msg in telegram._extract_chat_messages(data):
+        for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):
             callback = chat_msg.get("callback")
             if callback:
                 sessions, last_win_idx, cb_action = commands._handle_callback(
@@ -384,10 +413,17 @@ def cmd_listen():
                 last_win_idx = reply_wid
 
             # Photo received — download and route to Claude
-            if photo_id:
-                dest = f"/tmp/tg_photo_{int(time.time())}.jpg"
-                path = telegram._download_tg_photo(photo_id, dest)
-                if path:
+            photo_ids = chat_msg.get("photos") or ([photo_id] if photo_id else [])
+            if photo_ids:
+                ts = f"{time.time():.6f}"
+                paths: list[str] = []
+                for i, fid in enumerate(photo_ids):
+                    suffix = f"_{i}" if len(photo_ids) > 1 else ""
+                    dest = f"/tmp/tg_photo_{ts}{suffix}.jpg"
+                    path = telegram._download_tg_photo(fid, dest)
+                    if path:
+                        paths.append(path)
+                if paths:
                     caption = text
                     target_idx = None
                     remaining_text = caption
@@ -403,14 +439,19 @@ def cmd_listen():
                     if target_idx:
                         pane, project = sessions[target_idx]
                         wid = f"w{target_idx}"
-                        instruction = f"Read {path}"
+                        if len(paths) == 1:
+                            instruction = f"Read {paths[0]}"
+                        else:
+                            instruction = "Read these images: " + ", ".join(paths)
                         if remaining_text:
                             instruction += f" — {remaining_text}"
+
+                        paths_display = "`, `".join(paths)
 
                         # Busy check — queue if session is working
                         if state._is_busy(wid):
                             state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`",
+                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
                                              silent=state._is_silent(_CAT_CONFIRM))
                             last_win_idx = target_idx
                             continue
@@ -418,7 +459,7 @@ def cmd_listen():
                         is_idle, typed_text = routing._pane_idle_state(pane)
                         if not is_idle:
                             state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{path}`",
+                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
                                              silent=state._is_silent(_CAT_CONFIRM))
                             last_win_idx = target_idx
                             continue
@@ -431,15 +472,19 @@ def cmd_listen():
                             subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
                             time.sleep(0.2)
 
-                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.1 && tmux send-keys -t {p} Enter"
+                        # Longer delay for multi-photo albums — Claude Code
+                        # needs time to process/render image path previews
+                        delay = "0.5" if len(paths) > 1 else "0.1"
+                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep {delay} && tmux send-keys -t {p} Enter"
                         subprocess.run(["bash", "-c", cmd], timeout=10)
                         state._mark_busy(wid)
-                        confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{path}`"
+                        confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{paths_display}`"
                         telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
                         commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
                         last_win_idx = target_idx
                     else:
-                        telegram.tg_send(f"📷 Photo saved to `{path}` — no target session.\n{tmux.format_sessions_message(sessions)}",
+                        paths_display = "`, `".join(paths)
+                        telegram.tg_send(f"📷 Photo saved to `{paths_display}` — no target session.\n{tmux.format_sessions_message(sessions)}",
                                          reply_markup=tmux._sessions_keyboard(sessions))
                 else:
                     telegram.tg_send("⚠️ Failed to download photo.", silent=state._is_silent(_CAT_ERROR))

@@ -89,7 +89,7 @@ from .commands import (
 )
 
 # listener
-from .listener import cmd_listen
+from .listener import _merge_album_photos, cmd_listen
 
 # cli
 from .cli import cmd_notify, cmd_ask, cmd_send_photo, cmd_send_doc, cmd_hook, cmd_help, main
