@@ -265,6 +265,8 @@ def cmd_listen():
             state._cleanup_stale_busy(sessions)
             last_prompt_cleanup = time.time()
 
+        locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
+
         # --- Interrupt detection (no hook fires on Esc interrupt) ---
         if time.time() - last_interrupt_check > 5:
             last_interrupt_check = time.time()
@@ -381,8 +383,6 @@ def cmd_listen():
                             config._save_last_msg(wid, msg)
                         config._save_keyboard_msg(wid, kb_id)
                     config._log("listen", f"pane-detected permission for {wid} ({project})")
-
-        locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
 
         focus_state = state._load_focus_state()
         deepfocus_state = state._load_deepfocus_state()
