@@ -143,6 +143,7 @@ def cmd_listen():
     smartfocus_has_sent: bool = False
 
     interrupted_notified: set[str] = set()  # wids already notified as interrupted
+    compact_notified: set[str] = set()  # wids already notified as compacting
     last_interrupt_check: float = 0
 
     # Consume existing updates to avoid replaying old messages
@@ -267,6 +268,28 @@ def cmd_listen():
                     interrupted_notified.add(wid)
             # Clear for gone sessions
             interrupted_notified -= interrupted_notified - {f"w{i}" for i in sessions}
+
+            # --- Auto-compact detection ---
+            for idx, (pane, project) in sessions.items():
+                wid = f"w{idx}"
+                try:
+                    raw = tmux._capture_pane(pane, 15)
+                except Exception:
+                    continue
+                if content._detect_compacting(raw):
+                    if wid not in compact_notified:
+                        label = state._wid_label(idx)
+                        telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
+                                         silent=state._is_silent(_CAT_MONITOR))
+                        compact_notified.add(wid)
+                else:
+                    if wid in compact_notified:
+                        label = state._wid_label(idx)
+                        telegram.tg_send(f"✅ {label} finished compacting.",
+                                         silent=state._is_silent(_CAT_MONITOR))
+                        compact_notified.discard(wid)
+            # Clear for gone sessions
+            compact_notified -= compact_notified - {f"w{i}" for i in sessions}
 
         focus_state = state._load_focus_state()
         deepfocus_state = state._load_deepfocus_state()

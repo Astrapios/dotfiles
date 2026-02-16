@@ -56,6 +56,9 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^c(\d+)$", stripped)
     if m:
         return f"/clear w{m.group(1)}"
+    m = re.match(r"^r(\d+)$", stripped)
+    if m:
+        return f"/restart w{m.group(1)}"
     # noti <args> → /notification <args>
     m = re.match(r"^noti\s+(.+)$", stripped)
     if m:
@@ -146,6 +149,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
             "`/interrupt [wN]` — interrupt current task (Esc)",
             "`/kill wN` — exit a Claude session (Ctrl+C x3)",
+            "`/restart wN` — kill and relaunch with `claude -c`",
             "`/stop` — pause the listener",
             "`/quit` — shut down the listener",
             "",
@@ -153,7 +157,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
             "`af` autofocus | `sv` saved | `?` help",
-            "`c` clear | `c4` clear w4",
+            "`c` clear | `c4` clear w4 | `r4` restart w4",
             "`g4` god w4 | `ga` god all | `goff` god off",
             "`noti` notification | `noti 123` set loud",
             "",
@@ -508,6 +512,69 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                              reply_markup=tmux._sessions_keyboard(sessions))
             return None, sessions, last_win_idx
 
+    # /restart (bare — show session picker)
+    if text.lower().strip() == "/restart":
+        sessions = tmux.scan_claude_sessions()
+        kb = tmux._command_sessions_keyboard("restart", sessions)
+        if kb:
+            telegram.tg_send("🔄 Restart which session?", reply_markup=kb)
+        else:
+            telegram.tg_send("⚠️ No Claude sessions found.")
+        return None, sessions, last_win_idx
+
+    # /restart wN|name
+    restart_m = re.match(r"^/restart\s+w?(\w[\w-]*)$", text.lower())
+    if restart_m:
+        raw_target = restart_m.group(1)
+        idx = state._resolve_name(raw_target, sessions)
+        if idx:
+            pane, project = sessions[idx]
+            wid = f"w{idx}"
+            # Save working directory before killing
+            cwd = tmux._get_pane_cwd(pane)
+            p = shlex.quote(pane)
+            # Kill with 3x Ctrl+C
+            subprocess.run(
+                ["bash", "-c",
+                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
+                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
+                 f"tmux send-keys -t {p} C-c"],
+                timeout=10,
+            )
+            time.sleep(2)
+            sessions = tmux.scan_claude_sessions()
+            if idx in sessions:
+                telegram.tg_send(f"⚠️ {state._wid_label(idx)} (`{project}`) still running — restart aborted.")
+                return None, sessions, last_win_idx
+            # Clear stale state
+            state._clear_busy(wid)
+            for suffix in (f"_active_prompt_{wid}.json", f"_bash_cmd_{wid}.json"):
+                try:
+                    os.remove(os.path.join(config.SIGNAL_DIR, suffix))
+                except OSError:
+                    pass
+            # Relaunch with claude -c (continue last conversation)
+            cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
+            subprocess.run(
+                ["bash", "-c",
+                 f"tmux send-keys -t {p} -l {shlex.quote(cd_cmd + 'claude -c')} && "
+                 f"sleep 0.1 && tmux send-keys -t {p} Enter"],
+                timeout=10,
+            )
+            time.sleep(3)
+            sessions = tmux.scan_claude_sessions()
+            if idx in sessions:
+                _, new_project = sessions[idx]
+                telegram.tg_send(f"🔄 Restarted {state._wid_label(idx)} (`{new_project}`).")
+                return None, sessions, idx
+            else:
+                telegram.tg_send(f"⚠️ {state._wid_label(idx)} did not restart — pane may have closed.")
+                return None, sessions, last_win_idx
+        else:
+            telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                             reply_markup=tmux._sessions_keyboard(sessions))
+            return None, sessions, last_win_idx
+
     # /last [wN|name]
     last_m = re.match(r"^/last(?:\s+w?(\w[\w-]*))?$", text.lower())
     if last_m:
@@ -688,7 +755,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|last|god)_(w?)(\d+)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|restart|last|god)_(w?)(\d+)$", cb_data)
     if m:
         cmd, _, idx = m.group(1), m.group(2), m.group(3)
         cmd_text = f"/{cmd} w{idx}"

@@ -113,11 +113,23 @@ def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
     while lines and not lines[-1].strip():
         lines.pop()
     filtered = []
+    in_prompt = False
     for line in lines:
         s = line.strip()
-        # Prompt lines are never response content
+        # Prompt lines: keep in status mode (context), strip in response mode
         if s.startswith("❯"):
+            if keep_status:
+                in_prompt = False
+                filtered.append(line.rstrip())
+            else:
+                in_prompt = True
             continue
+        # Skip wrapped continuations of a filtered ❯ prompt line
+        if in_prompt:
+            indent = len(line) - len(line.lstrip())
+            if indent >= 2 and s and not re.match(r'[●•─━❯✻⏵⏸>*\-\d]', s):
+                continue
+            in_prompt = False
         if re.match(r'^[─━]{3,}$', s):
             continue
         if s.startswith(("⏵⏵ ", "⏸ ")):
@@ -178,6 +190,18 @@ def _detect_interrupted(raw: str) -> bool:
     # Check the few lines just above ❯ for the interrupted marker
     for i in range(end - 1, max(end - 6, -1), -1):
         if "Interrupted" in lines[i] and "·" in lines[i]:
+            return True
+    return False
+
+
+def _detect_compacting(raw: str) -> bool:
+    """Check if pane content shows Claude is auto-compacting context.
+
+    Looks for 'Compacting' (present participle) in status/spinner lines,
+    which appears during compaction but not after ('compacted').
+    """
+    for line in raw.splitlines():
+        if re.search(r'[Cc]ompacting', line):
             return True
     return False
 

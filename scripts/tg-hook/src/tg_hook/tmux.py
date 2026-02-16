@@ -39,6 +39,18 @@ def get_pane_project(pane: str) -> str:
     return "unknown"
 
 
+def _get_pane_cwd(pane: str) -> str:
+    """Get the current working directory of a tmux pane."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display", "-t", pane, "-p", "#{pane_current_path}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
 def _get_pane_width(pane: str) -> int:
     """Get the character width of a tmux pane."""
     try:

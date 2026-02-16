@@ -129,6 +129,7 @@ Telegram commands (inside listener):
   /last [wN]          Re-send last Telegram message
   /autofocus          Toggle auto-monitor on send
   /kill wN            Exit a Claude session
+  /restart wN         Kill and relaunch with claude -c
   /stop / /start      Pause/resume listener
   /quit               Shut down listener""")
 

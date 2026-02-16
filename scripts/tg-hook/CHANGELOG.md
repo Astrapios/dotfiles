@@ -5,6 +5,12 @@ All notable changes to tg-hook are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.10.0
+
+- Add `/restart wN` command — kills a Claude session and relaunches with `claude -c` (continue last conversation) in the same pane
+- Alias: `r4` → `/restart w4`
+- Auto-compact detection — listener detects when Claude is auto-compacting context and sends ⏳/✅ notifications to Telegram
+
 ## 0.9.0
 
 - Support receiving documents (PDF, text files, etc.) from Telegram — downloads and routes to Claude as `Read /tmp/tg_doc_xxx.ext — caption`

@@ -41,7 +41,7 @@ from .telegram import (
 
 # tmux
 from .tmux import (
-    get_window_id, get_pane_project, _get_pane_width, _get_cursor_x,
+    get_window_id, get_pane_project, _get_pane_cwd, _get_pane_width, _get_cursor_x,
     _join_wrapped_lines, _capture_pane, scan_claude_sessions,
     format_sessions_message, _sessions_keyboard, _command_sessions_keyboard,
 )
@@ -68,8 +68,8 @@ from .state import (
 # content
 from .content import (
     _extract_pane_permission, _filter_noise, _filter_tool_calls,
-    _has_response_start, _detect_interrupted, clean_pane_content,
-    clean_pane_status, _compute_new_lines,
+    _has_response_start, _detect_interrupted, _detect_compacting,
+    clean_pane_content, clean_pane_status, _compute_new_lines,
 )
 
 # routing

@@ -259,6 +259,7 @@ def _set_bot_commands():
         {"command": "stop", "description": "Pause the listener"},
         {"command": "start", "description": "Resume the listener"},
         {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
+        {"command": "restart", "description": "Kill and relaunch with claude -c"},
         {"command": "quit", "description": "Shut down the listener"},
     ]
     try:

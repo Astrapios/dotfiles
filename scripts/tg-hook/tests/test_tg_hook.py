@@ -183,6 +183,40 @@ class TestFilterNoise(unittest.TestCase):
         result = tg._filter_noise(raw)
         self.assertEqual(result, ["● All 3 images received.", "Here are the descriptions."])
 
+    def test_removes_wrapped_prompt_continuations(self):
+        """Wrapped continuations of a ❯ prompt line should also be filtered."""
+        raw = (
+            "● Response above.\n"
+            "❯ Read /tmp/photo.jpg — after compaction, before it should\n"
+            "  have keywords such as compacting in the status line\n"
+            "  right above the prompt line\n"
+            "● Claude's next response."
+        )
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["● Response above.", "● Claude's next response."])
+
+    def test_prompt_continuation_stops_at_bullet(self):
+        """Continuation skipping stops at a ● bullet (not mistaken for continuation)."""
+        raw = (
+            "❯ some prompt\n"
+            "● Response starts here.\n"
+            "  Indented response text."
+        )
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["● Response starts here.", "  Indented response text."])
+
+    def test_keeps_prompt_in_status_mode(self):
+        """With keep_status=True, ❯ prompt lines are preserved for context."""
+        raw = (
+            "● Response above.\n"
+            "❯ Read /tmp/photo.jpg — after compaction, before it should\n"
+            "  have keywords such as compacting in the status line\n"
+            "● Claude's next response."
+        )
+        result = tg._filter_noise(raw, keep_status=True)
+        self.assertIn("❯ Read /tmp/photo.jpg — after compaction, before it should", result)
+        self.assertIn("  have keywords such as compacting in the status line", result)
+
 
 class TestCleanPaneContent(unittest.TestCase):
     """Test clean_pane_content for stop events."""
@@ -2484,7 +2518,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("saved", names)
         self.assertIn("clear", names)
         self.assertIn("notification", names)
-        self.assertEqual(len(commands), 18)
+        self.assertIn("restart", names)
+        self.assertEqual(len(commands), 19)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -6715,6 +6750,188 @@ class TestAlbumPhotoInstruction(unittest.TestCase):
         paths = ["/tmp/tg_photo_1.jpg"]
         instruction = f"Read {paths[0]}"
         self.assertEqual(instruction, "Read /tmp/tg_photo_1.jpg")
+
+
+class TestDetectCompacting(unittest.TestCase):
+    """Test _detect_compacting detects auto-compacting status."""
+
+    def test_compacting_in_progress(self):
+        raw = (
+            "● Some response text here.\n"
+            "  More details about the task.\n"
+            "⠙ Compacting conversation…\n"
+        )
+        self.assertTrue(tg._detect_compacting(raw))
+
+    def test_compacting_lowercase(self):
+        raw = "⠐ compacting context…\n"
+        self.assertTrue(tg._detect_compacting(raw))
+
+    def test_compacted_not_detected(self):
+        """Past tense 'compacted' should not match."""
+        raw = (
+            "✻ Conversation compacted (ctrl+o for history)\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertFalse(tg._detect_compacting(raw))
+
+    def test_normal_pane_not_compacting(self):
+        raw = (
+            "● Here is the response.\n"
+            "\n"
+            "❯ \n"
+        )
+        self.assertFalse(tg._detect_compacting(raw))
+
+    def test_compacting_with_status_bar(self):
+        raw = (
+            "⏵⏵ accept edits on · claude-code\n"
+            "⠋ Compacting conversation…  1m 23s\n"
+            "Context left until auto-compact: 5%\n"
+        )
+        self.assertTrue(tg._detect_compacting(raw))
+
+
+class TestRestartCommand(unittest.TestCase):
+    """Test /restart command."""
+
+    def setUp(self):
+        self.sessions = {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")}
+        self.signal_dir = "/tmp/tg_hook_test_restart"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig = tg.config.SIGNAL_DIR
+        tg.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        tg.config.SIGNAL_DIR = self._orig
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(tg.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
+    def test_restart_success(self, mock_cwd, mock_scan, mock_run, mock_send):
+        """Restart kills, clears state, relaunches, reports success."""
+        # First scan: session gone (killed). Second scan: session back (restarted).
+        mock_scan.side_effect = [
+            {"5": ("0:5.0", "other")},  # after kill: w4 gone
+            {"4": ("0:4.0", "myproj"), "5": ("0:5.0", "other")},  # after relaunch: w4 back
+        ]
+        # Create state files that should be cleaned up
+        tg._mark_busy("w4")
+        tg.save_active_prompt("w4", "0:4.0", total=3)
+
+        with patch("time.sleep"):
+            action, sessions, last = tg._handle_command(
+                "/restart w4", self.sessions, "5")
+        self.assertIsNone(action)
+        self.assertEqual(last, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Restarted", msg)
+        self.assertIn("myproj", msg)
+        # Verify cwd was queried
+        mock_cwd.assert_called_once_with("0:4.0")
+        # Verify Ctrl+C x3 was sent (first subprocess.run call)
+        first_run = mock_run.call_args_list[0]
+        cmd_str = first_run[0][0][2]
+        self.assertEqual(cmd_str.count("C-c"), 3)
+        # Verify claude -c was sent (second subprocess.run call)
+        second_run = mock_run.call_args_list[1]
+        cmd_str2 = second_run[0][0][2]
+        self.assertIn("claude -c", cmd_str2)
+        self.assertIn("/home/user/myproj", cmd_str2)
+        # State files should be cleaned
+        self.assertFalse(tg._is_busy("w4"))
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(tg.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
+    def test_restart_kill_fails(self, mock_cwd, mock_scan, mock_run, mock_send):
+        """Restart aborts if session is still running after kill."""
+        mock_scan.return_value = self.sessions  # w4 still there
+        with patch("time.sleep"):
+            action, sessions, last = tg._handle_command(
+                "/restart w4", self.sessions, "5")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("still running", msg)
+        self.assertIn("restart aborted", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch("subprocess.run")
+    @patch.object(tg.tmux, "scan_claude_sessions")
+    @patch.object(tg.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
+    def test_restart_relaunch_fails(self, mock_cwd, mock_scan, mock_run, mock_send):
+        """Restart warns if session doesn't come back after relaunch."""
+        mock_scan.side_effect = [
+            {"5": ("0:5.0", "other")},  # after kill: w4 gone
+            {"5": ("0:5.0", "other")},  # after relaunch: w4 still gone
+        ]
+        with patch("time.sleep"):
+            action, sessions, last = tg._handle_command(
+                "/restart w4", self.sessions, "5")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("did not restart", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_restart_nonexistent_session(self, mock_send):
+        action, _, _ = tg._handle_command(
+            "/restart w99", self.sessions, "4")
+        msg = mock_send.call_args[0][0]
+        self.assertIn("No session", msg)
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    @patch.object(tg.tmux, "scan_claude_sessions")
+    def test_bare_restart_shows_picker(self, mock_scan, mock_send):
+        """Bare /restart shows session picker."""
+        mock_scan.return_value = self.sessions
+        action, _, _ = tg._handle_command("/restart", self.sessions, "4")
+        self.assertIsNone(action)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Restart which", msg)
+        _, kwargs = mock_send.call_args
+        kb = kwargs.get("reply_markup")
+        buttons = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        self.assertIn("cmd_restart_4", buttons)
+
+
+class TestRestartAlias(unittest.TestCase):
+    """Test r4 alias resolves to /restart w4."""
+
+    def test_r4_alias(self):
+        result = tg._resolve_alias("r4", False)
+        self.assertEqual(result, "/restart w4")
+
+    def test_r4_alias_with_active_prompt(self):
+        """Digit aliases always resolve even during prompts."""
+        result = tg._resolve_alias("r4", True)
+        self.assertEqual(result, "/restart w4")
+
+
+class TestRestartCallback(unittest.TestCase):
+    """Test restart command callback from inline keyboard."""
+
+    @patch.object(tg.commands, "_handle_command", return_value=(None, {}, "4"))
+    @patch.object(tg.telegram, "_answer_callback_query")
+    @patch.object(tg.telegram, "_remove_inline_keyboard")
+    def test_cmd_restart_callback(self, mock_remove, mock_answer, mock_cmd):
+        callback = {"id": "cb1", "data": "cmd_restart_4", "message_id": 100}
+        sessions, last, action = tg._handle_callback(
+            callback, {"4": ("0:4.0", "proj")}, None)
+        mock_cmd.assert_called_once_with("/restart w4", {"4": ("0:4.0", "proj")}, None)
+
+
+class TestHelpIncludesRestart(unittest.TestCase):
+    """Test help text includes /restart."""
+
+    @patch.object(tg.telegram, "tg_send", return_value=1)
+    def test_help_mentions_restart(self, mock_send):
+        tg._handle_command("/help", {"4": ("0:4.0", "proj")}, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("/restart", msg)
+        self.assertIn("r4", msg)
 
 
 if __name__ == "__main__":
