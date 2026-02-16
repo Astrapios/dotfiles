@@ -97,7 +97,7 @@ def _enable_accept_edits(pane: str):
 
 def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: str):
     """Activate smart focus after a message is sent (not queued/prompt reply)."""
-    if not (confirm.startswith("📨 Sent to") or confirm.startswith("📷 Photo sent to")):
+    if not (confirm.startswith("📨 Sent to") or confirm.startswith("📷 Photo sent to") or confirm.startswith("📎 Document sent to")):
         return
     if not state._is_autofocus_enabled():
         return

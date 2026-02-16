@@ -324,7 +324,7 @@ def _poll_updates(offset: int, timeout: int = 1) -> tuple[dict | None, int]:
     return data, offset
 
 
-def _download_tg_photo(file_id: str, dest: str) -> str | None:
+def _download_tg_file(file_id: str, dest: str) -> str | None:
     """Download a Telegram file by file_id to dest path. Returns path or None."""
     try:
         r = requests.get(
@@ -346,7 +346,7 @@ def _download_tg_photo(file_id: str, dest: str) -> str | None:
             f.write(r2.content)
         return dest
     except Exception as e:
-        config._log("photo", f"Download failed: {e}")
+        config._log("file", f"Download failed: {e}")
         return None
 
 
@@ -397,9 +397,22 @@ def _extract_chat_messages(data: dict) -> list[dict]:
             messages.append({
                 "text": caption.strip(),
                 "photo": best.get("file_id"),
+                "document": None,
                 "callback": None,
                 "reply_wid": reply_wid,
                 "media_group_id": msg.get("media_group_id"),
+            })
+        elif msg.get("document"):
+            doc = msg["document"]
+            messages.append({
+                "text": caption.strip(),
+                "photo": None,
+                "document": {
+                    "file_id": doc.get("file_id"),
+                    "file_name": doc.get("file_name", ""),
+                },
+                "callback": None,
+                "reply_wid": reply_wid,
             })
         elif text:
             messages.append({"text": text.strip(), "photo": None,

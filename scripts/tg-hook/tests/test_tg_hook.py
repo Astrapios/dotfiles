@@ -1001,9 +1001,41 @@ class TestExtractChatMessages(unittest.TestCase):
         result = tg._extract_chat_messages(data)
         self.assertEqual(result[0]["reply_wid"], "3")
 
+    def test_document_message(self):
+        """Document message → document dict with file_id and file_name."""
+        data = self._make_update({
+            "document": {"file_id": "doc_abc", "file_name": "report.pdf"},
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(len(result), 1)
+        self.assertIsNone(result[0]["photo"])
+        self.assertEqual(result[0]["document"]["file_id"], "doc_abc")
+        self.assertEqual(result[0]["document"]["file_name"], "report.pdf")
+        self.assertEqual(result[0]["text"], "")
 
-class TestDownloadTgPhoto(unittest.TestCase):
-    """Test _download_tg_photo helper."""
+    def test_document_message_with_caption(self):
+        """Document message with caption → text set from caption."""
+        data = self._make_update({
+            "document": {"file_id": "doc_xyz", "file_name": "data.csv"},
+            "caption": "w4 analyze this",
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["text"], "w4 analyze this")
+        self.assertEqual(result[0]["document"]["file_id"], "doc_xyz")
+        self.assertEqual(result[0]["document"]["file_name"], "data.csv")
+        self.assertIsNone(result[0]["photo"])
+
+    def test_document_no_file_name(self):
+        """Document without file_name → file_name defaults to empty string."""
+        data = self._make_update({
+            "document": {"file_id": "doc_no_name"},
+        })
+        result = tg._extract_chat_messages(data)
+        self.assertEqual(result[0]["document"]["file_name"], "")
+
+
+class TestDownloadTgFile(unittest.TestCase):
+    """Test _download_tg_file helper."""
 
     @patch("requests.get")
     def test_successful_download(self, mock_get):
@@ -1020,7 +1052,7 @@ class TestDownloadTgPhoto(unittest.TestCase):
         mock_get.side_effect = [get_file_resp, download_resp]
 
         dest = "/tmp/tg_hook_test_photo.jpg"
-        result = tg._download_tg_photo("test_file_id", dest)
+        result = tg._download_tg_file("test_file_id", dest)
         self.assertEqual(result, dest)
         self.assertTrue(os.path.exists(dest))
         with open(dest, "rb") as f:
@@ -1029,7 +1061,7 @@ class TestDownloadTgPhoto(unittest.TestCase):
 
     @patch("requests.get", side_effect=Exception("network error"))
     def test_download_failure_returns_none(self, mock_get):
-        result = tg._download_tg_photo("bad_id", "/tmp/tg_hook_test_fail.jpg")
+        result = tg._download_tg_file("bad_id", "/tmp/tg_hook_test_fail.jpg")
         self.assertIsNone(result)
 
 
@@ -1830,8 +1862,8 @@ class TestCmdHookEdgeCases(unittest.TestCase):
         self.assertEqual(sig["questions"], questions)
 
 
-class TestDownloadTgPhotoEdgeCases(unittest.TestCase):
-    """Additional edge cases for _download_tg_photo."""
+class TestDownloadTgFileEdgeCases(unittest.TestCase):
+    """Additional edge cases for _download_tg_file."""
 
     @patch("requests.get")
     def test_empty_file_path(self, mock_get):
@@ -1840,7 +1872,7 @@ class TestDownloadTgPhotoEdgeCases(unittest.TestCase):
         resp.json.return_value = {"result": {"file_path": ""}}
         resp.raise_for_status = MagicMock()
         mock_get.return_value = resp
-        result = tg._download_tg_photo("file_id", "/tmp/test.jpg")
+        result = tg._download_tg_file("file_id", "/tmp/test.jpg")
         self.assertIsNone(result)
 
     @patch("requests.get")
@@ -1850,7 +1882,7 @@ class TestDownloadTgPhotoEdgeCases(unittest.TestCase):
         resp.json.return_value = {}
         resp.raise_for_status = MagicMock()
         mock_get.return_value = resp
-        result = tg._download_tg_photo("file_id", "/tmp/test.jpg")
+        result = tg._download_tg_file("file_id", "/tmp/test.jpg")
         self.assertIsNone(result)
 
 

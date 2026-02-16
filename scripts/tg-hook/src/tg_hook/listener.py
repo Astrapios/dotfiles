@@ -84,6 +84,7 @@ def cmd_listen():
     sessions = tmux.scan_claude_sessions()
     last_scan = time.time()
     last_win_idx = None
+    pending_file = None  # {"type": "photo"|"document", "paths"|"path": ..., ...}
     RESCAN_INTERVAL = 60
 
     last_prompt_cleanup: float = 0
@@ -396,11 +397,36 @@ def cmd_listen():
         for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):
             callback = chat_msg.get("callback")
             if callback:
+                cb_data = callback.get("data", "")
+
+                # Handle pending file Skip / Cancel buttons
+                if cb_data in ("file_skip", "file_cancel"):
+                    telegram._answer_callback_query(callback["id"])
+                    if callback.get("message_id"):
+                        telegram._remove_inline_keyboard(callback["message_id"])
+                    if pending_file and cb_data == "file_skip":
+                        if pending_file["type"] == "photo":
+                            pf_paths = pending_file["paths"]
+                            if len(pf_paths) == 1:
+                                instruction = f"Read {pf_paths[0]}"
+                            else:
+                                instruction = "Read these images: " + ", ".join(pf_paths)
+                        else:
+                            instruction = f"Read {pending_file['path']}"
+                        pending_file = None
+                        _, sessions, last_win_idx = commands._handle_command(
+                            instruction, sessions, last_win_idx)
+                    elif pending_file and cb_data == "file_cancel":
+                        pending_file = None
+                        telegram.tg_send("🗑 File discarded.",
+                                         silent=state._is_silent(_CAT_CONFIRM))
+                    continue
+
                 sessions, last_win_idx, cb_action = commands._handle_callback(
                     callback, sessions, last_win_idx)
                 if cb_action == "quit":
                     return
-                if quit_pending and callback.get("data", "").startswith("quit_"):
+                if quit_pending and cb_data.startswith("quit_"):
                     quit_pending = False
                 continue
 
@@ -420,11 +446,25 @@ def cmd_listen():
                 for i, fid in enumerate(photo_ids):
                     suffix = f"_{i}" if len(photo_ids) > 1 else ""
                     dest = f"/tmp/tg_photo_{ts}{suffix}.jpg"
-                    path = telegram._download_tg_photo(fid, dest)
+                    path = telegram._download_tg_file(fid, dest)
                     if path:
                         paths.append(path)
                 if paths:
                     caption = text
+                    if not caption:
+                        # No caption — prompt for instructions before routing
+                        pending_file = {"type": "photo", "paths": paths}
+                        paths_display = "`, `".join(paths)
+                        count = f"{len(paths)} photos" if len(paths) > 1 else "Photo"
+                        file_kb = telegram._build_inline_keyboard([
+                            [("⏭ Skip", "file_skip"), ("🗑 Cancel", "file_cancel")],
+                        ])
+                        telegram.tg_send(
+                            f"📷 {count} received\n`{paths_display}`\n\n"
+                            f"Reply with instructions for Claude:",
+                            reply_markup=file_kb,
+                            silent=state._is_silent(_CAT_CONFIRM))
+                        continue
                     target_idx = None
                     remaining_text = caption
                     m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
@@ -490,6 +530,87 @@ def cmd_listen():
                     telegram.tg_send("⚠️ Failed to download photo.", silent=state._is_silent(_CAT_ERROR))
                 continue
 
+            # Document received — download and route to Claude
+            doc_info = chat_msg.get("document")
+            if doc_info:
+                ts = f"{time.time():.6f}"
+                file_name = doc_info.get("file_name", "")
+                ext = os.path.splitext(file_name)[1] if file_name else ".bin"
+                if not ext:
+                    ext = ".bin"
+                dest = f"/tmp/tg_doc_{ts}{ext}"
+                path = telegram._download_tg_file(doc_info["file_id"], dest)
+                if path:
+                    caption = text
+                    if not caption:
+                        # No caption — prompt for instructions before routing
+                        display = file_name or os.path.basename(path)
+                        pending_file = {"type": "document", "path": path, "file_name": display}
+                        file_kb = telegram._build_inline_keyboard([
+                            [("⏭ Skip", "file_skip"), ("🗑 Cancel", "file_cancel")],
+                        ])
+                        telegram.tg_send(
+                            f"📎 Document received: `{display}`\n\n"
+                            f"Reply with instructions for Claude:",
+                            reply_markup=file_kb,
+                            silent=state._is_silent(_CAT_CONFIRM))
+                        continue
+                    target_idx = None
+                    remaining_text = caption
+                    m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
+                    if m and m.group(1) in sessions:
+                        target_idx = m.group(1)
+                        remaining_text = m.group(2).strip()
+                    elif len(sessions) == 1:
+                        target_idx = next(iter(sessions))
+                    elif last_win_idx and last_win_idx in sessions:
+                        target_idx = last_win_idx
+
+                    if target_idx:
+                        pane, project = sessions[target_idx]
+                        wid = f"w{target_idx}"
+                        instruction = f"Read {path}"
+                        if remaining_text:
+                            instruction += f" — {remaining_text}"
+
+                        # Busy check — queue if session is working
+                        if state._is_busy(wid):
+                            state._save_queued_msg(wid, instruction)
+                            telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
+                                             silent=state._is_silent(_CAT_CONFIRM))
+                            last_win_idx = target_idx
+                            continue
+
+                        is_idle, typed_text = routing._pane_idle_state(pane)
+                        if not is_idle:
+                            state._save_queued_msg(wid, instruction)
+                            telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
+                                             silent=state._is_silent(_CAT_CONFIRM))
+                            last_win_idx = target_idx
+                            continue
+
+                        p = shlex.quote(pane)
+
+                        # Save locally typed text before clearing
+                        if typed_text:
+                            state._save_queued_msg(wid, typed_text)
+                            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+                            time.sleep(0.2)
+
+                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.3 && tmux send-keys -t {p} Enter"
+                        subprocess.run(["bash", "-c", cmd], timeout=10)
+                        state._mark_busy(wid)
+                        confirm = f"📎 Document sent to `w{target_idx}` (`{project}`):\n`{file_name}`"
+                        telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                        commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
+                        last_win_idx = target_idx
+                    else:
+                        telegram.tg_send(f"📎 Document saved to `{path}` — no target session.\n{tmux.format_sessions_message(sessions)}",
+                                         reply_markup=tmux._sessions_keyboard(sessions))
+                else:
+                    telegram.tg_send("⚠️ Failed to download document.", silent=state._is_silent(_CAT_ERROR))
+                continue
+
             # Handle quit confirmation
             if quit_pending:
                 quit_pending = False
@@ -501,6 +622,28 @@ def cmd_listen():
                 continue
 
             text = commands._resolve_alias(text, commands._any_active_prompt())
+
+            # Pending file: user is providing instructions for a previously sent photo/doc
+            if pending_file and not text.startswith("/"):
+                wn_m = re.match(r"^(w\d+)\s+(.*)", text, re.DOTALL)
+                prefix = ""
+                user_text = text.strip()
+                if wn_m:
+                    prefix = wn_m.group(1) + " "
+                    user_text = wn_m.group(2).strip()
+                if pending_file["type"] == "photo":
+                    pf_paths = pending_file["paths"]
+                    if len(pf_paths) == 1:
+                        instruction = f"Read {pf_paths[0]}"
+                    else:
+                        instruction = "Read these images: " + ", ".join(pf_paths)
+                else:
+                    instruction = f"Read {pending_file['path']}"
+                if user_text and user_text not in ("-", "skip"):
+                    instruction += f" — {user_text}"
+                text = f"{prefix}{instruction}"
+                pending_file = None
+
             prev_sessions = sessions
             action, sessions, last_win_idx = commands._handle_command(
                 text, sessions, last_win_idx

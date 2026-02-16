@@ -36,7 +36,7 @@ from .telegram import (
     tg_send, _send_long_message, _get_image_dimensions, tg_send_document,
     tg_send_photo, _build_inline_keyboard,
     _answer_callback_query, _remove_inline_keyboard, _set_bot_commands,
-    tg_wait_reply, _poll_updates, _download_tg_photo, _extract_chat_messages,
+    tg_wait_reply, _poll_updates, _download_tg_file, _extract_chat_messages,
 )
 
 # tmux
