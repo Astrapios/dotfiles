@@ -115,25 +115,25 @@ Setup:
   5. Run: astra listen
 
 Telegram commands (inside listener):
-  /status [wN]        List sessions or show session output
-  /focus wN           Watch completed responses
-  /deepfocus wN       Stream all output in real-time
-  /unfocus            Stop monitoring
-  /clear [wN]         Reset transient state (prompts, busy, focus)
-  /god [wN|all|off]   Auto-accept permissions (god mode)
-  /notification [12..7|all|off]  Control which alerts buzz
-  /log [N]            Show last N listener log lines (default 30)
-  /interrupt wN       Interrupt current task
-  /name wN label      Name a session
-  /new [dir]          Start new Claude session
-  /saved [wN]         Review queued messages
-  /last [wN]          Re-send last Telegram message
-  /autofocus          Toggle auto-monitor on send
-  /local [on|off]     Suppress Telegram when viewing locally
-  /kill wN            Exit a Claude session
-  /restart wN         Kill and relaunch with claude -c
-  /stop / /start      Pause/resume listener
-  /quit               Shut down listener""")
+  /status [wN] [lines] List sessions or show output
+  /interrupt [wN]      Interrupt current task (Esc)
+  /god [wN|all|off]    Auto-accept permissions (god mode)
+  /focus wN            Watch completed responses
+  /deepfocus wN        Stream all output in real-time
+  /unfocus             Stop monitoring
+  /saved [wN]          Review saved messages
+  /last [wN]           Re-send last Telegram message
+  /autofocus [on|off]  Auto-monitor on send (default: on)
+  /local [on|off]      Suppress Telegram when viewing locally
+  /notification [1..7|all|off]  Control which alerts buzz
+  /name wN label       Name a session
+  /new [dir]           Start new Claude session
+  /restart wN          Kill and relaunch with claude -c
+  /kill wN             Exit a Claude session
+  /clear [wN]          Reset transient state
+  /log [N]             Show last N journal lines (default 30)
+  /stop / /start       Pause / resume listener
+  /quit                Shut down listener""")
 
 
 def main():

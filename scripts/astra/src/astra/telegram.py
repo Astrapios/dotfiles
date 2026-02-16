@@ -244,26 +244,30 @@ def _remove_inline_keyboard(message_id: int, chat_id: str = ""):
 def _set_bot_commands():
     """Register bot commands with Telegram so they appear in the / picker."""
     commands = [
-        {"command": "status", "description": "List sessions, or show session status with wN"},
-        {"command": "help", "description": "Show available commands"},
+        # Core — used frequently
+        {"command": "status", "description": "List sessions or show output for wN"},
+        {"command": "interrupt", "description": "Interrupt current task (Esc)"},
+        {"command": "god", "description": "Auto-accept permissions (god mode)"},
         {"command": "focus", "description": "Watch completed responses from a session"},
         {"command": "deepfocus", "description": "Stream all session output in real-time"},
-        {"command": "unfocus", "description": "Stop real-time monitoring"},
-        {"command": "clear", "description": "Reset transient state (prompts, busy, focus)"},
-        {"command": "autofocus", "description": "Toggle auto-monitor on message send"},
-        {"command": "local", "description": "Suppress Telegram when viewing locally in tmux"},
-        {"command": "god", "description": "Auto-accept permissions (god mode)"},
-        {"command": "notification", "description": "Control which alerts buzz your phone"},
-        {"command": "log", "description": "Show recent listener log lines"},
-        {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},
-        {"command": "interrupt", "description": "Interrupt current task (Esc)"},
-        {"command": "last", "description": "Re-send last message for a session"},
+        {"command": "unfocus", "description": "Stop monitoring"},
         {"command": "saved", "description": "Review queued messages for busy sessions"},
+        {"command": "last", "description": "Re-send last Telegram message for a session"},
+        # Settings
+        {"command": "autofocus", "description": "Toggle auto-monitor on send"},
+        {"command": "local", "description": "Suppress Telegram when viewing in tmux"},
+        {"command": "notification", "description": "Control which alerts buzz your phone"},
+        {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},
+        # Session management
         {"command": "new", "description": "Start new Claude session"},
+        {"command": "restart", "description": "Kill and relaunch with claude -c"},
+        {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
+        {"command": "clear", "description": "Reset transient state (prompts, busy, focus)"},
+        # Admin
+        {"command": "log", "description": "Show recent listener journal lines"},
+        {"command": "help", "description": "Show available commands"},
         {"command": "stop", "description": "Pause the listener"},
         {"command": "start", "description": "Resume the listener"},
-        {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
-        {"command": "restart", "description": "Kill and relaunch with claude -c"},
         {"command": "quit", "description": "Shut down the listener"},
     ]
     try:
