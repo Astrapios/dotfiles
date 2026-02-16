@@ -156,7 +156,6 @@ def cmd_listen():
     smartfocus_prev_lines: list[str] = []
     smartfocus_has_sent: bool = False
 
-    interrupted_notified: set[str] = set()  # wids already notified as interrupted
     compact_notified: set[str] = set()  # wids already notified as compacting
     last_interrupt_check: float = 0
 
@@ -178,6 +177,9 @@ def cmd_listen():
     statuses = routing._get_session_statuses(sessions)
     telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses),
                      reply_markup=telegram._build_reply_keyboard())
+    # Pre-seed interrupted set so we don't send redundant notifications
+    # for sessions already shown as 🔴 in the startup message
+    interrupted_notified = {f"w{idx}" for idx, s in statuses.items() if s == "interrupted"}
     god_wids = state._god_mode_wids()
     config._log("listen", f"Found {len(sessions)} Claude session(s).")
     config._log("listen", f"God mode: {god_wids or 'off'}")
@@ -236,6 +238,7 @@ def cmd_listen():
                     smartfocus_prev_lines = []
                     smartfocus_has_sent = False
                     statuses = routing._get_session_statuses(sessions)
+                    interrupted_notified = {f"w{idx}" for idx, s in statuses.items() if s == "interrupted"}
                     telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions, statuses=statuses),
                                      reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
