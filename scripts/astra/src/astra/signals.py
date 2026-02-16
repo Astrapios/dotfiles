@@ -182,7 +182,7 @@ def process_signals(focused_wids: set[str] | None = None,
                 routing._select_option(pane, 1)  # Accept IMMEDIATELY
                 desc = bash_cmd[:200] if bash_cmd else (signal.get("message", "") or "permission")
                 config._log("god", f"Auto-allowed {wid} ({project}): {desc}")
-                telegram.tg_send(f"\U0001f531{tag} Auto-allowed (`{project}`): `{desc}`",
+                telegram.tg_send(f"\u26a1{tag} Auto-allowed (`{project}`): `{desc}`",
                                  silent=state._is_silent(_CAT_CONFIRM))
             else:
                 perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)

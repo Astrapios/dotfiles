@@ -179,7 +179,7 @@ Auto-accept all permission prompts for trusted sessions:
 When active, permissions are auto-accepted and you see compact receipts instead of interactive buttons:
 
 ```
-🔱 w4 Auto-allowed (myproject): git status
+⚡ w4 Auto-allowed (myproject): git status
 ```
 
 God mode also enables "accept edits on" mode (Shift+Tab cycling) to reduce edit permission prompts.

@@ -460,12 +460,15 @@ def cmd_listen():
             deepfocus_target_wid = None
 
         try:
-            data, offset = telegram._poll_updates(offset, timeout=1)
+            data, offset = telegram._poll_updates(offset, timeout=0)
         except KeyboardInterrupt:
             telegram.tg_send("👋 Bye.")
             break
         if data is None:
             time.sleep(2)
+            continue
+        if not data.get("result"):
+            time.sleep(0.15)
             continue
 
         for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):

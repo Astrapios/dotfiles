@@ -138,7 +138,7 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]]) -> str:
         target, project = sessions[idx]
         name = names.get(idx, "")
         label = f"`w{idx} [{name}]`" if name else f"`w{idx}`"
-        god = " 🔱" if state._is_god_mode_for(idx) else ""
+        god = " ⚡" if state._is_god_mode_for(idx) else ""
         lines.append(f"  {label} — `{project}` (`{target}`){god}")
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)

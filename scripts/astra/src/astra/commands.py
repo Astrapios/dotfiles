@@ -372,12 +372,12 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             # Bare /god — show status
             wids = state._god_mode_wids()
             if not wids:
-                status_msg = "\U0001f531 God mode is *off*."
+                status_msg = "\u26a1 God mode is *off*."
             elif "all" in wids:
-                status_msg = "\U0001f531 God mode is *on* for all sessions."
+                status_msg = "\u26a1 God mode is *on* for all sessions."
             else:
                 labels = ", ".join(state._wid_label(w) for w in sorted(wids, key=lambda x: int(x) if x.isdigit() else 0))
-                status_msg = f"\U0001f531 God mode is *on* for {labels}."
+                status_msg = f"\u26a1 God mode is *on* for {labels}."
             kb = tmux._command_sessions_keyboard("god", sessions)
             telegram.tg_send(status_msg, reply_markup=kb)
             return None, sessions, last_win_idx
@@ -389,16 +389,16 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if off_target:
                 idx = state._resolve_name(off_target, sessions) or off_target
                 state._set_god_mode(idx, False)
-                telegram.tg_send(f"\U0001f531 God mode *off* for {state._wid_label(idx)}.")
+                telegram.tg_send(f"\u26a1 God mode *off* for {state._wid_label(idx)}.")
             else:
                 state._clear_god_mode()
-                telegram.tg_send("\U0001f531 God mode *off*.")
+                telegram.tg_send("\u26a1 God mode *off*.")
             return None, sessions, last_win_idx
 
         # /god all
         if arg.lower() == "all":
             state._set_god_mode("all", True)
-            telegram.tg_send("\U0001f531 God mode *on* for all sessions.")
+            telegram.tg_send("\u26a1 God mode *on* for all sessions.")
             # Cycle accept-edits for all idle sessions
             for idx, (p, proj) in sessions.items():
                 idle, _ = routing._pane_idle_state(p)
@@ -413,7 +413,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             idx = state._resolve_name(raw_target, sessions)
             if idx:
                 state._set_god_mode(idx, True)
-                telegram.tg_send(f"\U0001f531 God mode *on* for {state._wid_label(idx)}.")
+                telegram.tg_send(f"\u26a1 God mode *on* for {state._wid_label(idx)}.")
                 pane_t, _ = sessions[idx]
                 idle, _ = routing._pane_idle_state(pane_t)
                 if idle:
