@@ -8,7 +8,8 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 ## 0.9.0
 
 - Support receiving documents (PDF, text files, etc.) from Telegram — downloads and routes to Claude as `Read /tmp/tg_doc_xxx.ext — caption`
-- Prompt for instructions when photo or document is sent without a caption — reply with text (or `-` to skip)
+- Prompt for instructions when photo or document is sent without a caption — reply with text, ⏭ Skip, or 🗑 Cancel
+- Accumulate multiple caption-less files into one prompt — send photos/documents one by one and they merge before routing
 - Rename `_download_tg_photo` → `_download_tg_file` (the function was already generic)
 
 ## 0.8.1

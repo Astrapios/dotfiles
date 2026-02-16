@@ -69,6 +69,43 @@ def _check_file_changes() -> bool:
     return False
 
 
+def _build_pending_prompt(files: list[dict]) -> tuple[str, dict]:
+    """Build prompt message and inline keyboard for pending file(s)."""
+    kb = telegram._build_inline_keyboard([
+        [("⏭ Skip", "file_skip"), ("🗑 Cancel", "file_cancel")],
+    ])
+    if len(files) == 1:
+        f = files[0]
+        if f["type"] == "photo":
+            msg = f"📷 Photo received\n`{f['path']}`"
+        else:
+            display = f.get("display", os.path.basename(f["path"]))
+            msg = f"📎 Document received: `{display}`"
+    else:
+        lines = []
+        for f in files:
+            name = f.get("display", os.path.basename(f["path"]))
+            icon = "📷" if f["type"] == "photo" else "📎"
+            lines.append(f"  {icon} `{name}`")
+        msg = f"📎 {len(files)} files received:\n" + "\n".join(lines)
+    msg += "\n\nReply with instructions for Claude:"
+    return msg, kb
+
+
+def _build_file_instruction(files: list[dict], user_text: str = "") -> str:
+    """Build a Read instruction from accumulated pending files."""
+    paths = [f["path"] for f in files]
+    if len(paths) == 1:
+        instruction = f"Read {paths[0]}"
+    else:
+        all_photos = all(f["type"] == "photo" for f in files)
+        label = "images" if all_photos else "files"
+        instruction = f"Read these {label}: " + ", ".join(paths)
+    if user_text and user_text not in ("-", "skip"):
+        instruction += f" — {user_text}"
+    return instruction
+
+
 def cmd_listen():
     """Poll Telegram and auto-route messages to Claude sessions by wN prefix."""
     state._clear_signals()
@@ -84,7 +121,7 @@ def cmd_listen():
     sessions = tmux.scan_claude_sessions()
     last_scan = time.time()
     last_win_idx = None
-    pending_file = None  # {"type": "photo"|"document", "paths"|"path": ..., ...}
+    pending_file = None  # {"files": [{"type","path","display"},...], "prompt_msg_id": int}
     RESCAN_INTERVAL = 60
 
     last_prompt_cleanup: float = 0
@@ -405,14 +442,7 @@ def cmd_listen():
                     if callback.get("message_id"):
                         telegram._remove_inline_keyboard(callback["message_id"])
                     if pending_file and cb_data == "file_skip":
-                        if pending_file["type"] == "photo":
-                            pf_paths = pending_file["paths"]
-                            if len(pf_paths) == 1:
-                                instruction = f"Read {pf_paths[0]}"
-                            else:
-                                instruction = "Read these images: " + ", ".join(pf_paths)
-                        else:
-                            instruction = f"Read {pending_file['path']}"
+                        instruction = _build_file_instruction(pending_file["files"])
                         pending_file = None
                         _, sessions, last_win_idx = commands._handle_command(
                             instruction, sessions, last_win_idx)
@@ -452,17 +482,17 @@ def cmd_listen():
                 if paths:
                     caption = text
                     if not caption:
-                        # No caption — prompt for instructions before routing
-                        pending_file = {"type": "photo", "paths": paths}
-                        paths_display = "`, `".join(paths)
-                        count = f"{len(paths)} photos" if len(paths) > 1 else "Photo"
-                        file_kb = telegram._build_inline_keyboard([
-                            [("⏭ Skip", "file_skip"), ("🗑 Cancel", "file_cancel")],
-                        ])
-                        telegram.tg_send(
-                            f"📷 {count} received\n`{paths_display}`\n\n"
-                            f"Reply with instructions for Claude:",
-                            reply_markup=file_kb,
+                        # No caption — accumulate and prompt for instructions
+                        new_files = [{"type": "photo", "path": p} for p in paths]
+                        if pending_file:
+                            if pending_file.get("prompt_msg_id"):
+                                telegram._remove_inline_keyboard(pending_file["prompt_msg_id"])
+                            pending_file["files"].extend(new_files)
+                        else:
+                            pending_file = {"files": new_files}
+                        msg, kb = _build_pending_prompt(pending_file["files"])
+                        pending_file["prompt_msg_id"] = telegram.tg_send(
+                            msg, reply_markup=kb,
                             silent=state._is_silent(_CAT_CONFIRM))
                         continue
                     target_idx = None
@@ -543,16 +573,18 @@ def cmd_listen():
                 if path:
                     caption = text
                     if not caption:
-                        # No caption — prompt for instructions before routing
+                        # No caption — accumulate and prompt for instructions
                         display = file_name or os.path.basename(path)
-                        pending_file = {"type": "document", "path": path, "file_name": display}
-                        file_kb = telegram._build_inline_keyboard([
-                            [("⏭ Skip", "file_skip"), ("🗑 Cancel", "file_cancel")],
-                        ])
-                        telegram.tg_send(
-                            f"📎 Document received: `{display}`\n\n"
-                            f"Reply with instructions for Claude:",
-                            reply_markup=file_kb,
+                        new_file = {"type": "document", "path": path, "display": display}
+                        if pending_file:
+                            if pending_file.get("prompt_msg_id"):
+                                telegram._remove_inline_keyboard(pending_file["prompt_msg_id"])
+                            pending_file["files"].append(new_file)
+                        else:
+                            pending_file = {"files": [new_file]}
+                        msg, kb = _build_pending_prompt(pending_file["files"])
+                        pending_file["prompt_msg_id"] = telegram.tg_send(
+                            msg, reply_markup=kb,
                             silent=state._is_silent(_CAT_CONFIRM))
                         continue
                     target_idx = None
@@ -625,22 +657,15 @@ def cmd_listen():
 
             # Pending file: user is providing instructions for a previously sent photo/doc
             if pending_file and not text.startswith("/"):
+                if pending_file.get("prompt_msg_id"):
+                    telegram._remove_inline_keyboard(pending_file["prompt_msg_id"])
                 wn_m = re.match(r"^(w\d+)\s+(.*)", text, re.DOTALL)
                 prefix = ""
                 user_text = text.strip()
                 if wn_m:
                     prefix = wn_m.group(1) + " "
                     user_text = wn_m.group(2).strip()
-                if pending_file["type"] == "photo":
-                    pf_paths = pending_file["paths"]
-                    if len(pf_paths) == 1:
-                        instruction = f"Read {pf_paths[0]}"
-                    else:
-                        instruction = "Read these images: " + ", ".join(pf_paths)
-                else:
-                    instruction = f"Read {pending_file['path']}"
-                if user_text and user_text not in ("-", "skip"):
-                    instruction += f" — {user_text}"
+                instruction = _build_file_instruction(pending_file["files"], user_text)
                 text = f"{prefix}{instruction}"
                 pending_file = None
 
