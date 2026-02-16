@@ -5,6 +5,19 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.13.0
+
+- **Local view suppression** — auto-detect when a tmux client is viewing a Claude session and skip redundant Telegram notifications for that session
+- Add `/local [on|off]` command to toggle local view suppression (default: on)
+- Show 👁 indicator in `/status` and startup message for locally viewed sessions
+- Alias: `lv` → `/local`
+- When locally viewed: permissions, stops, questions, plan approvals, god mode receipts, interrupt/compact notifications are suppressed
+- State management (busy, prompts, god mode actions) always runs regardless of local view
+- Active prompt is still saved so Telegram fallback works if user switches away
+- Log `[local]` tag on suppressed signals, interrupts, and compact notifications
+- Show `Local suppress: on/off` at startup in listener log
+- **Remove `/tmp/astra.log` file** — `/log` command now reads from `journalctl --user -u astra` instead of a separate log file; `_rotate_log()` removed
+
 ## 0.12.0
 
 - **Optimize god mode latency** — send tmux accept keys *before* Telegram notification, skip unnecessary pane capture (~200-500ms faster)

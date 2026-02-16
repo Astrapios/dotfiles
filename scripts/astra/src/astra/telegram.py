@@ -251,6 +251,7 @@ def _set_bot_commands():
         {"command": "unfocus", "description": "Stop real-time monitoring"},
         {"command": "clear", "description": "Reset transient state (prompts, busy, focus)"},
         {"command": "autofocus", "description": "Toggle auto-monitor on message send"},
+        {"command": "local", "description": "Suppress Telegram when viewing locally in tmux"},
         {"command": "god", "description": "Auto-accept permissions (god mode)"},
         {"command": "notification", "description": "Control which alerts buzz your phone"},
         {"command": "log", "description": "Show recent listener log lines"},

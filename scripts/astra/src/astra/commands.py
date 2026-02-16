@@ -12,7 +12,7 @@ _CAT_ERROR = 4
 _CAT_CONFIRM = 7
 
 _ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus",
-                            "ga": "/god all", "goff": "/god off", "c": "/clear",
+                            "lv": "/local", "ga": "/god all", "goff": "/god off", "c": "/clear",
                             "noti": "/notification"}
 
 
@@ -142,6 +142,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
             "`/autofocus` — toggle auto-monitor on send (default: on)",
+            "`/local [on|off]` — suppress Telegram when viewing locally",
             "`/clear [wN]` — reset transient state (prompts, busy, focus)",
             "`/god [wN|all|off]` — auto-accept permissions",
             "`/notification [12..7|all|off]` — control which alerts buzz",
@@ -157,7 +158,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Aliases:*",
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus | `i4` interrupt w4",
-            "`af` autofocus | `sv` saved | `?` help",
+            "`af` autofocus | `lv` local | `sv` saved | `?` help",
             "`c` clear | `c4` clear w4 | `r4` restart w4",
             "`g4` god w4 | `ga` god all | `goff` god off",
             "`noti` notification | `noti 123` set loud",
@@ -172,7 +173,9 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if text.lower() == "/status":
         sessions = tmux.scan_claude_sessions()
         statuses = routing._get_session_statuses(sessions)
-        telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses),
+        viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else None
+        telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
+                                                       locally_viewed=viewed),
                          reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
@@ -320,6 +323,30 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("👁 Autofocus *on*.")
         return None, sessions, last_win_idx
 
+    # /local [on|off]
+    local_m = re.match(r"^/local(?:\s+(on|off))?$", text.lower())
+    if local_m:
+        arg = local_m.group(1)
+        if arg == "on":
+            state._set_local_suppress(True)
+            telegram.tg_send("📍 Local suppression *on* — Telegram muted for locally viewed sessions.")
+        elif arg == "off":
+            state._set_local_suppress(False)
+            telegram.tg_send("📍 Local suppression *off* — always notify via Telegram.")
+        else:
+            enabled = state._is_local_suppress_enabled()
+            viewed = tmux._get_locally_viewed_windows()
+            status = "*on*" if enabled else "*off*"
+            lines = [f"📍 Local view suppression is {status}."]
+            if viewed:
+                labels = ", ".join(f"`w{v}`" for v in sorted(viewed, key=int))
+                lines.append(f"Currently viewed: {labels}")
+            else:
+                lines.append("No tmux client attached or viewing a Claude window.")
+            lines.append("\n`/local on` | `/local off`")
+            telegram.tg_send("\n".join(lines))
+        return None, sessions, last_win_idx
+
     # /notification [digits|all|off]
     noti_m = re.match(r"^/notification(?:\s+(.+))?$", text, re.IGNORECASE)
     if noti_m:
@@ -356,12 +383,17 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         n = int(log_m.group(1)) if log_m.group(1) else 30
         n = min(n, 100)
         try:
-            with open(config.LOG_FILE) as f:
-                lines = f.readlines()
-            tail = lines[-n:]
-            telegram.tg_send(f"📋 Last {len(tail)} log lines:\n```\n{''.join(tail).strip()}\n```")
-        except OSError:
-            telegram.tg_send("⚠️ No log file found.")
+            result = subprocess.run(
+                ["journalctl", "--user", "-u", "astra", "-n", str(n), "--no-pager"],
+                capture_output=True, text=True, timeout=10,
+            )
+            output = result.stdout.strip()
+            if output:
+                telegram.tg_send(f"📋 Last {n} log lines:\n```\n{output[-3500:]}\n```")
+            else:
+                telegram.tg_send("⚠️ No journal entries found for astra.")
+        except Exception:
+            telegram.tg_send("⚠️ Failed to read journalctl.")
         return None, sessions, last_win_idx
 
     # /god [w4|all|off|off w4]

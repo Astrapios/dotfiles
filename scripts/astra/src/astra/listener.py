@@ -120,7 +120,6 @@ def cmd_listen():
     lock_fd.write(str(os.getpid()))
     lock_fd.flush()
 
-    config._rotate_log()
     state._clear_signals()
     # Clear stale state — after restart, no in-memory context to handle prompts
     # and stop signals that would clear busy files are lost during reload
@@ -175,7 +174,9 @@ def cmd_listen():
 
     telegram._set_bot_commands()
     statuses = routing._get_session_statuses(sessions)
-    telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses),
+    startup_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
+    telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
+                                                   locally_viewed=startup_viewed or None),
                      reply_markup=telegram._build_reply_keyboard())
     # Pre-seed interrupted set so we don't send redundant notifications
     # for sessions already shown as 🔴 in the startup message
@@ -183,6 +184,7 @@ def cmd_listen():
     god_wids = state._god_mode_wids()
     config._log("listen", f"Found {len(sessions)} Claude session(s).")
     config._log("listen", f"God mode: {god_wids or 'off'}")
+    config._log("listen", f"Local suppress: {'on' if state._is_local_suppress_enabled() else 'off'}")
     config._log("listen", "Press Ctrl+C to stop")
 
     paused = False
@@ -239,7 +241,9 @@ def cmd_listen():
                     smartfocus_has_sent = False
                     statuses = routing._get_session_statuses(sessions)
                     interrupted_notified = {f"w{idx}" for idx, s in statuses.items() if s == "interrupted"}
-                    telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions, statuses=statuses),
+                    resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
+                    telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions, statuses=statuses,
+                                                                                       locally_viewed=resume_viewed or None),
                                      reply_markup=telegram._build_reply_keyboard())
                     config._log("listen", "Resumed listening.")
                 elif text.lower() == "/quit":
@@ -280,9 +284,12 @@ def cmd_listen():
                 if wid in interrupted_notified:
                     continue
                 if content._detect_interrupted(raw):
-                    label = state._wid_label(idx)
-                    telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
-                                     silent=state._is_silent(_CAT_INTERRUPT))
+                    if idx not in locally_viewed:
+                        label = state._wid_label(idx)
+                        telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
+                                         silent=state._is_silent(_CAT_INTERRUPT))
+                    else:
+                        config._log("local", f"suppressed interrupt for w{idx} ({project})")
                     interrupted_notified.add(wid)
             # Clear for gone sessions
             interrupted_notified -= interrupted_notified - {f"w{i}" for i in sessions}
@@ -296,18 +303,24 @@ def cmd_listen():
                     continue
                 if content._detect_compacting(raw):
                     if wid not in compact_notified:
-                        label = state._wid_label(idx)
-                        telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
-                                         silent=state._is_silent(_CAT_MONITOR))
+                        if idx not in locally_viewed:
+                            label = state._wid_label(idx)
+                            telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
+                                             silent=state._is_silent(_CAT_MONITOR))
+                        else:
+                            config._log("local", f"suppressed compact for w{idx} ({project})")
                         compact_notified.add(wid)
                 else:
                     if wid in compact_notified:
-                        label = state._wid_label(idx)
-                        telegram.tg_send(f"✅ {label} finished compacting.",
-                                         silent=state._is_silent(_CAT_MONITOR))
+                        if idx not in locally_viewed:
+                            label = state._wid_label(idx)
+                            telegram.tg_send(f"✅ {label} finished compacting.",
+                                             silent=state._is_silent(_CAT_MONITOR))
                         compact_notified.discard(wid)
             # Clear for gone sessions
             compact_notified -= compact_notified - {f"w{i}" for i in sessions}
+
+        locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
 
         focus_state = state._load_focus_state()
         deepfocus_state = state._load_deepfocus_state()
@@ -322,6 +335,7 @@ def cmd_listen():
             focused_wids=focused_wids or None,
             smartfocus_prev=smartfocus_prev_lines if smartfocus_state else None,
             smartfocus_has_sent=smartfocus_has_sent if smartfocus_state else False,
+            locally_viewed=locally_viewed or None,
         )
         # Re-read smartfocus state — process_signals may have cleared it
         smartfocus_state = state._load_smartfocus_state()

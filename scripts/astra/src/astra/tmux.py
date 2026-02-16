@@ -107,6 +107,32 @@ def _get_cursor_x(pane: str) -> int | None:
         return None
 
 
+def _get_locally_viewed_windows() -> set[str]:
+    """Return window indices currently being viewed by attached tmux clients."""
+    try:
+        result = subprocess.run(
+            ["tmux", "list-clients", "-F", "#{client_session}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        attached = set(result.stdout.strip().splitlines())
+        if not attached:
+            return set()
+        viewed = set()
+        for sess in attached:
+            result = subprocess.run(
+                ["tmux", "list-windows", "-t", sess, "-F",
+                 "#{window_index}\t#{window_active}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) == 2 and parts[1] == "1":
+                    viewed.add(parts[0])
+        return viewed
+    except Exception:
+        return set()
+
+
 def scan_claude_sessions() -> dict[str, tuple[str, str]]:
     """Scan tmux for panes running claude. Returns {window_index: (pane_target, project)}."""
     sessions = {}
@@ -129,10 +155,12 @@ def scan_claude_sessions() -> dict[str, tuple[str, str]]:
 
 
 def format_sessions_message(sessions: dict[str, tuple[str, str]],
-                            statuses: dict[str, str] | None = None) -> str:
+                            statuses: dict[str, str] | None = None,
+                            locally_viewed: set[str] | None = None) -> str:
     """Format a sessions map into a Telegram message.
 
     statuses: optional dict of {idx: "idle"|"busy"|"interrupted"} for each session.
+    locally_viewed: optional set of window indices currently viewed in tmux.
     """
     if not sessions:
         return "⚠️ No Claude sessions found in tmux."
@@ -147,7 +175,8 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]],
         status_icon = ""
         if statuses and idx in statuses:
             status_icon = f" {_status_icons.get(statuses[idx], '')}"
-        lines.append(f"  {label} — `{project}`{status_icon}{god}")
+        local_icon = " 👁" if locally_viewed and idx in locally_viewed else ""
+        lines.append(f"  {label} — `{project}`{status_icon}{god}{local_icon}")
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)
 

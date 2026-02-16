@@ -42,7 +42,8 @@ from .telegram import (
 # tmux
 from .tmux import (
     get_window_id, get_pane_project, _get_pane_cwd, _get_pane_width, _get_cursor_x,
-    _join_wrapped_lines, _capture_pane, scan_claude_sessions,
+    _join_wrapped_lines, _capture_pane, _get_locally_viewed_windows,
+    scan_claude_sessions,
     format_sessions_message, _sessions_keyboard, _command_sessions_keyboard,
 )
 
@@ -53,6 +54,7 @@ from .state import (
     _save_focus_state, _load_focus_state, _clear_focus_state,
     _save_deepfocus_state, _load_deepfocus_state, _clear_deepfocus_state,
     _save_smartfocus_state, _load_smartfocus_state, _clear_smartfocus_state,
+    _is_local_suppress_enabled, _set_local_suppress,
     _is_autofocus_enabled, _set_autofocus,
     _save_session_name, _clear_session_name, _load_session_names,
     _resolve_name, _wid_label,

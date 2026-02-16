@@ -129,6 +129,7 @@ Telegram commands (inside listener):
   /saved [wN]         Review queued messages
   /last [wN]          Re-send last Telegram message
   /autofocus          Toggle auto-monitor on send
+  /local [on|off]     Suppress Telegram when viewing locally
   /kill wN            Exit a Claude session
   /restart wN         Kill and relaunch with claude -c
   /stop / /start      Pause/resume listener

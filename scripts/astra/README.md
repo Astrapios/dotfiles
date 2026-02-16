@@ -128,6 +128,7 @@ Once the listener is running, send these from Telegram:
 | `/clear [wN]` | Reset transient state (prompts, busy, focus) |
 | `/god [wN\|all\|off]` | Auto-accept permissions (god mode) |
 | `/autofocus` | Toggle auto-monitor on message send |
+| `/local [on\|off]` | Suppress Telegram when viewing locally in tmux |
 | `/name wN label` | Name a session for easier routing |
 | `/interrupt wN` | Interrupt current task (Esc) |
 | `/new [dir]` | Start a new Claude session |
@@ -153,6 +154,7 @@ Once the listener is running, send these from Telegram:
 | `goff` | `/god off` |
 | `uf` | `/unfocus` |
 | `af` | `/autofocus` |
+| `lv` | `/local` |
 | `noti` / `noti 123` | `/notification` / `/notification 123` |
 | `sv` | `/saved` |
 | `?` | `/help` |

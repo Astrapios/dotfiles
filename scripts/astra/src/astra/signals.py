@@ -34,12 +34,14 @@ def _format_question_msg(tag: str, project: str, question: dict) -> str:
 
 def process_signals(focused_wids: set[str] | None = None,
                      smartfocus_prev: list[str] | None = None,
-                     smartfocus_has_sent: bool = False) -> str | None:
+                     smartfocus_has_sent: bool = False,
+                     locally_viewed: set[str] | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
     If focused_wids is set, stop signals for those windows are suppressed.
     smartfocus_prev: previous lines from smartfocus monitoring, used to send
     only the tail (new content) when a smartfocus session stops.
-    smartfocus_has_sent: whether any 👁 update was sent during this smartfocus session."""
+    smartfocus_has_sent: whether any 👁 update was sent during this smartfocus session.
+    locally_viewed: set of window indices currently viewed in tmux — suppresses Telegram sends."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return None
 
@@ -69,12 +71,13 @@ def process_signals(focused_wids: set[str] | None = None,
         project = signal.get("project", "unknown")
         w_idx = wid.lstrip("w") if wid else ""
         tag = f" {state._wid_label(w_idx)}" if w_idx else ""
+        is_local = bool(locally_viewed and w_idx in locally_viewed)
 
         if pane:
             project = tmux.get_pane_project(pane) or project
 
         # Remove stale inline keyboard from previous message for this session
-        if wid:
+        if wid and not is_local:
             old_kb = config._clear_keyboard_msg(wid)
             if old_kb:
                 telegram._remove_inline_keyboard(old_kb)
@@ -93,6 +96,8 @@ def process_signals(focused_wids: set[str] | None = None,
 
             if focused_wids and w_idx in focused_wids:
                 pass
+            elif is_local:
+                pass  # Locally viewed — skip Telegram notification
             elif was_smartfocus and pane:
                 # Smartfocus session ended — send tail or full content
                 time.sleep(1)
@@ -158,21 +163,22 @@ def process_signals(focused_wids: set[str] | None = None,
                 telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
 
             # Check for queued messages (always, regardless of focus)
-            queued = state._load_queued_msgs(wid)
-            if queued:
-                preview_lines = []
-                for i, m in enumerate(queued, 1):
-                    preview_lines.append(f"{i}. `{m['text'][:100]}`")
-                preview = "\n".join(preview_lines)
-                saved_kb = telegram._build_inline_keyboard([[
-                    ("\u2709\ufe0f Send", f"saved_send_{wid}"),
-                    ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
-                ]])
-                telegram.tg_send(
-                    f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
-                    reply_markup=saved_kb,
-                    silent=state._is_silent(_CAT_CONFIRM),
-                )
+            if not is_local:
+                queued = state._load_queued_msgs(wid)
+                if queued:
+                    preview_lines = []
+                    for i, m in enumerate(queued, 1):
+                        preview_lines.append(f"{i}. `{m['text'][:100]}`")
+                    preview = "\n".join(preview_lines)
+                    saved_kb = telegram._build_inline_keyboard([[
+                        ("\u2709\ufe0f Send", f"saved_send_{wid}"),
+                        ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                    ]])
+                    telegram.tg_send(
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
+                        reply_markup=saved_kb,
+                        silent=state._is_silent(_CAT_CONFIRM),
+                    )
 
             # God mode: ensure accept-edits is on when session becomes idle
             if pane and w_idx and state._is_god_mode_for(w_idx):
@@ -185,11 +191,12 @@ def process_signals(focused_wids: set[str] | None = None,
             # God mode: auto-accept and send compact receipt (skip plan approvals)
             is_plan_perm = "plan" in signal.get("message", "").lower()
             if w_idx and state._is_god_mode_for(w_idx) and not is_plan_perm:
-                routing._select_option(pane, 1)  # Accept IMMEDIATELY
+                routing._select_option(pane, 1)  # Accept IMMEDIATELY — always runs
                 desc = bash_cmd[:200] if bash_cmd else (signal.get("message", "") or "permission")
                 config._log("god", f"Auto-allowed {wid} ({project}): {desc}")
-                telegram.tg_send(f"\u26a1{tag} Auto-allowed (`{project}`): `{desc}`",
-                                 silent=state._is_silent(_CAT_CONFIRM))
+                if not is_local:
+                    telegram.tg_send(f"\u26a1{tag} Auto-allowed (`{project}`): `{desc}`",
+                                     silent=state._is_silent(_CAT_CONFIRM))
             else:
                 perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
                 if options and not any(o.startswith("1.") for o in options):
@@ -201,31 +208,33 @@ def process_signals(focused_wids: set[str] | None = None,
                         max_opt = max(max_opt, int(m_opt.group(1)))
                 opts_text = "\n".join(options)
                 n = max_opt or 3
-                perm_kb = telegram._build_inline_keyboard([[
-                    ("\u2705 Allow", f"perm_{wid}_1"),
-                    ("\u2705 Always", f"perm_{wid}_2"),
-                    ("\u274c Deny", f"perm_{wid}_{n}"),
-                ]])
-                context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
-                if bash_cmd:
-                    if perm_context:
-                        code_block = f"```\n{perm_context}\n\n{bash_cmd[:2000]}\n```"
-                    else:
-                        code_block = f"```\n{bash_cmd[:2000]}\n```"
-                    msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
-                    kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
-                    config._save_last_msg(wid, msg)
-                    config._save_keyboard_msg(wid, kb_id)
-                else:
-                    title = perm_header or "needs permission"
-                    header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
-                    if perm_body:
-                        kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
-                    else:
-                        msg = f"{header_str}{opts_text}"
+                if not is_local:
+                    perm_kb = telegram._build_inline_keyboard([[
+                        ("\u2705 Allow", f"perm_{wid}_1"),
+                        ("\u2705 Always", f"perm_{wid}_2"),
+                        ("\u274c Deny", f"perm_{wid}_{n}"),
+                    ]])
+                    context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
+                    if bash_cmd:
+                        if perm_context:
+                            code_block = f"```\n{perm_context}\n\n{bash_cmd[:2000]}\n```"
+                        else:
+                            code_block = f"```\n{bash_cmd[:2000]}\n```"
+                        msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
                         kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                         config._save_last_msg(wid, msg)
-                    config._save_keyboard_msg(wid, kb_id)
+                        config._save_keyboard_msg(wid, kb_id)
+                    else:
+                        title = perm_header or "needs permission"
+                        header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
+                        if perm_body:
+                            kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
+                        else:
+                            msg = f"{header_str}{opts_text}"
+                            kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
+                            config._save_last_msg(wid, msg)
+                        config._save_keyboard_msg(wid, kb_id)
+                # Always save prompt so Telegram fallback works if user switches away
                 state.save_active_prompt(wid, pane, total=n,
                                          shortcuts={"y": 1, "yes": 1, "allow": 1,
                                                     "approve": 1,
@@ -258,15 +267,16 @@ def process_signals(focused_wids: set[str] | None = None,
             except Exception:
                 pass
 
-            plan_kb = telegram._build_inline_keyboard([
-                [("\u2705 Approve", f"perm_{wid}_1"),
-                 ("\u274c Deny", f"perm_{wid}_{deny_at}")],
-            ])
-            free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
-            msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
-            kb_id = telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
-            config._save_last_msg(wid, msg)
-            config._save_keyboard_msg(wid, kb_id)
+            if not is_local:
+                plan_kb = telegram._build_inline_keyboard([
+                    [("\u2705 Approve", f"perm_{wid}_1"),
+                     ("\u274c Deny", f"perm_{wid}_{deny_at}")],
+                ])
+                free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
+                msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
+                kb_id = telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
+                config._save_last_msg(wid, msg)
+                config._save_keyboard_msg(wid, kb_id)
             state.save_active_prompt(wid, pane, total=total,
                                      free_text_at=free_text_at,
                                      shortcuts={"y": 1, "yes": 1, "approve": 1,
@@ -276,23 +286,24 @@ def process_signals(focused_wids: set[str] | None = None,
         elif event == "question":
             questions = signal.get("questions", [])
             if questions:
-                msg = _format_question_msg(tag, project, questions[0])
-                opts = questions[0].get("options", [])
-                q_buttons = [(opt.get("label", "?")[:20], f"q_{wid}_{i}")
-                             for i, opt in enumerate(opts, 1)]
-                q_rows = [q_buttons[i:i+3] for i in range(0, len(q_buttons), 3)]
-                q_kb = telegram._build_inline_keyboard(q_rows) if q_buttons else None
-                kb_id = telegram.tg_send(msg, reply_markup=q_kb, silent=state._is_silent(_CAT_QUESTION))
-                config._save_last_msg(wid, msg)
-                if q_kb:
-                    config._save_keyboard_msg(wid, kb_id)
                 first_opts = len(questions[0].get("options", []))
                 remaining = questions[1:] if len(questions) > 1 else None
+                if not is_local:
+                    msg = _format_question_msg(tag, project, questions[0])
+                    opts = questions[0].get("options", [])
+                    q_buttons = [(opt.get("label", "?")[:20], f"q_{wid}_{i}")
+                                 for i, opt in enumerate(opts, 1)]
+                    q_rows = [q_buttons[i:i+3] for i in range(0, len(q_buttons), 3)]
+                    q_kb = telegram._build_inline_keyboard(q_rows) if q_buttons else None
+                    kb_id = telegram.tg_send(msg, reply_markup=q_kb, silent=state._is_silent(_CAT_QUESTION))
+                    config._save_last_msg(wid, msg)
+                    if q_kb:
+                        config._save_keyboard_msg(wid, kb_id)
                 state.save_active_prompt(wid, pane, total=first_opts + 2,
                                          free_text_at=first_opts,
                                          remaining_qs=remaining,
                                          project=project)
-            else:
+            elif not is_local:
                 msg = f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)"
                 telegram.tg_send(msg, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
@@ -303,6 +314,7 @@ def process_signals(focused_wids: set[str] | None = None,
             pass
         if wid:
             last_wid = wid.lstrip("w")
-        config._log("signal", f"{event} for {wid} ({project})")
+        local_tag = " [local]" if is_local else ""
+        config._log("signal", f"{event} for {wid} ({project}){local_tag}")
 
     return last_wid

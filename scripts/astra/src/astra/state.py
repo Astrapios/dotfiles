@@ -203,6 +203,25 @@ def _clear_smartfocus_state():
         pass
 
 
+def _is_local_suppress_enabled() -> bool:
+    """Check if local view suppression is enabled (on by default)."""
+    return not os.path.exists(os.path.join(config.SIGNAL_DIR, "_local_suppress_off.json"))
+
+
+def _set_local_suppress(enabled: bool):
+    """Enable or disable local view suppression."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, "_local_suppress_off.json")
+    if enabled:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    else:
+        with open(path, "w") as f:
+            json.dump({"ts": time.time()}, f)
+
+
 def _is_autofocus_enabled() -> bool:
     """Check if autofocus is enabled (on by default)."""
     return not os.path.exists(os.path.join(config.SIGNAL_DIR, "_autofocus_off.json"))
