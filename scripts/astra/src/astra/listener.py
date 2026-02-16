@@ -261,7 +261,6 @@ def cmd_listen():
         # --- Interrupt detection (no hook fires on Esc interrupt) ---
         if time.time() - last_interrupt_check > 5:
             last_interrupt_check = time.time()
-            from astra import routing
             for idx, (pane, project) in sessions.items():
                 wid = f"w{idx}"
                 try:
