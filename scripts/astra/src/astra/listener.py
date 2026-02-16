@@ -320,6 +320,68 @@ def cmd_listen():
             # Clear for gone sessions
             compact_notified -= compact_notified - {f"w{i}" for i in sessions}
 
+            # --- Hookless permission detection (Fetch, WebSearch, etc.) ---
+            for idx, (pane, project) in sessions.items():
+                wid = f"w{idx}"
+                # Skip if already have an active prompt (hook already handled it)
+                prompt_path = os.path.join(config.SIGNAL_DIR, f"_active_prompt_{wid}.json")
+                if os.path.exists(prompt_path):
+                    continue
+                # Skip if pane is idle (no permission dialog)
+                idle, _ = routing._pane_idle_state(pane)
+                if idle:
+                    continue
+                # Check if pane shows a numbered options dialog
+                if not state._pane_has_prompt(pane):
+                    continue
+                # Permission dialog detected without a hook signal
+                is_local = idx in locally_viewed
+                is_god = state._is_god_mode_for(idx)
+                if is_god:
+                    routing._select_option(pane, 1)
+                    config._log("god", f"Auto-allowed {wid} ({project}) [pane-detected]")
+                    if not is_local:
+                        perm_header, _, _, _ = content._extract_pane_permission(pane)
+                        desc = perm_header or "permission"
+                        telegram.tg_send(f"\u26a1 {state._wid_label(idx)} Auto-allowed (`{project}`): `{desc}`",
+                                         silent=state._is_silent(signals._CAT_CONFIRM))
+                else:
+                    perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
+                    if not options:
+                        continue
+                    max_opt = 0
+                    for o in options:
+                        m_opt = re.match(r'(\d+)', o)
+                        if m_opt:
+                            max_opt = max(max_opt, int(m_opt.group(1)))
+                    n = max_opt or 3
+                    opts_text = "\n".join(options)
+                    state.save_active_prompt(wid, pane, total=n,
+                                             shortcuts={"y": 1, "yes": 1, "allow": 1,
+                                                        "approve": 1,
+                                                        "n": n, "no": n, "deny": n})
+                    if not is_local:
+                        tag = f" {state._wid_label(idx)}"
+                        perm_kb = telegram._build_inline_keyboard([[
+                            ("\u2705 Allow", f"perm_{wid}_1"),
+                            ("\u2705 Always", f"perm_{wid}_2"),
+                            ("\u274c Deny", f"perm_{wid}_{n}"),
+                        ]])
+                        context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
+                        title = perm_header or "needs permission"
+                        header_str = f"🔧{tag} (`{project}`) {title}:\n\n{context_str}"
+                        if perm_body:
+                            kb_id = telegram._send_long_message(header_str, perm_body, wid,
+                                                                reply_markup=perm_kb, footer=opts_text,
+                                                                silent=state._is_silent(signals._CAT_PERMISSION))
+                        else:
+                            msg = f"{header_str}{opts_text}"
+                            kb_id = telegram.tg_send(msg, reply_markup=perm_kb,
+                                                     silent=state._is_silent(signals._CAT_PERMISSION))
+                            config._save_last_msg(wid, msg)
+                        config._save_keyboard_msg(wid, kb_id)
+                    config._log("listen", f"pane-detected permission for {wid} ({project})")
+
         locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
 
         focus_state = state._load_focus_state()
