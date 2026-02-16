@@ -17,7 +17,6 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - Log `[local]` tag on suppressed signals, interrupts, and compact notifications
 - Show `Local suppress: on/off` at startup in listener log
 - **Remove `/tmp/astra.log` file** — `/log` command now reads from `journalctl --user -u astra` instead of a separate log file; `_rotate_log()` removed
-- **Detect hookless permissions** — scan panes every 5s for permission dialogs that hooks miss (Fetch, WebSearch); auto-accept in god mode or forward to Telegram
 
 ## 0.12.0
 
