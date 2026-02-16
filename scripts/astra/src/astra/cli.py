@@ -122,6 +122,7 @@ Telegram commands (inside listener):
   /clear [wN]         Reset transient state (prompts, busy, focus)
   /god [wN|all|off]   Auto-accept permissions (god mode)
   /notification [12..7|all|off]  Control which alerts buzz
+  /log [N]            Show last N listener log lines (default 30)
   /interrupt wN       Interrupt current task
   /name wN label      Name a session
   /new [dir]          Start new Claude session

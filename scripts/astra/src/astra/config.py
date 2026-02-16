@@ -1,5 +1,10 @@
 """Configuration, environment loading, logging, and shared state."""
+import datetime
 import os
+
+
+LOG_FILE = "/tmp/astra.log"
+_MAX_LOG_BYTES = 512 * 1024  # 512 KB
 
 
 def _load_env_file(path: str) -> dict[str, str]:
@@ -33,7 +38,28 @@ GOD_MODE_PATH = _god_new if os.path.exists(_god_new) else (_god_old if os.path.e
 
 
 def _log(tag: str, msg: str):
-    print(f"[{tag}] {msg}")
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] [{tag}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _rotate_log():
+    """Truncate log file if it exceeds max size (keep tail half)."""
+    try:
+        if os.path.getsize(LOG_FILE) > _MAX_LOG_BYTES:
+            with open(LOG_FILE, "rb") as f:
+                f.seek(-_MAX_LOG_BYTES // 2, 2)
+                f.readline()  # skip partial line
+                tail = f.read()
+            with open(LOG_FILE, "wb") as f:
+                f.write(tail)
+    except OSError:
+        pass
 
 
 _last_messages: dict[str, str] = {}  # wid -> last sent message

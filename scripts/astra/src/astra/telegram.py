@@ -251,6 +251,7 @@ def _set_bot_commands():
         {"command": "autofocus", "description": "Toggle auto-monitor on message send"},
         {"command": "god", "description": "Auto-accept permissions (god mode)"},
         {"command": "notification", "description": "Control which alerts buzz your phone"},
+        {"command": "log", "description": "Show recent listener log lines"},
         {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},
         {"command": "interrupt", "description": "Interrupt current task (Esc)"},
         {"command": "last", "description": "Re-send last message for a session"},

@@ -145,6 +145,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/clear [wN]` — reset transient state (prompts, busy, focus)",
             "`/god [wN|all|off]` — auto-accept permissions",
             "`/notification [12..7|all|off]` — control which alerts buzz",
+            "`/log [N]` — show last N listener log lines (default 30)",
             "`/name wN [label]` — name a session",
             "`/new [dir]` — start new Claude session (default: `~/projects/`)",
             "`/interrupt [wN]` — interrupt current task (Esc)",
@@ -346,6 +347,20 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             telegram.tg_send(f"🔔 Loud: {labels or '_(none)_'}")
         else:
             telegram.tg_send("⚠️ Usage: `/notification [digits|all|off]`")
+        return None, sessions, last_win_idx
+
+    # /log [N]
+    log_m = re.match(r"^/log(?:\s+(\d+))?$", text.lower())
+    if log_m:
+        n = int(log_m.group(1)) if log_m.group(1) else 30
+        n = min(n, 100)
+        try:
+            with open(config.LOG_FILE) as f:
+                lines = f.readlines()
+            tail = lines[-n:]
+            telegram.tg_send(f"📋 Last {len(tail)} log lines:\n```\n{''.join(tail).strip()}\n```")
+        except OSError:
+            telegram.tg_send("⚠️ No log file found.")
         return None, sessions, last_win_idx
 
     # /god [w4|all|off|off w4]

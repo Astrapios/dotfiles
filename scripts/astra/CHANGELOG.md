@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.12.0
+
+- **Optimize god mode latency** — send tmux accept keys *before* Telegram notification, skip unnecessary pane capture (~200-500ms faster)
+- **Add timestamps and file logging** — `_log()` now prepends `[HH:MM:SS]` timestamps and tees to `/tmp/astra.log` with automatic rotation at 512 KB
+- **Add `/log [N]` command** — view last N listener log lines from Telegram (default 30, max 100)
+- God mode auto-accepts now appear in listener stdout/journal via `_log()`
+
 ## 0.11.0
 
 - Add systemd user service for auto-start and crash recovery (`astra.service`)

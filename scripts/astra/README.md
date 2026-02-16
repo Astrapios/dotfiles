@@ -135,6 +135,7 @@ Once the listener is running, send these from Telegram:
 | `/last [wN]` | Re-send last Telegram message |
 | `/kill wN` | Exit a Claude session (Ctrl+C) |
 | `/notification [digits\|all\|off]` | Control which alerts buzz your phone |
+| `/log [N]` | Show last N listener log lines (default 30) |
 | `/stop` / `/start` | Pause / resume the listener |
 | `/quit` | Shut down the listener |
 

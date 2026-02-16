@@ -120,6 +120,7 @@ def cmd_listen():
     lock_fd.write(str(os.getpid()))
     lock_fd.flush()
 
+    config._rotate_log()
     state._clear_signals()
     # Clear stale state — after restart, no in-memory context to handle prompts
     # and stop signals that would clear busy files are lost during reload

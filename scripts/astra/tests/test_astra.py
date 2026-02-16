@@ -2519,7 +2519,7 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("clear", names)
         self.assertIn("notification", names)
         self.assertIn("restart", names)
-        self.assertEqual(len(commands), 19)
+        self.assertEqual(len(commands), 20)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -5563,9 +5563,11 @@ class TestGodModeAutoAcceptNonBash(unittest.TestCase):
     def test_edit_auto_accepted(self, mock_send, mock_proj, mock_extract, mock_select):
         """Non-bash edit permission auto-accepted in god mode."""
         astra._set_god_mode("4", True)
-        self._write_signal("permission", cmd="")
+        self._write_signal("permission", cmd="", message="wants to update file.py")
         astra.process_signals()
         mock_select.assert_called_once_with("%20", 1)
+        # God mode skips pane capture — uses signal message as description
+        mock_extract.assert_not_called()
         msg = mock_send.call_args[0][0]
         self.assertIn("Auto-allowed", msg)
         self.assertIn("wants to update", msg)

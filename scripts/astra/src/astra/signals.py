@@ -175,16 +175,17 @@ def process_signals(focused_wids: set[str] | None = None,
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
-            perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
 
             # God mode: auto-accept and send compact receipt (skip plan approvals)
             is_plan_perm = "plan" in signal.get("message", "").lower()
             if w_idx and state._is_god_mode_for(w_idx) and not is_plan_perm:
-                desc = bash_cmd[:200] if bash_cmd else (perm_header or "permission")
+                routing._select_option(pane, 1)  # Accept IMMEDIATELY
+                desc = bash_cmd[:200] if bash_cmd else (signal.get("message", "") or "permission")
+                config._log("god", f"Auto-allowed {wid} ({project}): {desc}")
                 telegram.tg_send(f"\U0001f531{tag} Auto-allowed (`{project}`): `{desc}`",
                                  silent=state._is_silent(_CAT_CONFIRM))
-                routing._select_option(pane, 1)
             else:
+                perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
                 if options and not any(o.startswith("1.") for o in options):
                     options.insert(0, "1. Yes")
                 max_opt = 0
