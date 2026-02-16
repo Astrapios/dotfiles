@@ -129,7 +129,10 @@ def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
             if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
                 continue
             # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
-            if re.match(r'^[^\w\s●❯] \w+.*…', s):
+            if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
+                continue
+            # Tool progress lines (e.g. "● Reading 1 file… (ctrl+o to expand)")
+            if s.startswith("●") and re.search(r'\(ctrl\+', s):
                 continue
         if re.match(r'^\+\d+ more lines \(', s):
             continue

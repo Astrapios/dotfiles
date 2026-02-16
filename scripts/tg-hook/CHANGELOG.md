@@ -12,6 +12,9 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - Fix filename collision for simultaneous photos: use microsecond-precision timestamps with index suffix
 - Fix album Enter not sent: increase delay before Enter for multi-photo instructions (0.5s vs 0.1s)
 - Fix album instruction format: use `Read these images: path1, path2` with comma separators for clarity
+- Fix smartfocus noise: filter spinner lines with `...` (three dots), not just `…` (Unicode ellipsis)
+- Fix smartfocus noise: filter tool progress lines like `● Reading 1 file... (ctrl+o to expand)`
+- Increase send-keys Enter delay from 0.1s to 0.3s for text messages and single photos to prevent stuck prompts
 
 ## 0.8.0
 

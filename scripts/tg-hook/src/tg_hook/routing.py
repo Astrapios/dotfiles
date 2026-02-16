@@ -39,7 +39,10 @@ def _is_ui_chrome(s: str) -> bool:
     if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
         return True
     # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
-    if re.match(r'^[^\w\s●❯] \w+.*…', s):
+    if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
+        return True
+    # Tool progress lines (e.g. "● Reading 1 file… (ctrl+o to expand)")
+    if s.startswith("●") and re.search(r'\(ctrl\+', s):
         return True
     if re.match(r'^\+\d+ more lines \(', s):
         return True
@@ -217,7 +220,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     clean_text = text.replace("\n", " ").replace("\r", " ")
 
     # Normal message: type text + Enter (sleep lets Claude Code accept the input)
-    cmd = f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && sleep 0.1 && tmux send-keys -t {p} Enter"
+    cmd = f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && sleep 0.3 && tmux send-keys -t {p} Enter"
     subprocess.run(["bash", "-c", cmd], timeout=10)
     state._mark_busy(wid)
     return f"📨 Sent to {label}:\n`{text[:500]}`"

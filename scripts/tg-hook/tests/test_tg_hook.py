@@ -148,6 +148,24 @@ class TestFilterNoise(unittest.TestCase):
         result = tg._filter_noise(raw)
         self.assertEqual(result, ["line one", "line two", "line three"])
 
+    def test_removes_spinner_three_dots(self):
+        """Filter spinner lines using ... (three dots) not just … (Unicode)."""
+        raw = "hello\n❊ Infusing... (thinking)\nworld"
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["hello", "world"])
+
+    def test_removes_tool_progress_ctrl_o(self):
+        """Filter tool progress lines with (ctrl+o to expand)."""
+        raw = "hello\n● Reading 1 file... (ctrl+o to expand)\nworld"
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["hello", "world"])
+
+    def test_keeps_response_bullet(self):
+        """Response bullets should NOT be filtered."""
+        raw = "● All 3 images received.\nHere are the descriptions."
+        result = tg._filter_noise(raw)
+        self.assertEqual(result, ["● All 3 images received.", "Here are the descriptions."])
+
 
 class TestCleanPaneContent(unittest.TestCase):
     """Test clean_pane_content for stop events."""
@@ -4670,6 +4688,24 @@ class TestIsUiChrome(unittest.TestCase):
     def test_short_separator_not_chrome(self):
         """Separators need at least 3 chars."""
         self.assertFalse(tg._is_ui_chrome("──"))
+
+    def test_thinking_three_dots(self):
+        """Spinner with ... (three dots) instead of … (Unicode ellipsis)."""
+        self.assertTrue(tg._is_ui_chrome("❊ Infusing... (thinking)"))
+
+    def test_spinner_three_dots(self):
+        self.assertTrue(tg._is_ui_chrome("⠐ Thinking..."))
+
+    def test_tool_progress_ctrl_o(self):
+        """Tool progress line with (ctrl+o to expand)."""
+        self.assertTrue(tg._is_ui_chrome("● Reading 1 file... (ctrl+o to expand)"))
+
+    def test_tool_progress_unicode_ellipsis(self):
+        self.assertTrue(tg._is_ui_chrome("● Reading 1 file… (ctrl+o to expand)"))
+
+    def test_response_bullet_not_filtered(self):
+        """Regular response bullet should NOT be filtered."""
+        self.assertFalse(tg._is_ui_chrome("● All 3 images received."))
 
 
 class TestFilterToolCalls(unittest.TestCase):

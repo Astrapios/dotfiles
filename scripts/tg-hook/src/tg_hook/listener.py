@@ -472,9 +472,9 @@ def cmd_listen():
                             subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
                             time.sleep(0.2)
 
-                        # Longer delay for multi-photo albums — Claude Code
-                        # needs time to process/render image path previews
-                        delay = "0.5" if len(paths) > 1 else "0.1"
+                        # Delay before Enter — Claude Code needs time to
+                        # process image path previews (longer for albums)
+                        delay = "0.5" if len(paths) > 1 else "0.3"
                         cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep {delay} && tmux send-keys -t {p} Enter"
                         subprocess.run(["bash", "-c", cmd], timeout=10)
                         state._mark_busy(wid)
