@@ -63,8 +63,19 @@ def _rotate_log():
 
 
 _last_messages: dict[str, str] = {}  # wid -> last sent message
+_keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
 
 
 def _save_last_msg(wid: str, msg: str):
     """Track the last message sent for a window."""
     _last_messages[wid.lstrip("w")] = msg
+
+
+def _save_keyboard_msg(wid: str, msg_id: int):
+    """Track a message with inline keyboard buttons for later cleanup."""
+    _keyboard_messages[wid.lstrip("w")] = msg_id
+
+
+def _clear_keyboard_msg(wid: str) -> int | None:
+    """Pop and return the tracked keyboard message_id for a window, or None."""
+    return _keyboard_messages.pop(wid.lstrip("w"), None)

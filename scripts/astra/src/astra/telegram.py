@@ -42,13 +42,13 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
 
 def _send_long_message(header: str, body: str, wid: str = "",
                        reply_markup: dict | None = None, footer: str = "",
-                       silent: bool = False):
+                       silent: bool = False) -> int:
     """Send a header + body as one or more Telegram messages, chunking if needed.
 
     Body is wrapped in ``` code blocks. Footer is appended after the closing ```.
     If the total exceeds TG_MAX, body is split across multiple messages at line
     boundaries. reply_markup is attached to the last chunk only so buttons appear
-    at the bottom.
+    at the bottom. Returns the last message_id.
     """
     # Escape triple backticks in body to prevent breaking the code block wrapper
     body = body.replace("```", "'''")
@@ -58,9 +58,9 @@ def _send_long_message(header: str, body: str, wid: str = "",
 
     if len(body) <= chunk_size:
         msg = f"{header}```\n{body}\n```{footer_str}"
-        tg_send(msg, reply_markup=reply_markup, silent=silent)
+        msg_id = tg_send(msg, reply_markup=reply_markup, silent=silent)
         config._save_last_msg(wid, msg)
-        return
+        return msg_id
 
     lines = body.splitlines(keepends=True)
     chunks: list[str] = []
@@ -76,6 +76,7 @@ def _send_long_message(header: str, body: str, wid: str = "",
     if current:
         chunks.append("".join(current))
 
+    last_msg_id = 0
     total = len(chunks)
     for i, chunk in enumerate(chunks):
         if i == 0:
@@ -86,9 +87,10 @@ def _send_long_message(header: str, body: str, wid: str = "",
         suffix = footer_str if is_last else ""
         msg = f"{label}```\n{chunk}\n```{suffix}"
         kb = reply_markup if is_last else None
-        tg_send(msg, reply_markup=kb, silent=silent)
+        last_msg_id = tg_send(msg, reply_markup=kb, silent=silent)
     if chunks:
         config._save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")
+    return last_msg_id
 
 
 def _get_image_dimensions(path: str) -> tuple[int, int]:

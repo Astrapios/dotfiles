@@ -73,6 +73,12 @@ def process_signals(focused_wids: set[str] | None = None,
         if pane:
             project = tmux.get_pane_project(pane) or project
 
+        # Remove stale inline keyboard from previous message for this session
+        if wid:
+            old_kb = config._clear_keyboard_msg(wid)
+            if old_kb:
+                telegram._remove_inline_keyboard(old_kb)
+
         if event == "stop":
             state._clear_busy(wid)
             sf = state._load_smartfocus_state()
@@ -207,17 +213,19 @@ def process_signals(focused_wids: set[str] | None = None,
                     else:
                         code_block = f"```\n{bash_cmd[:2000]}\n```"
                     msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
-                    telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
+                    kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                     config._save_last_msg(wid, msg)
+                    config._save_keyboard_msg(wid, kb_id)
                 else:
                     title = perm_header or "needs permission"
                     header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
                     if perm_body:
-                        telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
+                        kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
                     else:
                         msg = f"{header_str}{opts_text}"
-                        telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
+                        kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                         config._save_last_msg(wid, msg)
+                    config._save_keyboard_msg(wid, kb_id)
                 state.save_active_prompt(wid, pane, total=n,
                                          shortcuts={"y": 1, "yes": 1, "allow": 1,
                                                     "approve": 1,
@@ -256,8 +264,9 @@ def process_signals(focused_wids: set[str] | None = None,
             ])
             free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
             msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
-            telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
+            kb_id = telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
             config._save_last_msg(wid, msg)
+            config._save_keyboard_msg(wid, kb_id)
             state.save_active_prompt(wid, pane, total=total,
                                      free_text_at=free_text_at,
                                      shortcuts={"y": 1, "yes": 1, "approve": 1,
@@ -273,8 +282,10 @@ def process_signals(focused_wids: set[str] | None = None,
                              for i, opt in enumerate(opts, 1)]
                 q_rows = [q_buttons[i:i+3] for i in range(0, len(q_buttons), 3)]
                 q_kb = telegram._build_inline_keyboard(q_rows) if q_buttons else None
-                telegram.tg_send(msg, reply_markup=q_kb, silent=state._is_silent(_CAT_QUESTION))
+                kb_id = telegram.tg_send(msg, reply_markup=q_kb, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
+                if q_kb:
+                    config._save_keyboard_msg(wid, kb_id)
                 first_opts = len(questions[0].get("options", []))
                 remaining = questions[1:] if len(questions) > 1 else None
                 state.save_active_prompt(wid, pane, total=first_opts + 2,

@@ -726,6 +726,11 @@ def _handle_callback(callback: dict, sessions: dict,
     if msg_id:
         telegram._remove_inline_keyboard(msg_id)
 
+    # Clear keyboard tracker for any wid-based callback
+    wid_m = re.search(r"(w\d+)", cb_data)
+    if wid_m:
+        config._clear_keyboard_msg(wid_m.group(1))
+
     if cb_data == "quit_y":
         telegram.tg_send("👋 Bye.")
         return sessions, last_win_idx, "quit"
