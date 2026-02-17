@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.14.1
+
+- **Fix idle detection on narrow panes** — status line `esc to interr…` (truncated by tmux) was not recognized as busy, causing sessions to show as idle while Claude was actively running
+
 ## 0.14.0
 
 - **Simulation test harness** — extract `_ListenerState` dataclass and `_listen_tick()` from `cmd_listen()` to enable integration testing of the listener loop without real Telegram/tmux

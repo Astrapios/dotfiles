@@ -46,8 +46,8 @@ def _is_ui_chrome(s: str) -> bool:
         return True
     if re.match(r'^\+\d+ more lines \(', s):
         return True
-    # Status bar below prompt: "1 file +2 -2 · esc to interrupt"
-    if "esc to interrupt" in s:
+    # Status bar below prompt: "1 file +2 -2 · esc to interrupt" (may be truncated to "esc to interr…")
+    if "esc to interr" in s:
         return True
     if re.match(r'^\d+ files? [+-]', s):
         return True
@@ -67,7 +67,7 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
     in earlier lines are correctly ignored.
     typed_text is any text on the same line after ❯ (locally typed input).
     Uses cursor position to exclude grayed-out auto-suggestions.
-    Also checks for "esc to interrupt" below the prompt — if present,
+    Also checks for "esc to interr" below the prompt — if present,
     Claude is actively running and the pane is NOT idle.
     """
     try:
@@ -77,7 +77,7 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
     saw_esc_to_interrupt = False
     for line in reversed(raw.splitlines()):
         s = line.strip()
-        if "esc to interrupt" in s:
+        if "esc to interr" in s:
             saw_esc_to_interrupt = True
         if _is_ui_chrome(s):
             continue

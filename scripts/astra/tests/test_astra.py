@@ -5962,6 +5962,17 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
         self.assertFalse(is_idle)
 
     @patch.object(astra.tmux, "_capture_pane")
+    def test_busy_with_truncated_esc_to_interrupt(self, mock_capture):
+        """Truncated 'esc to interr…' (narrow pane) still detected as busy."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "  ⏵⏵ accept edits on · 2 bashes · esc to interr\u2026 Context left until auto-compact: 11%\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
     def test_prompt_above_status_bar_no_interrupt(self, mock_capture):
         """Prompt above separator + file count status bar is idle."""
         mock_capture.return_value = (
