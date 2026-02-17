@@ -47,6 +47,19 @@ A pip-installable Python package bridging Claude Code sessions to Telegram. Stru
 
 **tmux send-keys pattern:** Arrow key commands must be sent in a single `tmux send-keys` call (e.g., `tmux send-keys -t pane Down Down Enter`), with `sleep 0.1` between navigation and action via `bash -c` chaining. Individual subprocess calls are too slow and keys get dropped.
 
+**Listener architecture (`_ListenerState` + `_listen_tick`):**
+- `cmd_listen()` is startup + lock + `while True: _listen_tick(s)`
+- `_ListenerState` dataclass holds all loop state (sessions, focus, smartfocus, offsets, etc.)
+- `_listen_tick(s)` runs one iteration, returns `None` (continue), `"quit"`, or `"pause_break"`
+- This enables simulation testing without real Telegram/tmux
+
+**Simulation test harness (`tests/sim/`):**
+- `SimulationHarness` patches Telegram, tmux, subprocess, and time with stateful fakes
+- Write a test by: adding sessions to `h.tmux`, injecting messages via `h.tg`, calling `h.tick(s)` or `h.run_ticks(s, n)`, then asserting on `h.tg.sent_messages` / `h.subprocess_calls`
+- When fixing a listener bug: write a sim test that reproduces it first, then fix, then the test prevents regression
+- Pure functions (`_filter_noise`, `_pane_idle_state`, `_extract_chat_messages`) run against fake pane content — no mocking of internal logic needed
+- See `tests/test_simulation.py` for examples covering routing, smartfocus, permissions, interrupts
+
 ### Versioning
 
 astra uses semver pre-1.0. **On every commit touching `scripts/astra/`**, check whether a version bump is needed and include it in the same commit:

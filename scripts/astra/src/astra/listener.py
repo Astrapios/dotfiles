@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 
 import requests
 
@@ -22,6 +23,8 @@ _CAT_CONFIRM = 7
 _pkg_dir = pathlib.Path(__file__).parent
 _file_mtimes: dict[pathlib.Path, float] = {}
 _reload_after: float | None = None
+
+_RESCAN_INTERVAL = 60
 
 
 def _merge_album_photos(messages: list[dict]) -> list[dict]:
@@ -107,6 +110,588 @@ def _build_file_instruction(files: list[dict], user_text: str = "") -> str:
     return instruction
 
 
+@dataclass
+class _ListenerState:
+    """All mutable state for the listener loop."""
+    sessions: dict = field(default_factory=dict)
+    last_scan: float = 0
+    last_win_idx: str | None = None
+    offset: int = 0
+    paused: bool = False
+    quit_pending: bool = False
+    pending_file: dict | None = None
+    last_prompt_cleanup: float = 0
+    focus_target_wid: str | None = None
+    focus_pane_width: int = 0
+    focus_last_hash: int = 0
+    deepfocus_target_wid: str | None = None
+    deepfocus_pane_width: int = 0
+    deepfocus_prev_lines: list = field(default_factory=list)
+    deepfocus_pending: list = field(default_factory=list)
+    deepfocus_last_new_ts: float = 0
+    deepfocus_first_new_ts: float = 0
+    smartfocus_target_wid: str | None = None
+    smartfocus_pane_width: int = 0
+    smartfocus_prev_lines: list = field(default_factory=list)
+    smartfocus_has_sent: bool = False
+    compact_notified: set = field(default_factory=set)
+    last_interrupt_check: float = 0
+    interrupted_notified: set = field(default_factory=set)
+    god_wids: list = field(default_factory=list)
+
+
+def _listen_tick(s):
+    """Execute one iteration of the listener loop.
+
+    Mutates *s* in place.  Returns ``None`` to continue looping,
+    ``"quit"`` to exit the listener, or ``"pause_break"`` when
+    transitioning to paused mode.  ``KeyboardInterrupt`` from
+    ``_poll_updates`` propagates to the caller.
+    """
+    global _reload_after
+
+    # Auto-reload on file change (debounced — wait for files to stabilize)
+    try:
+        if _check_file_changes():
+            _init_file_mtimes()
+            _reload_after = time.time() + 2.0
+            config._log("listen", "Code change detected, reloading in 2s...")
+        elif _reload_after and time.time() >= _reload_after:
+            _reload_after = None
+            config._log("listen", "Reloading...")
+            telegram.tg_send("🔄 Reloading...", silent=state._is_silent(_CAT_CONFIRM))
+            _restart_cmd = "import sys; sys.argv=['astra','listen']; from astra.cli import main; main()"
+            os.execv(sys.executable, [sys.executable, "-c", _restart_cmd])
+    except OSError:
+        pass
+
+    # --- Paused mode: only respond to /start, /help, /quit ---
+    if s.paused:
+        data, s.offset = telegram._poll_updates(s.offset, timeout=5)
+        if data is None:
+            time.sleep(2)
+            return None
+
+        for chat_msg in telegram._extract_chat_messages(data):
+            text = chat_msg["text"]
+            if text.lower() == "/start":
+                state._clear_signals(include_state=True)
+                s.sessions = tmux.scan_claude_sessions()
+                s.last_scan = time.time()
+                s.paused = False
+                s.focus_target_wid = None
+                s.focus_pane_width = 0
+                s.focus_last_hash = 0
+                s.deepfocus_target_wid = None
+                s.deepfocus_pane_width = 0
+                s.deepfocus_prev_lines = []
+                s.deepfocus_pending = []
+                s.deepfocus_last_new_ts = 0
+                s.deepfocus_first_new_ts = 0
+                s.smartfocus_target_wid = None
+                s.smartfocus_pane_width = 0
+                s.smartfocus_prev_lines = []
+                s.smartfocus_has_sent = False
+                statuses = routing._get_session_statuses(s.sessions)
+                s.interrupted_notified = {f"w{idx}" for idx, st in statuses.items() if st == "interrupted"}
+                resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
+                telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(s.sessions, statuses=statuses,
+                                                                                   locally_viewed=resume_viewed or None),
+                                 reply_markup=telegram._build_reply_keyboard())
+                config._log("listen", "Resumed listening.")
+            elif text.lower() == "/quit":
+                telegram.tg_send("👋 Bye.")
+                return "quit"
+            elif text.lower() == "/help":
+                telegram.tg_send("⏸ Paused. Send `/start` to resume or `/quit` to exit.")
+            else:
+                telegram.tg_send("⏸ Paused. Send `/start` to resume.")
+        return None
+
+    # --- Active mode ---
+    if time.time() - s.last_scan > _RESCAN_INTERVAL:
+        s.sessions = tmux.scan_claude_sessions()
+        s.last_scan = time.time()
+
+    if time.time() - s.last_prompt_cleanup > 5:
+        state._cleanup_stale_prompts()
+        state._cleanup_stale_busy(s.sessions)
+        s.last_prompt_cleanup = time.time()
+
+    locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
+
+    # --- Interrupt detection (no hook fires on Esc interrupt) ---
+    if time.time() - s.last_interrupt_check > 5:
+        s.last_interrupt_check = time.time()
+        for idx, (pane, project) in s.sessions.items():
+            wid = f"w{idx}"
+            try:
+                raw = tmux._capture_pane(pane, 15)
+            except Exception:
+                continue
+            idle, _ = routing._pane_idle_state(pane)
+            if not idle:
+                s.interrupted_notified.discard(wid)
+                continue
+            # Pane is idle — clear stale busy flag (interrupt doesn't fire Stop hook)
+            if state._is_busy(wid):
+                state._clear_busy(wid)
+            if wid in s.interrupted_notified:
+                continue
+            if content._detect_interrupted(raw):
+                if idx not in locally_viewed:
+                    label = state._wid_label(idx)
+                    telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
+                                     silent=state._is_silent(_CAT_INTERRUPT))
+                else:
+                    config._log("local", f"suppressed interrupt for w{idx} ({project})")
+                s.interrupted_notified.add(wid)
+        # Clear for gone sessions
+        s.interrupted_notified -= s.interrupted_notified - {f"w{i}" for i in s.sessions}
+
+        # --- Auto-compact detection ---
+        for idx, (pane, project) in s.sessions.items():
+            wid = f"w{idx}"
+            try:
+                raw = tmux._capture_pane(pane, 15)
+            except Exception:
+                continue
+            if content._detect_compacting(raw):
+                if wid not in s.compact_notified:
+                    if idx not in locally_viewed:
+                        label = state._wid_label(idx)
+                        telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
+                                         silent=state._is_silent(_CAT_MONITOR))
+                    else:
+                        config._log("local", f"suppressed compact for w{idx} ({project})")
+                    s.compact_notified.add(wid)
+            else:
+                if wid in s.compact_notified:
+                    if idx not in locally_viewed:
+                        label = state._wid_label(idx)
+                        telegram.tg_send(f"✅ {label} finished compacting.",
+                                         silent=state._is_silent(_CAT_MONITOR))
+                    s.compact_notified.discard(wid)
+        # Clear for gone sessions
+        s.compact_notified -= s.compact_notified - {f"w{i}" for i in s.sessions}
+
+    focus_state = state._load_focus_state()
+    deepfocus_state = state._load_deepfocus_state()
+    smartfocus_state = state._load_smartfocus_state()
+    focused_wids: set[str] = set()
+    if focus_state:
+        focused_wids.add(focus_state["wid"])
+    if deepfocus_state:
+        focused_wids.add(deepfocus_state["wid"])
+
+    signal_wid = signals.process_signals(
+        focused_wids=focused_wids or None,
+        smartfocus_prev=s.smartfocus_prev_lines if smartfocus_state else None,
+        smartfocus_has_sent=s.smartfocus_has_sent if smartfocus_state else False,
+        locally_viewed=locally_viewed or None,
+    )
+    # Re-read smartfocus state — process_signals may have cleared it
+    smartfocus_state = state._load_smartfocus_state()
+    if signal_wid:
+        s.last_win_idx = signal_wid
+
+    # --- Lightweight focus monitoring (completed responses only) ---
+    if focus_state:
+        fw = focus_state["wid"]
+        if fw != s.focus_target_wid:
+            s.focus_target_wid = fw
+            s.focus_pane_width = tmux._get_pane_width(focus_state["pane"])
+            s.focus_last_hash = 0
+        fp, fproj = focus_state["pane"], focus_state["project"]
+        if fw not in s.sessions:
+            s.sessions = tmux.scan_claude_sessions()
+            s.last_scan = time.time()
+            if fw not in s.sessions:
+                state._clear_focus_state()
+                telegram.tg_send(f"🔍 Focus on {state._wid_label(fw)} ended — session gone.")
+                s.focus_target_wid = None
+                focus_state = None
+        if focus_state:
+            for n in (50, 150):
+                raw = tmux._capture_pane(fp, n)
+                if content._has_response_start(raw):
+                    break
+            cleaned = content.clean_pane_content(raw, "stop", s.focus_pane_width)
+            if cleaned:
+                h = hash(cleaned)
+                if h != s.focus_last_hash and s.focus_last_hash != 0:
+                    header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
+                    telegram._send_long_message(header, cleaned, fw, silent=state._is_silent(_CAT_MONITOR))
+                s.focus_last_hash = h
+    elif s.focus_target_wid:
+        s.focus_target_wid = None
+
+    # --- Smart focus monitoring (auto-activated on message send) ---
+    if smartfocus_state:
+        sfw = smartfocus_state["wid"]
+        # Skip if manual focus or deepfocus already covers this wid
+        if (focus_state and focus_state["wid"] == sfw) or \
+           (deepfocus_state and deepfocus_state["wid"] == sfw):
+            pass
+        else:
+            if sfw != s.smartfocus_target_wid:
+                s.smartfocus_target_wid = sfw
+                s.smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
+                s.smartfocus_prev_lines = []
+                s.smartfocus_has_sent = False
+            sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
+            if sfw not in s.sessions:
+                s.sessions = tmux.scan_claude_sessions()
+                s.last_scan = time.time()
+                if sfw not in s.sessions:
+                    state._clear_smartfocus_state()
+                    s.smartfocus_target_wid = None
+                    s.smartfocus_prev_lines = []
+                    smartfocus_state = None
+            if smartfocus_state:
+                raw = tmux._capture_pane(sfp, 50)
+                cur_lines = content._filter_noise(raw)
+                for i in range(len(cur_lines) - 1, -1, -1):
+                    if cur_lines[i].strip().startswith("❯"):
+                        cur_lines = cur_lines[:i]
+                        break
+                if s.smartfocus_pane_width:
+                    cur_lines = tmux._join_wrapped_lines(cur_lines, s.smartfocus_pane_width)
+                if s.smartfocus_prev_lines:
+                    new = content._compute_new_lines(s.smartfocus_prev_lines, cur_lines)
+                    if new:
+                        new_text = "\n".join(new).strip()
+                        if new_text:
+                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                            telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
+                            s.smartfocus_has_sent = True
+                s.smartfocus_prev_lines = cur_lines
+    elif s.smartfocus_target_wid:
+        s.smartfocus_target_wid = None
+        s.smartfocus_prev_lines = []
+        s.smartfocus_has_sent = False
+
+    # --- Deep focus monitoring (streams all output) ---
+    if deepfocus_state:
+        dfw = deepfocus_state["wid"]
+        if dfw != s.deepfocus_target_wid:
+            s.deepfocus_prev_lines = []
+            s.deepfocus_pending = []
+            s.deepfocus_last_new_ts = 0
+            s.deepfocus_first_new_ts = 0
+            s.deepfocus_target_wid = dfw
+            s.deepfocus_pane_width = tmux._get_pane_width(deepfocus_state["pane"])
+
+        dfp, dfproj = deepfocus_state["pane"], deepfocus_state["project"]
+
+        if dfw not in s.sessions:
+            s.sessions = tmux.scan_claude_sessions()
+            s.last_scan = time.time()
+            if dfw not in s.sessions:
+                state._clear_deepfocus_state()
+                telegram.tg_send(f"🔬 Deep focus on {state._wid_label(dfw)} ended — session gone.")
+                s.deepfocus_target_wid = None
+                deepfocus_state = None
+
+    if deepfocus_state:
+        raw = tmux._capture_pane(dfp, 50)
+        cur_lines = content._filter_noise(raw)
+        for i in range(len(cur_lines) - 1, -1, -1):
+            if cur_lines[i].strip().startswith("❯"):
+                cur_lines = cur_lines[:i]
+                break
+        if s.deepfocus_pane_width:
+            cur_lines = tmux._join_wrapped_lines(cur_lines, s.deepfocus_pane_width)
+
+        if s.deepfocus_prev_lines:
+            new = content._compute_new_lines(s.deepfocus_prev_lines, cur_lines)
+            if new:
+                s.deepfocus_pending.extend(new)
+                s.deepfocus_last_new_ts = time.time()
+                if not s.deepfocus_first_new_ts:
+                    s.deepfocus_first_new_ts = time.time()
+
+        s.deepfocus_prev_lines = cur_lines
+
+        now = time.time()
+        debounce_ok = s.deepfocus_pending and s.deepfocus_last_new_ts and (now - s.deepfocus_last_new_ts >= 3)
+        max_delay_ok = s.deepfocus_pending and s.deepfocus_first_new_ts and (now - s.deepfocus_first_new_ts >= 15)
+
+        if debounce_ok or max_delay_ok:
+            chunk = "\n".join(s.deepfocus_pending).strip()
+            if chunk:
+                msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
+                telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
+                config._save_last_msg(dfw, msg)
+            s.deepfocus_pending = []
+            s.deepfocus_last_new_ts = 0
+            s.deepfocus_first_new_ts = 0
+    elif s.deepfocus_target_wid:
+        s.deepfocus_target_wid = None
+
+    data, s.offset = telegram._poll_updates(s.offset, timeout=0)
+    if data is None:
+        time.sleep(2)
+        return None
+    if not data.get("result"):
+        time.sleep(0.15)
+        return None
+
+    for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):
+        callback = chat_msg.get("callback")
+        if callback:
+            cb_data = callback.get("data", "")
+
+            # Handle pending file Skip / Cancel buttons
+            if cb_data in ("file_skip", "file_cancel"):
+                telegram._answer_callback_query(callback["id"])
+                if callback.get("message_id"):
+                    telegram._remove_inline_keyboard(callback["message_id"])
+                if s.pending_file and cb_data == "file_skip":
+                    instruction = _build_file_instruction(s.pending_file["files"])
+                    s.pending_file = None
+                    _, s.sessions, s.last_win_idx = commands._handle_command(
+                        instruction, s.sessions, s.last_win_idx)
+                elif s.pending_file and cb_data == "file_cancel":
+                    s.pending_file = None
+                    telegram.tg_send("🗑 File discarded.",
+                                     silent=state._is_silent(_CAT_CONFIRM))
+                continue
+
+            s.sessions, s.last_win_idx, cb_action = commands._handle_callback(
+                callback, s.sessions, s.last_win_idx)
+            if cb_action == "quit":
+                return "quit"
+            if s.quit_pending and cb_data.startswith("quit_"):
+                s.quit_pending = False
+            continue
+
+        text = chat_msg["text"]
+        photo_id = chat_msg.get("photo")
+
+        # Reply-to routing: use wid from the replied-to message
+        reply_wid = chat_msg.get("reply_wid")
+        if reply_wid and reply_wid in s.sessions:
+            s.last_win_idx = reply_wid
+
+        # Photo received — download and route to Claude
+        photo_ids = chat_msg.get("photos") or ([photo_id] if photo_id else [])
+        if photo_ids:
+            ts = f"{time.time():.6f}"
+            paths: list[str] = []
+            for i, fid in enumerate(photo_ids):
+                suffix = f"_{i}" if len(photo_ids) > 1 else ""
+                dest = f"/tmp/tg_photo_{ts}{suffix}.jpg"
+                path = telegram._download_tg_file(fid, dest)
+                if path:
+                    paths.append(path)
+            if paths:
+                caption = text
+                if not caption:
+                    # No caption — accumulate and prompt for instructions
+                    new_files = [{"type": "photo", "path": p} for p in paths]
+                    if s.pending_file:
+                        if s.pending_file.get("prompt_msg_id"):
+                            telegram._remove_inline_keyboard(s.pending_file["prompt_msg_id"])
+                        s.pending_file["files"].extend(new_files)
+                    else:
+                        s.pending_file = {"files": new_files}
+                    msg, kb = _build_pending_prompt(s.pending_file["files"])
+                    s.pending_file["prompt_msg_id"] = telegram.tg_send(
+                        msg, reply_markup=kb,
+                        silent=state._is_silent(_CAT_CONFIRM))
+                    continue
+                target_idx = None
+                remaining_text = caption
+                m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
+                if m and m.group(1) in s.sessions:
+                    target_idx = m.group(1)
+                    remaining_text = m.group(2).strip()
+                elif len(s.sessions) == 1:
+                    target_idx = next(iter(s.sessions))
+                elif s.last_win_idx and s.last_win_idx in s.sessions:
+                    target_idx = s.last_win_idx
+
+                if target_idx:
+                    pane, project = s.sessions[target_idx]
+                    wid = f"w{target_idx}"
+                    if len(paths) == 1:
+                        instruction = f"Read {paths[0]}"
+                    else:
+                        instruction = "Read these images: " + ", ".join(paths)
+                    if remaining_text:
+                        instruction += f" — {remaining_text}"
+
+                    paths_display = "`, `".join(paths)
+
+                    # Busy check — queue if session is working
+                    if state._is_busy(wid):
+                        state._save_queued_msg(wid, instruction)
+                        telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
+                                         silent=state._is_silent(_CAT_CONFIRM))
+                        s.last_win_idx = target_idx
+                        continue
+
+                    is_idle, typed_text = routing._pane_idle_state(pane)
+                    if not is_idle:
+                        state._save_queued_msg(wid, instruction)
+                        telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
+                                         silent=state._is_silent(_CAT_CONFIRM))
+                        s.last_win_idx = target_idx
+                        continue
+
+                    p = shlex.quote(pane)
+
+                    # Save locally typed text before clearing
+                    if typed_text:
+                        state._save_queued_msg(wid, typed_text)
+                        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+                        time.sleep(0.2)
+
+                    # Delay before Enter — Claude Code needs time to
+                    # process image path previews (longer for albums)
+                    delay = "0.5" if len(paths) > 1 else "0.3"
+                    cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep {delay} && tmux send-keys -t {p} Enter"
+                    subprocess.run(["bash", "-c", cmd], timeout=10)
+                    state._mark_busy(wid)
+                    confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{paths_display}`"
+                    telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                    commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
+                    s.last_win_idx = target_idx
+                else:
+                    paths_display = "`, `".join(paths)
+                    telegram.tg_send(f"📷 Photo saved to `{paths_display}` — no target session.\n{tmux.format_sessions_message(s.sessions)}",
+                                     reply_markup=tmux._sessions_keyboard(s.sessions))
+            else:
+                telegram.tg_send("⚠️ Failed to download photo.", silent=state._is_silent(_CAT_ERROR))
+            continue
+
+        # Document received — download and route to Claude
+        doc_info = chat_msg.get("document")
+        if doc_info:
+            ts = f"{time.time():.6f}"
+            file_name = doc_info.get("file_name", "")
+            ext = os.path.splitext(file_name)[1] if file_name else ".bin"
+            if not ext:
+                ext = ".bin"
+            dest = f"/tmp/tg_doc_{ts}{ext}"
+            path = telegram._download_tg_file(doc_info["file_id"], dest)
+            if path:
+                caption = text
+                if not caption:
+                    # No caption — accumulate and prompt for instructions
+                    display = file_name or os.path.basename(path)
+                    new_file = {"type": "document", "path": path, "display": display}
+                    if s.pending_file:
+                        if s.pending_file.get("prompt_msg_id"):
+                            telegram._remove_inline_keyboard(s.pending_file["prompt_msg_id"])
+                        s.pending_file["files"].append(new_file)
+                    else:
+                        s.pending_file = {"files": [new_file]}
+                    msg, kb = _build_pending_prompt(s.pending_file["files"])
+                    s.pending_file["prompt_msg_id"] = telegram.tg_send(
+                        msg, reply_markup=kb,
+                        silent=state._is_silent(_CAT_CONFIRM))
+                    continue
+                target_idx = None
+                remaining_text = caption
+                m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
+                if m and m.group(1) in s.sessions:
+                    target_idx = m.group(1)
+                    remaining_text = m.group(2).strip()
+                elif len(s.sessions) == 1:
+                    target_idx = next(iter(s.sessions))
+                elif s.last_win_idx and s.last_win_idx in s.sessions:
+                    target_idx = s.last_win_idx
+
+                if target_idx:
+                    pane, project = s.sessions[target_idx]
+                    wid = f"w{target_idx}"
+                    instruction = f"Read {path}"
+                    if remaining_text:
+                        instruction += f" — {remaining_text}"
+
+                    # Busy check — queue if session is working
+                    if state._is_busy(wid):
+                        state._save_queued_msg(wid, instruction)
+                        telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
+                                         silent=state._is_silent(_CAT_CONFIRM))
+                        s.last_win_idx = target_idx
+                        continue
+
+                    is_idle, typed_text = routing._pane_idle_state(pane)
+                    if not is_idle:
+                        state._save_queued_msg(wid, instruction)
+                        telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
+                                         silent=state._is_silent(_CAT_CONFIRM))
+                        s.last_win_idx = target_idx
+                        continue
+
+                    p = shlex.quote(pane)
+
+                    # Save locally typed text before clearing
+                    if typed_text:
+                        state._save_queued_msg(wid, typed_text)
+                        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+                        time.sleep(0.2)
+
+                    cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.3 && tmux send-keys -t {p} Enter"
+                    subprocess.run(["bash", "-c", cmd], timeout=10)
+                    state._mark_busy(wid)
+                    confirm = f"📎 Document sent to `w{target_idx}` (`{project}`):\n`{file_name}`"
+                    telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                    commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
+                    s.last_win_idx = target_idx
+                else:
+                    telegram.tg_send(f"📎 Document saved to `{path}` — no target session.\n{tmux.format_sessions_message(s.sessions)}",
+                                     reply_markup=tmux._sessions_keyboard(s.sessions))
+            else:
+                telegram.tg_send("⚠️ Failed to download document.", silent=state._is_silent(_CAT_ERROR))
+            continue
+
+        # Handle quit confirmation
+        if s.quit_pending:
+            s.quit_pending = False
+            if text.lower() in ("y", "yes"):
+                telegram.tg_send("👋 Bye.")
+                return "quit"
+            else:
+                telegram.tg_send("Cancelled.")
+            continue
+
+        text = commands._resolve_alias(text, commands._any_active_prompt())
+
+        # Pending file: user is providing instructions for a previously sent photo/doc
+        if s.pending_file and not text.startswith("/"):
+            if s.pending_file.get("prompt_msg_id"):
+                telegram._remove_inline_keyboard(s.pending_file["prompt_msg_id"])
+            wn_m = re.match(r"^(w\d+)\s+(.*)", text, re.DOTALL)
+            prefix = ""
+            user_text = text.strip()
+            if wn_m:
+                prefix = wn_m.group(1) + " "
+                user_text = wn_m.group(2).strip()
+            instruction = _build_file_instruction(s.pending_file["files"], user_text)
+            text = f"{prefix}{instruction}"
+            s.pending_file = None
+
+        prev_sessions = s.sessions
+        action, s.sessions, s.last_win_idx = commands._handle_command(
+            text, s.sessions, s.last_win_idx
+        )
+        if s.sessions is not prev_sessions:
+            s.last_scan = time.time()
+        if action == "pause":
+            s.paused = True
+            return "pause_break"
+        elif action == "quit_pending":
+            s.quit_pending = True
+        elif action == "quit":
+            return "quit"
+
+    return None
+
+
 def cmd_listen():
     """Poll Telegram and auto-route messages to Claude sessions by wN prefix."""
     # Acquire exclusive lock to prevent duplicate listeners.
@@ -133,30 +718,6 @@ def cmd_listen():
 
     sessions = tmux.scan_claude_sessions()
     last_scan = time.time()
-    last_win_idx = None
-    pending_file = None  # {"files": [{"type","path","display"},...], "prompt_msg_id": int}
-    RESCAN_INTERVAL = 60
-
-    last_prompt_cleanup: float = 0
-
-    focus_target_wid: str | None = None
-    focus_pane_width: int = 0
-    focus_last_hash: int = 0
-
-    deepfocus_target_wid: str | None = None
-    deepfocus_pane_width: int = 0
-    deepfocus_prev_lines: list[str] = []
-    deepfocus_pending: list[str] = []
-    deepfocus_last_new_ts: float = 0
-    deepfocus_first_new_ts: float = 0
-
-    smartfocus_target_wid: str | None = None
-    smartfocus_pane_width: int = 0
-    smartfocus_prev_lines: list[str] = []
-    smartfocus_has_sent: bool = False
-
-    compact_notified: set[str] = set()  # wids already notified as compacting
-    last_interrupt_check: float = 0
 
     # Consume existing updates to avoid replaying old messages
     offset = 0
@@ -180,563 +741,27 @@ def cmd_listen():
                      reply_markup=telegram._build_reply_keyboard())
     # Pre-seed interrupted set so we don't send redundant notifications
     # for sessions already shown as 🔴 in the startup message
-    interrupted_notified = {f"w{idx}" for idx, s in statuses.items() if s == "interrupted"}
+    interrupted_notified = {f"w{idx}" for idx, st in statuses.items() if st == "interrupted"}
     god_wids = state._god_mode_wids()
     config._log("listen", f"Found {len(sessions)} Claude session(s).")
     config._log("listen", f"God mode: {god_wids or 'off'}")
     config._log("listen", f"Local suppress: {'on' if state._is_local_suppress_enabled() else 'off'}")
     config._log("listen", "Press Ctrl+C to stop")
 
-    paused = False
-    quit_pending = False
+    s = _ListenerState(
+        sessions=sessions,
+        last_scan=last_scan,
+        offset=offset,
+        interrupted_notified=interrupted_notified,
+        god_wids=god_wids,
+    )
     _init_file_mtimes()
 
     while True:
-        # Auto-reload on file change (debounced — wait for files to stabilize)
-        global _reload_after
         try:
-            if _check_file_changes():
-                _init_file_mtimes()
-                _reload_after = time.time() + 2.0
-                config._log("listen", "Code change detected, reloading in 2s...")
-            elif _reload_after and time.time() >= _reload_after:
-                _reload_after = None
-                config._log("listen", "Reloading...")
-                telegram.tg_send("🔄 Reloading...", silent=state._is_silent(_CAT_CONFIRM))
-                _restart_cmd = "import sys; sys.argv=['astra','listen']; from astra.cli import main; main()"
-                os.execv(sys.executable, [sys.executable, "-c", _restart_cmd])
-        except OSError:
-            pass
-
-        # --- Paused mode: only respond to /start, /help, /quit ---
-        if paused:
-            try:
-                data, offset = telegram._poll_updates(offset, timeout=5)
-            except KeyboardInterrupt:
-                telegram.tg_send("👋 Bye.")
-                break
-            if data is None:
-                time.sleep(2)
-                continue
-
-            for chat_msg in telegram._extract_chat_messages(data):
-                text = chat_msg["text"]
-                if text.lower() == "/start":
-                    state._clear_signals(include_state=True)
-                    sessions = tmux.scan_claude_sessions()
-                    last_scan = time.time()
-                    paused = False
-                    focus_target_wid = None
-                    focus_pane_width = 0
-                    focus_last_hash = 0
-                    deepfocus_target_wid = None
-                    deepfocus_pane_width = 0
-                    deepfocus_prev_lines = []
-                    deepfocus_pending = []
-                    deepfocus_last_new_ts = 0
-                    deepfocus_first_new_ts = 0
-                    smartfocus_target_wid = None
-                    smartfocus_pane_width = 0
-                    smartfocus_prev_lines = []
-                    smartfocus_has_sent = False
-                    statuses = routing._get_session_statuses(sessions)
-                    interrupted_notified = {f"w{idx}" for idx, s in statuses.items() if s == "interrupted"}
-                    resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
-                    telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(sessions, statuses=statuses,
-                                                                                       locally_viewed=resume_viewed or None),
-                                     reply_markup=telegram._build_reply_keyboard())
-                    config._log("listen", "Resumed listening.")
-                elif text.lower() == "/quit":
-                    telegram.tg_send("👋 Bye.")
-                    return
-                elif text.lower() == "/help":
-                    telegram.tg_send("⏸ Paused. Send `/start` to resume or `/quit` to exit.")
-                else:
-                    telegram.tg_send("⏸ Paused. Send `/start` to resume.")
-            continue
-
-        # --- Active mode ---
-        if time.time() - last_scan > RESCAN_INTERVAL:
-            sessions = tmux.scan_claude_sessions()
-            last_scan = time.time()
-
-        if time.time() - last_prompt_cleanup > 5:
-            state._cleanup_stale_prompts()
-            state._cleanup_stale_busy(sessions)
-            last_prompt_cleanup = time.time()
-
-        locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
-
-        # --- Interrupt detection (no hook fires on Esc interrupt) ---
-        if time.time() - last_interrupt_check > 5:
-            last_interrupt_check = time.time()
-            for idx, (pane, project) in sessions.items():
-                wid = f"w{idx}"
-                try:
-                    raw = tmux._capture_pane(pane, 15)
-                except Exception:
-                    continue
-                idle, _ = routing._pane_idle_state(pane)
-                if not idle:
-                    interrupted_notified.discard(wid)
-                    continue
-                # Pane is idle — clear stale busy flag (interrupt doesn't fire Stop hook)
-                if state._is_busy(wid):
-                    state._clear_busy(wid)
-                if wid in interrupted_notified:
-                    continue
-                if content._detect_interrupted(raw):
-                    if idx not in locally_viewed:
-                        label = state._wid_label(idx)
-                        telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
-                                         silent=state._is_silent(_CAT_INTERRUPT))
-                    else:
-                        config._log("local", f"suppressed interrupt for w{idx} ({project})")
-                    interrupted_notified.add(wid)
-            # Clear for gone sessions
-            interrupted_notified -= interrupted_notified - {f"w{i}" for i in sessions}
-
-            # --- Auto-compact detection ---
-            for idx, (pane, project) in sessions.items():
-                wid = f"w{idx}"
-                try:
-                    raw = tmux._capture_pane(pane, 15)
-                except Exception:
-                    continue
-                if content._detect_compacting(raw):
-                    if wid not in compact_notified:
-                        if idx not in locally_viewed:
-                            label = state._wid_label(idx)
-                            telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
-                                             silent=state._is_silent(_CAT_MONITOR))
-                        else:
-                            config._log("local", f"suppressed compact for w{idx} ({project})")
-                        compact_notified.add(wid)
-                else:
-                    if wid in compact_notified:
-                        if idx not in locally_viewed:
-                            label = state._wid_label(idx)
-                            telegram.tg_send(f"✅ {label} finished compacting.",
-                                             silent=state._is_silent(_CAT_MONITOR))
-                        compact_notified.discard(wid)
-            # Clear for gone sessions
-            compact_notified -= compact_notified - {f"w{i}" for i in sessions}
-
-        focus_state = state._load_focus_state()
-        deepfocus_state = state._load_deepfocus_state()
-        smartfocus_state = state._load_smartfocus_state()
-        focused_wids: set[str] = set()
-        if focus_state:
-            focused_wids.add(focus_state["wid"])
-        if deepfocus_state:
-            focused_wids.add(deepfocus_state["wid"])
-
-        signal_wid = signals.process_signals(
-            focused_wids=focused_wids or None,
-            smartfocus_prev=smartfocus_prev_lines if smartfocus_state else None,
-            smartfocus_has_sent=smartfocus_has_sent if smartfocus_state else False,
-            locally_viewed=locally_viewed or None,
-        )
-        # Re-read smartfocus state — process_signals may have cleared it
-        smartfocus_state = state._load_smartfocus_state()
-        if signal_wid:
-            last_win_idx = signal_wid
-
-        # --- Lightweight focus monitoring (completed responses only) ---
-        if focus_state:
-            fw = focus_state["wid"]
-            if fw != focus_target_wid:
-                focus_target_wid = fw
-                focus_pane_width = tmux._get_pane_width(focus_state["pane"])
-                focus_last_hash = 0
-            fp, fproj = focus_state["pane"], focus_state["project"]
-            if fw not in sessions:
-                sessions = tmux.scan_claude_sessions()
-                last_scan = time.time()
-                if fw not in sessions:
-                    state._clear_focus_state()
-                    telegram.tg_send(f"🔍 Focus on {state._wid_label(fw)} ended — session gone.")
-                    focus_target_wid = None
-                    focus_state = None
-            if focus_state:
-                for n in (50, 150):
-                    raw = tmux._capture_pane(fp, n)
-                    if content._has_response_start(raw):
-                        break
-                cleaned = content.clean_pane_content(raw, "stop", focus_pane_width)
-                if cleaned:
-                    h = hash(cleaned)
-                    if h != focus_last_hash and focus_last_hash != 0:
-                        header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
-                        telegram._send_long_message(header, cleaned, fw, silent=state._is_silent(_CAT_MONITOR))
-                    focus_last_hash = h
-        elif focus_target_wid:
-            focus_target_wid = None
-
-        # --- Smart focus monitoring (auto-activated on message send) ---
-        if smartfocus_state:
-            sfw = smartfocus_state["wid"]
-            # Skip if manual focus or deepfocus already covers this wid
-            if (focus_state and focus_state["wid"] == sfw) or \
-               (deepfocus_state and deepfocus_state["wid"] == sfw):
-                pass
-            else:
-                if sfw != smartfocus_target_wid:
-                    smartfocus_target_wid = sfw
-                    smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
-                    smartfocus_prev_lines = []
-                    smartfocus_has_sent = False
-                sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
-                if sfw not in sessions:
-                    sessions = tmux.scan_claude_sessions()
-                    last_scan = time.time()
-                    if sfw not in sessions:
-                        state._clear_smartfocus_state()
-                        smartfocus_target_wid = None
-                        smartfocus_prev_lines = []
-                        smartfocus_state = None
-                if smartfocus_state:
-                    for n in (50, 150):
-                        raw = tmux._capture_pane(sfp, n)
-                        if content._has_response_start(raw):
-                            break
-                    cleaned = content.clean_pane_content(raw, "stop", smartfocus_pane_width)
-                    if cleaned:
-                        cur_lines = cleaned.splitlines()
-                        if smartfocus_prev_lines:
-                            new = content._compute_new_lines(smartfocus_prev_lines, cur_lines)
-                            if new:
-                                new_text = "\n".join(new).strip()
-                                if new_text:
-                                    header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                                    telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
-                                    smartfocus_has_sent = True
-                                    smartfocus_prev_lines = cur_lines
-                        else:
-                            smartfocus_prev_lines = cur_lines
-        elif smartfocus_target_wid:
-            smartfocus_target_wid = None
-            smartfocus_prev_lines = []
-            smartfocus_has_sent = False
-
-        # --- Deep focus monitoring (streams all output) ---
-        if deepfocus_state:
-            dfw = deepfocus_state["wid"]
-            if dfw != deepfocus_target_wid:
-                deepfocus_prev_lines = []
-                deepfocus_pending = []
-                deepfocus_last_new_ts = 0
-                deepfocus_first_new_ts = 0
-                deepfocus_target_wid = dfw
-                deepfocus_pane_width = tmux._get_pane_width(deepfocus_state["pane"])
-
-            dfp, dfproj = deepfocus_state["pane"], deepfocus_state["project"]
-
-            if dfw not in sessions:
-                sessions = tmux.scan_claude_sessions()
-                last_scan = time.time()
-                if dfw not in sessions:
-                    state._clear_deepfocus_state()
-                    telegram.tg_send(f"🔬 Deep focus on {state._wid_label(dfw)} ended — session gone.")
-                    deepfocus_target_wid = None
-                    deepfocus_state = None
-
-        if deepfocus_state:
-            raw = tmux._capture_pane(dfp, 50)
-            cur_lines = content._filter_noise(raw)
-            for i in range(len(cur_lines) - 1, -1, -1):
-                if cur_lines[i].strip().startswith("❯"):
-                    cur_lines = cur_lines[:i]
-                    break
-            if deepfocus_pane_width:
-                cur_lines = tmux._join_wrapped_lines(cur_lines, deepfocus_pane_width)
-
-            if deepfocus_prev_lines:
-                new = content._compute_new_lines(deepfocus_prev_lines, cur_lines)
-                if new:
-                    deepfocus_pending.extend(new)
-                    deepfocus_last_new_ts = time.time()
-                    if not deepfocus_first_new_ts:
-                        deepfocus_first_new_ts = time.time()
-
-            deepfocus_prev_lines = cur_lines
-
-            now = time.time()
-            debounce_ok = deepfocus_pending and deepfocus_last_new_ts and (now - deepfocus_last_new_ts >= 3)
-            max_delay_ok = deepfocus_pending and deepfocus_first_new_ts and (now - deepfocus_first_new_ts >= 15)
-
-            if debounce_ok or max_delay_ok:
-                chunk = "\n".join(deepfocus_pending).strip()
-                if chunk:
-                    msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
-                    telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
-                    config._save_last_msg(dfw, msg)
-                deepfocus_pending = []
-                deepfocus_last_new_ts = 0
-                deepfocus_first_new_ts = 0
-        elif deepfocus_target_wid:
-            deepfocus_target_wid = None
-
-        try:
-            data, offset = telegram._poll_updates(offset, timeout=0)
+            result = _listen_tick(s)
         except KeyboardInterrupt:
             telegram.tg_send("👋 Bye.")
             break
-        if data is None:
-            time.sleep(2)
-            continue
-        if not data.get("result"):
-            time.sleep(0.15)
-            continue
-
-        for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):
-            callback = chat_msg.get("callback")
-            if callback:
-                cb_data = callback.get("data", "")
-
-                # Handle pending file Skip / Cancel buttons
-                if cb_data in ("file_skip", "file_cancel"):
-                    telegram._answer_callback_query(callback["id"])
-                    if callback.get("message_id"):
-                        telegram._remove_inline_keyboard(callback["message_id"])
-                    if pending_file and cb_data == "file_skip":
-                        instruction = _build_file_instruction(pending_file["files"])
-                        pending_file = None
-                        _, sessions, last_win_idx = commands._handle_command(
-                            instruction, sessions, last_win_idx)
-                    elif pending_file and cb_data == "file_cancel":
-                        pending_file = None
-                        telegram.tg_send("🗑 File discarded.",
-                                         silent=state._is_silent(_CAT_CONFIRM))
-                    continue
-
-                sessions, last_win_idx, cb_action = commands._handle_callback(
-                    callback, sessions, last_win_idx)
-                if cb_action == "quit":
-                    return
-                if quit_pending and cb_data.startswith("quit_"):
-                    quit_pending = False
-                continue
-
-            text = chat_msg["text"]
-            photo_id = chat_msg.get("photo")
-
-            # Reply-to routing: use wid from the replied-to message
-            reply_wid = chat_msg.get("reply_wid")
-            if reply_wid and reply_wid in sessions:
-                last_win_idx = reply_wid
-
-            # Photo received — download and route to Claude
-            photo_ids = chat_msg.get("photos") or ([photo_id] if photo_id else [])
-            if photo_ids:
-                ts = f"{time.time():.6f}"
-                paths: list[str] = []
-                for i, fid in enumerate(photo_ids):
-                    suffix = f"_{i}" if len(photo_ids) > 1 else ""
-                    dest = f"/tmp/tg_photo_{ts}{suffix}.jpg"
-                    path = telegram._download_tg_file(fid, dest)
-                    if path:
-                        paths.append(path)
-                if paths:
-                    caption = text
-                    if not caption:
-                        # No caption — accumulate and prompt for instructions
-                        new_files = [{"type": "photo", "path": p} for p in paths]
-                        if pending_file:
-                            if pending_file.get("prompt_msg_id"):
-                                telegram._remove_inline_keyboard(pending_file["prompt_msg_id"])
-                            pending_file["files"].extend(new_files)
-                        else:
-                            pending_file = {"files": new_files}
-                        msg, kb = _build_pending_prompt(pending_file["files"])
-                        pending_file["prompt_msg_id"] = telegram.tg_send(
-                            msg, reply_markup=kb,
-                            silent=state._is_silent(_CAT_CONFIRM))
-                        continue
-                    target_idx = None
-                    remaining_text = caption
-                    m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
-                    if m and m.group(1) in sessions:
-                        target_idx = m.group(1)
-                        remaining_text = m.group(2).strip()
-                    elif len(sessions) == 1:
-                        target_idx = next(iter(sessions))
-                    elif last_win_idx and last_win_idx in sessions:
-                        target_idx = last_win_idx
-
-                    if target_idx:
-                        pane, project = sessions[target_idx]
-                        wid = f"w{target_idx}"
-                        if len(paths) == 1:
-                            instruction = f"Read {paths[0]}"
-                        else:
-                            instruction = "Read these images: " + ", ".join(paths)
-                        if remaining_text:
-                            instruction += f" — {remaining_text}"
-
-                        paths_display = "`, `".join(paths)
-
-                        # Busy check — queue if session is working
-                        if state._is_busy(wid):
-                            state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
-                                             silent=state._is_silent(_CAT_CONFIRM))
-                            last_win_idx = target_idx
-                            continue
-
-                        is_idle, typed_text = routing._pane_idle_state(pane)
-                        if not is_idle:
-                            state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
-                                             silent=state._is_silent(_CAT_CONFIRM))
-                            last_win_idx = target_idx
-                            continue
-
-                        p = shlex.quote(pane)
-
-                        # Save locally typed text before clearing
-                        if typed_text:
-                            state._save_queued_msg(wid, typed_text)
-                            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
-                            time.sleep(0.2)
-
-                        # Delay before Enter — Claude Code needs time to
-                        # process image path previews (longer for albums)
-                        delay = "0.5" if len(paths) > 1 else "0.3"
-                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep {delay} && tmux send-keys -t {p} Enter"
-                        subprocess.run(["bash", "-c", cmd], timeout=10)
-                        state._mark_busy(wid)
-                        confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{paths_display}`"
-                        telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-                        commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
-                        last_win_idx = target_idx
-                    else:
-                        paths_display = "`, `".join(paths)
-                        telegram.tg_send(f"📷 Photo saved to `{paths_display}` — no target session.\n{tmux.format_sessions_message(sessions)}",
-                                         reply_markup=tmux._sessions_keyboard(sessions))
-                else:
-                    telegram.tg_send("⚠️ Failed to download photo.", silent=state._is_silent(_CAT_ERROR))
-                continue
-
-            # Document received — download and route to Claude
-            doc_info = chat_msg.get("document")
-            if doc_info:
-                ts = f"{time.time():.6f}"
-                file_name = doc_info.get("file_name", "")
-                ext = os.path.splitext(file_name)[1] if file_name else ".bin"
-                if not ext:
-                    ext = ".bin"
-                dest = f"/tmp/tg_doc_{ts}{ext}"
-                path = telegram._download_tg_file(doc_info["file_id"], dest)
-                if path:
-                    caption = text
-                    if not caption:
-                        # No caption — accumulate and prompt for instructions
-                        display = file_name or os.path.basename(path)
-                        new_file = {"type": "document", "path": path, "display": display}
-                        if pending_file:
-                            if pending_file.get("prompt_msg_id"):
-                                telegram._remove_inline_keyboard(pending_file["prompt_msg_id"])
-                            pending_file["files"].append(new_file)
-                        else:
-                            pending_file = {"files": [new_file]}
-                        msg, kb = _build_pending_prompt(pending_file["files"])
-                        pending_file["prompt_msg_id"] = telegram.tg_send(
-                            msg, reply_markup=kb,
-                            silent=state._is_silent(_CAT_CONFIRM))
-                        continue
-                    target_idx = None
-                    remaining_text = caption
-                    m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
-                    if m and m.group(1) in sessions:
-                        target_idx = m.group(1)
-                        remaining_text = m.group(2).strip()
-                    elif len(sessions) == 1:
-                        target_idx = next(iter(sessions))
-                    elif last_win_idx and last_win_idx in sessions:
-                        target_idx = last_win_idx
-
-                    if target_idx:
-                        pane, project = sessions[target_idx]
-                        wid = f"w{target_idx}"
-                        instruction = f"Read {path}"
-                        if remaining_text:
-                            instruction += f" — {remaining_text}"
-
-                        # Busy check — queue if session is working
-                        if state._is_busy(wid):
-                            state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
-                                             silent=state._is_silent(_CAT_CONFIRM))
-                            last_win_idx = target_idx
-                            continue
-
-                        is_idle, typed_text = routing._pane_idle_state(pane)
-                        if not is_idle:
-                            state._save_queued_msg(wid, instruction)
-                            telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
-                                             silent=state._is_silent(_CAT_CONFIRM))
-                            last_win_idx = target_idx
-                            continue
-
-                        p = shlex.quote(pane)
-
-                        # Save locally typed text before clearing
-                        if typed_text:
-                            state._save_queued_msg(wid, typed_text)
-                            subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
-                            time.sleep(0.2)
-
-                        cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.3 && tmux send-keys -t {p} Enter"
-                        subprocess.run(["bash", "-c", cmd], timeout=10)
-                        state._mark_busy(wid)
-                        confirm = f"📎 Document sent to `w{target_idx}` (`{project}`):\n`{file_name}`"
-                        telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-                        commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
-                        last_win_idx = target_idx
-                    else:
-                        telegram.tg_send(f"📎 Document saved to `{path}` — no target session.\n{tmux.format_sessions_message(sessions)}",
-                                         reply_markup=tmux._sessions_keyboard(sessions))
-                else:
-                    telegram.tg_send("⚠️ Failed to download document.", silent=state._is_silent(_CAT_ERROR))
-                continue
-
-            # Handle quit confirmation
-            if quit_pending:
-                quit_pending = False
-                if text.lower() in ("y", "yes"):
-                    telegram.tg_send("👋 Bye.")
-                    return
-                else:
-                    telegram.tg_send("Cancelled.")
-                continue
-
-            text = commands._resolve_alias(text, commands._any_active_prompt())
-
-            # Pending file: user is providing instructions for a previously sent photo/doc
-            if pending_file and not text.startswith("/"):
-                if pending_file.get("prompt_msg_id"):
-                    telegram._remove_inline_keyboard(pending_file["prompt_msg_id"])
-                wn_m = re.match(r"^(w\d+)\s+(.*)", text, re.DOTALL)
-                prefix = ""
-                user_text = text.strip()
-                if wn_m:
-                    prefix = wn_m.group(1) + " "
-                    user_text = wn_m.group(2).strip()
-                instruction = _build_file_instruction(pending_file["files"], user_text)
-                text = f"{prefix}{instruction}"
-                pending_file = None
-
-            prev_sessions = sessions
-            action, sessions, last_win_idx = commands._handle_command(
-                text, sessions, last_win_idx
-            )
-            if sessions is not prev_sessions:
-                last_scan = time.time()
-            if action == "pause":
-                paused = True
-                break
-            elif action == "quit_pending":
-                quit_pending = True
-            elif action == "quit":
-                return
+        if result == "quit":
+            return

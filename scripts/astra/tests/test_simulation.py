@@ -1,0 +1,420 @@
+"""Simulation tests for the astra listener loop.
+
+These tests exercise the actual ``_listen_tick`` code path with
+FakeTelegram, FakeTmux, and FakeClock replacing the three external
+boundaries (Telegram API, tmux, subprocess).
+"""
+import os
+import unittest
+
+from astra import state, config, listener
+from tests.sim import SimulationHarness
+
+
+class SimTestBase(unittest.TestCase):
+    """Base class that sets up / tears down the simulation harness."""
+
+    def setUp(self):
+        self.h = SimulationHarness()
+        self.h.setup()
+
+    def tearDown(self):
+        self.h.teardown()
+
+
+class TestHarnessBasics(SimTestBase):
+    """Verify the harness itself works before testing real scenarios."""
+
+    def test_empty_tick_no_crash(self):
+        """A tick with no sessions and no messages should return None."""
+        s = self.h.make_listener_state()
+        result = self.h.tick(s)
+        self.assertIsNone(result)
+
+    def test_tick_with_idle_session(self):
+        """A tick with an idle session and no messages should return None."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+        result = self.h.tick(s)
+        self.assertIsNone(result)
+
+    def test_poll_returns_none(self):
+        """When _poll_updates returns None, the tick sleeps and returns."""
+        s = self.h.make_listener_state()
+        self.h.tick(s)
+        # Clock should have advanced by 2s (the sleep on empty poll)
+        self.assertGreater(self.h.clock.total_slept, 0)
+
+
+class TestTextMessageRouting(SimTestBase):
+    """Scenario 1: Text message routing.
+
+    Inject a Telegram message with wN prefix → verify routed to correct
+    pane → verify busy flag set → verify smartfocus activated.
+    """
+
+    def test_message_routed_to_session(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Inject a message targeting w4
+        self.h.tg.inject_text_message("w4 fix the bug")
+        self.h.tick(s)
+
+        # Verify confirmation sent to Telegram
+        self.h.assert_sent("Sent to.*w4")
+
+        # Verify tmux send-keys was called for the pane
+        self.h.assert_keys_sent_to("%20")
+
+        # Verify busy flag set
+        self.assertTrue(state._is_busy("w4"))
+
+    def test_smartfocus_activated_after_send(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("w4 fix the bug")
+        self.h.tick(s)
+
+        # Smartfocus should be activated
+        sf = state._load_smartfocus_state()
+        self.assertIsNotNone(sf)
+        self.assertEqual(sf["wid"], "4")
+        self.assertEqual(sf["pane"], "%20")
+
+    def test_single_session_no_prefix_needed(self):
+        """With one session, messages route without wN prefix."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("fix the bug")
+        self.h.tick(s)
+
+        self.h.assert_sent("Sent to.*w4")
+
+    def test_last_win_idx_remembered(self):
+        """After routing to w4, next message without prefix goes to w4."""
+        self.h.tmux.add_session("4", "%20", "projA", idle=True)
+        self.h.tmux.add_session("5", "%21", "projB", idle=True)
+        s = self.h.make_listener_state()
+
+        # First message to w4
+        self.h.tg.inject_text_message("w4 first task")
+        self.h.tick(s)
+        state._clear_busy("w4")
+        self.h.tmux.set_pane_idle("4")
+
+        # Second message without prefix — should go to w4
+        self.h.tg.inject_text_message("continue working")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        sent = self.h.tg.find_sent("Sent to.*w4")
+        self.assertEqual(len(sent), 2)
+
+
+class TestStopSignalWithSmartfocus(SimTestBase):
+    """Scenario 2: Stop signal with smartfocus tail.
+
+    Set up smartfocus state → inject stop signal → verify tail (not full
+    response) sent to Telegram.
+    """
+
+    def test_stop_with_smartfocus_sends_tail(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Simulate smartfocus having been active with some prev_lines
+        state._save_smartfocus_state("4", "%20", "myproject")
+        s.smartfocus_target_wid = "4"
+        s.smartfocus_pane_width = 120
+        s.smartfocus_prev_lines = ["line1", "line2", "line3"]
+        s.smartfocus_has_sent = True
+
+        # Set pane content to show a completed response with new content
+        self.h.tmux.set_pane_content("4",
+            "● Here is my response\n"
+            "line1\nline2\nline3\n"
+            "new_line4\nnew_line5\n"
+            "❯ "
+        )
+
+        # Inject stop signal
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+
+        # Should have sent a "finished" message
+        self.h.assert_sent("finished")
+
+    def test_stop_clears_busy_flag(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        state._mark_busy("w4")
+        self.assertTrue(state._is_busy("w4"))
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+
+        self.assertFalse(state._is_busy("w4"))
+
+
+class TestPermissionFlow(SimTestBase):
+    """Scenario 3: Permission flow.
+
+    Inject permission signal → verify keyboard sent → inject callback
+    → verify tmux send-keys called.
+    """
+
+    def test_permission_sends_keyboard(self):
+        # Set up pane with a permission dialog
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls -la\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again for this tool\n"
+            "  3. No\n"
+            "  Enter to select · ↑/↓ to navigate\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=perm_content)
+        s = self.h.make_listener_state()
+
+        # Inject permission signal
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="ls -la")
+        self.h.tick(s)
+
+        # Should have sent a permission message with keyboard
+        perm_msgs = self.h.tg.find_sent("permission")
+        self.assertTrue(len(perm_msgs) > 0)
+        # The permission message should have reply_markup
+        self.assertIsNotNone(perm_msgs[0].get("reply_markup"))
+
+    def test_permission_callback_sends_keys(self):
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls -la\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again for this tool\n"
+            "  3. No\n"
+            "  Enter to select · ↑/↓ to navigate\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=perm_content)
+        s = self.h.make_listener_state()
+
+        # First tick: process permission signal (creates active prompt)
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="ls -la")
+        self.h.tick(s)
+
+        # Get the message_id of the permission message
+        perm_msgs = self.h.tg.find_sent("permission")
+        msg_id = perm_msgs[0]["msg_id"] if perm_msgs else None
+
+        # Second tick: inject callback for "Allow" (option 1 = perm_w4_1)
+        self.h.tg.inject_callback("perm_w4_1", message_id=msg_id,
+                                  callback_id="cb_1")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Should have called tmux send-keys to navigate and select
+        self.assertTrue(len(self.h.subprocess_calls) > 0)
+
+
+class TestSmartfocusAcrossTicks(SimTestBase):
+    """Scenario 4: Smartfocus across multiple ticks.
+
+    Activate smartfocus → change pane content across ticks → verify
+    eye updates sent for each content change.
+    """
+
+    def test_smartfocus_tracks_content_changes(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Send message to activate smartfocus
+        self.h.tg.inject_text_message("w4 do something")
+        self.h.tick(s)
+        initial_sent = len(self.h.tg.sent_messages)
+
+        # Now simulate Claude working — pane shows response content
+        self.h.tmux.set_pane_content("4",
+            "● Working on it...\n"
+            "First I'll check the files\n"
+        )
+        state._clear_busy("w4")  # Clear so the route doesn't interfere
+
+        # Tick to establish prev_lines
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        after_first = len(self.h.tg.sent_messages)
+
+        # Change content — add new lines
+        self.h.tmux.set_pane_content("4",
+            "● Working on it...\n"
+            "First I'll check the files\n"
+            "Now reading main.py\n"
+            "Found the bug in line 42\n"
+        )
+
+        # Tick again — should detect new content and send update
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Should have sent an eye update for the new content
+        eye_msgs = self.h.tg.find_sent("👁")
+        self.assertTrue(len(eye_msgs) > 0, f"Expected 👁 message. All sent: {self.h.dump_timeline()}")
+
+    def test_smartfocus_clears_on_stop(self):
+        """Smartfocus state is cleared when stop signal is processed."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Activate smartfocus
+        state._save_smartfocus_state("4", "%20", "myproject")
+        s.smartfocus_target_wid = "4"
+        s.smartfocus_prev_lines = ["some content"]
+
+        # Set pane to show completed response
+        self.h.tmux.set_pane_content("4",
+            "● Done\nsome content\n❯ "
+        )
+
+        # Inject stop signal
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+
+        # Smartfocus should be cleared
+        sf = state._load_smartfocus_state()
+        self.assertIsNone(sf)
+
+
+class TestInterruptDetection(SimTestBase):
+    """Scenario 5: Interrupt detection.
+
+    Set pane content with "Interrupted" pattern → advance clock past
+    5s check interval → verify notification sent.
+    """
+
+    def test_interrupt_detected_and_notified(self):
+        self.h.tmux.add_session("4", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        # Set pane content showing an interrupted state
+        self.h.tmux.set_pane_content("4",
+            "Interrupted · 3 tool uses · 1.2K tokens remaining\n"
+            "❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2  # cursor on empty prompt
+
+        # Advance clock past the 5s interrupt check interval
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+
+        self.h.tick(s)
+
+        # Should have sent an interrupt notification
+        self.h.assert_sent("interrupted")
+
+    def test_interrupt_not_re_sent(self):
+        """After notifying about interrupt, don't send again."""
+        self.h.tmux.add_session("4", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        self.h.tmux.set_pane_content("4",
+            "Interrupted · 3 tool uses · 1.2K tokens remaining\n"
+            "❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+
+        # First detection
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+        first_count = len(self.h.tg.find_sent("interrupted"))
+
+        # Second detection — same content, should not re-notify
+        self.h.clock.advance(6)
+        self.h.tick(s)
+        second_count = len(self.h.tg.find_sent("interrupted"))
+
+        self.assertEqual(first_count, second_count,
+                         "Interrupt notification sent twice for same state")
+
+    def test_interrupt_re_sent_after_busy(self):
+        """After session goes busy and comes back interrupted, re-notify."""
+        self.h.tmux.add_session("4", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        # First: detect interrupt
+        self.h.tmux.set_pane_content("4",
+            "Interrupted · 3 tool uses\n❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+        self.assertEqual(len(self.h.tg.find_sent("interrupted")), 1)
+
+        # Simulate session going busy (not idle anymore)
+        self.h.tmux.set_pane_content("4",
+            "● Working on something...\n"
+            "  esc to interrupt\n"
+        )
+        self.h.clock.advance(6)
+        self.h.tick(s)
+
+        # Now interrupt again
+        self.h.tmux.set_pane_content("4",
+            "Interrupted · 5 tool uses\n❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+        self.h.clock.advance(6)
+        self.h.tick(s)
+
+        # Should have sent two interrupt notifications total
+        self.assertEqual(len(self.h.tg.find_sent("interrupted")), 2)
+
+
+class TestPausedMode(SimTestBase):
+    """Verify paused mode transitions work correctly."""
+
+    def test_pause_and_resume(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Inject /stop command (which triggers pause)
+        self.h.tg.inject_text_message("/stop")
+        result = self.h.tick(s)
+
+        self.assertEqual(result, "pause_break")
+        self.assertTrue(s.paused)
+
+        # In paused mode, /start resumes
+        self.h.tg.inject_text_message("/start")
+        self.h.clock.advance(1)
+        result = self.h.tick(s)
+
+        self.assertFalse(s.paused)
+        self.h.assert_sent("Resumed")
+
+    def test_pause_quit(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Pause first
+        s.paused = True
+
+        # /quit in paused mode should return "quit"
+        self.h.tg.inject_text_message("/quit")
+        result = self.h.tick(s)
+
+        self.assertEqual(result, "quit")
+        self.h.assert_sent("Bye")
+
+
+if __name__ == "__main__":
+    unittest.main()

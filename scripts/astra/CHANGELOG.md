@@ -5,6 +5,16 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.14.0
+
+- **Simulation test harness** — extract `_ListenerState` dataclass and `_listen_tick()` from `cmd_listen()` to enable integration testing of the listener loop without real Telegram/tmux
+- Add `tests/sim/` package with `FakeTelegram`, `FakeTmux`, `FakeClock`, and `SimulationHarness` that replace I/O boundaries with stateful fakes while delegating pure functions to real implementations
+- 18 simulation tests covering text routing, stop signals with smartfocus, permission flow, smartfocus content tracking, interrupt detection, and pause/resume
+
+## 0.13.2
+
+- **Fix smartfocus stopping mid-response** — replace `clean_pane_content("stop")` with `_filter_noise()` so smartfocus doesn't require the `●` marker (which scrolls off for long responses); always update prev\_lines to prevent state drift
+
 ## 0.13.1
 
 - **Re-source shell config on `/restart`** — runs `source ~/.zshrc` (or `~/.bashrc`) before relaunching Claude, ensuring PATH and env vars are fresh
