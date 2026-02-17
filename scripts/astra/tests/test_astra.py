@@ -3788,6 +3788,84 @@ class TestPaneIdleState(unittest.TestCase):
         self.assertEqual(typed, "")
 
 
+class TestGeminiIdleState(unittest.TestCase):
+    """Test _pane_idle_state with Gemini profile patterns."""
+
+    def setUp(self):
+        from astra import profiles
+        self.gemini = profiles.GEMINI
+        # Register a Gemini session so _profile_for_pane finds it
+        astra.state._current_sessions = {
+            "w1a": astra.SessionInfo("%30", "myproj", "gemini", "1", "a"),
+        }
+
+    def tearDown(self):
+        astra.state._current_sessions = {}
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_idle_prompt(self, mock_capture):
+        """Gemini idle: '>' prompt with decorative bars."""
+        mock_capture.return_value = (
+            "✦ Here is the result.\n"
+            "\n"
+            " >   \n"
+            "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_idle_with_status_bar(self, mock_capture):
+        """Gemini idle: prompt above status bar."""
+        mock_capture.return_value = (
+            " >   \n"
+            "~/.../proj (main)  no sandbox  Auto (Gemini 3) /model\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        self.assertTrue(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_busy_spinner(self, mock_capture):
+        """Gemini busy: braille spinner with esc to cancel."""
+        mock_capture.return_value = (
+            " >   fix the bug\n"
+            "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+            "⠋ Developing the fix (esc to cancel, 5s)\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_busy_esc_to_cancel(self, mock_capture):
+        """Gemini busy: 'esc to cancel' below prompt."""
+        mock_capture.return_value = (
+            " >   \n"
+            "esc to cancel\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_idle_with_typed_text(self, mock_capture):
+        """Gemini idle with typed text after prompt."""
+        mock_capture.return_value = " >   fix the bug\n"
+        is_idle, typed = astra._pane_idle_state("%30")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "fix the bug")
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_profile_for_pane_lookup(self, mock_capture):
+        """_profile_for_pane returns Gemini profile for Gemini pane."""
+        from astra.routing import _profile_for_pane
+        from astra import profiles
+        p = _profile_for_pane("%30")
+        self.assertEqual(p.name, "gemini")
+        # Unknown pane falls back to Claude
+        p2 = _profile_for_pane("%99")
+        self.assertEqual(p2.name, "claude")
+
+
 class TestBusyState(unittest.TestCase):
     """Test _mark_busy, _is_busy, _clear_busy state file operations."""
 

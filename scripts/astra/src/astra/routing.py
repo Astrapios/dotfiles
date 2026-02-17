@@ -87,7 +87,26 @@ def _is_ui_chrome(s: str, profile=None) -> bool:
         return True
     if re.match(r'^(\?|↵|⏎)\s', s):
         return True
+    # Gemini decorative bars and status bar
+    if re.match(r'^[▀▄]{3,}$', s):
+        return True
+    if re.search(r'no sandbox|Auto \(Gemini', s):
+        return True
+    # Gemini hint line: "Enter to submit · ↑/↓ for history · ..."
+    if 'Enter to submit' in s:
+        return True
     return False
+
+
+def _profile_for_pane(pane: str):
+    """Look up the CLIProfile for a pane via _current_sessions, default CLAUDE."""
+    from astra import profiles
+    for info in state._current_sessions.values():
+        if isinstance(info, tmux.SessionInfo) and info.pane_target == pane:
+            p = profiles.get_profile(info.cli)
+            if p:
+                return p
+    return profiles.CLAUDE
 
 
 def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
@@ -104,8 +123,7 @@ def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
     as an additional busy signal.
     """
     if profile is None:
-        from astra import profiles
-        profile = profiles.CLAUDE
+        profile = _profile_for_pane(pane)
     prompt_re = profile.prompt_re
     busy_ind = profile.busy_indicator
     try:

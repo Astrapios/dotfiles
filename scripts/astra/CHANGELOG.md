@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.15.4
+
+- **Fix Gemini idle detection** — `_pane_idle_state` now uses the correct CLI profile per pane instead of always defaulting to Claude; Gemini prompt (`>`), busy indicator (`esc to cancel`), and UI chrome (decorative bars, status bar) are properly recognized
+- `_profile_for_pane()` looks up the CLI profile from `_current_sessions` by pane target
+- Gemini-specific `_is_ui_chrome` patterns: `▀▀▀`/`▄▄▄` bars, status bar, hint line
+
 ## 0.15.3
 
 - **Always-suffix session IDs** — solo panes now get `w4a` suffix instead of bare `w4`, ensuring consistent addressing across solo and multi-pane windows
