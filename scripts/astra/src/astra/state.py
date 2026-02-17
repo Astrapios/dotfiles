@@ -291,17 +291,24 @@ def _resolve_name(target: str, sessions: dict) -> str | None:
     return None
 
 
-def _wid_label(wid: str) -> str:
+def _wid_label(wid: str, sessions: dict | None = None) -> str:
     """Format a wid with its name for display.
-    Accepts full wid ('w4') or bare index ('4').
-    Returns '`w4 [auth]`' or just '`w4`' if unnamed."""
+    Accepts full wid ('w4a') or bare index ('4').
+    When *sessions* is provided, strips suffix for solo panes ('w3a' → 'w3').
+    Returns '`w3 [auth]`' or just '`w3`' if unnamed."""
     if not wid.startswith("w"):
         wid = f"w{wid}"
     names = _load_session_names()
     name = names.get(wid, "")
+    display = wid
+    if sessions:
+        from astra import tmux
+        display = tmux._display_wid(wid, sessions)
+    if not name and display != wid:
+        name = names.get(display, "")
     if name:
-        return f"`{wid} [{name}]`"
-    return f"`{wid}`"
+        return f"`{display} [{name}]`"
+    return f"`{display}`"
 
 
 def _save_queued_msg(wid: str, text: str):
@@ -405,12 +412,12 @@ def _cleanup_stale_busy(active_sessions: dict):
 
 
 def _is_god_mode_for(wid: str) -> bool:
-    """Check if god mode is enabled for a specific wid (e.g. 'w4' or bare '4')."""
+    """Check if god mode is enabled for a specific wid (e.g. 'w4a')."""
     wids = _god_mode_wids()
     if "all" in wids:
         return True
-    # Check both bare and full wid format for compat
-    return wid in wids or wid.lstrip("w") in wids
+    # All stored values are fully suffixed now — exact match only
+    return wid in wids
 
 
 def _god_mode_wids() -> list[str]:
@@ -421,6 +428,22 @@ def _god_mode_wids() -> list[str]:
         try:
             with open(path) as f:
                 wids = json.load(f).get("wids", [])
+            # Normalize: bare "4" → "w4", bare "w4" → "w4a" (add suffix)
+            normalized = []
+            for w in wids:
+                if w == "all":
+                    normalized.append(w)
+                elif not w.startswith("w"):
+                    normalized.append(f"w{w}a")
+                elif re.match(r'^w\d+$', w):
+                    normalized.append(w + "a")
+                else:
+                    normalized.append(w)
+            if normalized != wids:
+                config._log("god", f"Normalized god mode wids: {wids} -> {normalized}")
+                wids = normalized
+                with open(config.GOD_MODE_PATH, "w") as f:
+                    json.dump({"wids": wids}, f)
             # Migrate legacy file to persistent location
             if path != config.GOD_MODE_PATH and wids:
                 _set_god_mode(wids[0], True)  # triggers write to persistent path
@@ -439,6 +462,12 @@ def _god_mode_wids() -> list[str]:
 
 def _set_god_mode(w_idx: str, enabled: bool):
     """Enable/disable god mode for a specific wid or 'all'."""
+    # Normalize to fully suffixed format: "4" → "w4a", "w4" → "w4a"
+    if w_idx != "all":
+        if not w_idx.startswith("w"):
+            w_idx = f"w{w_idx}"
+        if re.match(r'^w\d+$', w_idx):
+            w_idx = w_idx + "a"
     path = config.GOD_MODE_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
     wids = []

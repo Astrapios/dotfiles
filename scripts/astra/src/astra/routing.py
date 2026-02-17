@@ -166,7 +166,7 @@ def _get_session_statuses(sessions: dict[str, tuple[str, str]]) -> dict[str, str
     return statuses
 
 
-def route_to_pane(pane: str, win_idx: str, text: str) -> str:
+def route_to_pane(pane: str, win_idx: str, text: str, sessions: dict | None = None) -> str:
     """Route a message to a tmux pane, handling active prompts.
 
     If there's an active prompt, translates the reply into arrow-key
@@ -174,7 +174,7 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     Returns a confirmation message for Telegram.
     """
     wid = f"w{win_idx}" if not win_idx.startswith("w") else win_idx
-    label = state._wid_label(wid)
+    label = state._wid_label(wid, sessions)
     prompt = state.load_active_prompt(wid)
 
     if prompt:

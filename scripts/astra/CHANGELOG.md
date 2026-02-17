@@ -5,6 +5,25 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.15.3
+
+- **Always-suffix session IDs** — solo panes now get `w4a` suffix instead of bare `w4`, ensuring consistent addressing across solo and multi-pane windows
+- Bare `wN` in user commands resolves to `wNa` when solo, returns ambiguous (None) when multi-pane
+- Bare `3a` (w-prefix stripped by command regexes) resolves to `w3a` — fixes `s3a` alias and `/status w3a`
+- Signal wids from hooks (bare `wN`) resolved to actual session key via pane target matching
+- God mode normalizes stored wids to always-suffixed format (`w4` → `w4a` on load/write)
+- Display shows clean `w3` for solo panes, `w1a`/`w1b` only for multi-pane windows (status, buttons)
+- `_wid_label` accepts optional sessions for display-friendly wids in all notifications/headers
+- `format_sessions_message` uses pane-count-per-window for multi-pane detection instead of suffix presence
+
+## 0.15.2
+
+- Fix god mode check after wid migration — bidirectional normalization (`w4` ↔ `4`)
+- Fix `/status` passing bare window index to god mode check instead of full wid
+- Fix god mode status sorting for `wN` format wids
+- Normalize bare god mode entries to `wN` format on read and write
+- Show per-session detail (wid, project, CLI type) in listener startup log
+
 ## 0.15.1
 
 - Always show "Active sessions" header (not "Active Claude sessions")

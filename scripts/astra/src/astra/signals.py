@@ -46,7 +46,8 @@ def _format_question_msg(tag: str, project: str, question: dict, cli: str = "") 
 def process_signals(focused_wids: set[str] | None = None,
                      smartfocus_prev: list[str] | None = None,
                      smartfocus_has_sent: bool = False,
-                     locally_viewed: set[str] | None = None) -> str | None:
+                     locally_viewed: set[str] | None = None,
+                     sessions: dict | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
     If focused_wids is set, stop signals for those windows are suppressed.
     smartfocus_prev: previous lines from smartfocus monitoring, used to send
@@ -81,8 +82,22 @@ def process_signals(focused_wids: set[str] | None = None,
         wid = signal.get("wid", "")
         project = signal.get("project", "unknown")
         cli = signal.get("cli", "claude")
+
+        # Resolve bare wid (e.g. "w4") to actual session key (e.g. "w4a")
+        if sessions and wid and wid not in sessions:
+            # Match by pane target (most accurate)
+            for sid, info in sessions.items():
+                if isinstance(info, tmux.SessionInfo) and info.pane_target == pane:
+                    wid = sid
+                    break
+            else:
+                # Fallback: resolve_session_id handles wN → wNa alias
+                resolved = tmux.resolve_session_id(wid, sessions)
+                if resolved:
+                    wid = resolved
+
         dn = _display_name_for(cli)
-        tag = f" {state._wid_label(wid)}" if wid else ""
+        tag = f" {state._wid_label(wid, sessions)}" if wid else ""
         # locally_viewed contains bare window indices; extract from wid
         win_idx = re.match(r'^w?(\d+)', wid).group(1) if wid else ""
         is_local = bool(locally_viewed and win_idx in locally_viewed)
@@ -189,7 +204,7 @@ def process_signals(focused_wids: set[str] | None = None,
                         ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
                     ]])
                     telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(wid)}:\n{preview}",
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(wid, sessions)}:\n{preview}",
                         reply_markup=saved_kb,
                         silent=state._is_silent(_CAT_CONFIRM),
                     )

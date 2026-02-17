@@ -57,8 +57,8 @@ class TestTextMessageRouting(SimTestBase):
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
-        # Inject a message targeting w4
-        self.h.tg.inject_text_message("w4 fix the bug")
+        # Inject a message targeting w4a
+        self.h.tg.inject_text_message("w4a fix the bug")
         self.h.tick(s)
 
         # Verify confirmation sent to Telegram
@@ -68,19 +68,19 @@ class TestTextMessageRouting(SimTestBase):
         self.h.assert_keys_sent_to("%20")
 
         # Verify busy flag set
-        self.assertTrue(state._is_busy("w4"))
+        self.assertTrue(state._is_busy("w4a"))
 
     def test_smartfocus_activated_after_send(self):
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
-        self.h.tg.inject_text_message("w4 fix the bug")
+        self.h.tg.inject_text_message("w4a fix the bug")
         self.h.tick(s)
 
         # Smartfocus should be activated
         sf = state._load_smartfocus_state()
         self.assertIsNotNone(sf)
-        self.assertEqual(sf["wid"], "w4")
+        self.assertEqual(sf["wid"], "w4a")
         self.assertEqual(sf["pane"], "%20")
 
     def test_single_session_no_prefix_needed(self):
@@ -94,18 +94,18 @@ class TestTextMessageRouting(SimTestBase):
         self.h.assert_sent("Sent to.*w4")
 
     def test_last_win_idx_remembered(self):
-        """After routing to w4, next message without prefix goes to w4."""
+        """After routing to w4a, next message without prefix goes to w4a."""
         self.h.tmux.add_session("4", "%20", "projA", idle=True)
         self.h.tmux.add_session("5", "%21", "projB", idle=True)
         s = self.h.make_listener_state()
 
-        # First message to w4
-        self.h.tg.inject_text_message("w4 first task")
+        # First message to w4a
+        self.h.tg.inject_text_message("w4a first task")
         self.h.tick(s)
-        state._clear_busy("w4")
+        state._clear_busy("w4a")
         self.h.tmux.set_pane_idle("4")
 
-        # Second message without prefix — should go to w4
+        # Second message without prefix — should go to w4a
         self.h.tg.inject_text_message("continue working")
         self.h.clock.advance(1)
         self.h.tick(s)
@@ -126,8 +126,8 @@ class TestStopSignalWithSmartfocus(SimTestBase):
         s = self.h.make_listener_state()
 
         # Simulate smartfocus having been active with some prev_lines
-        state._save_smartfocus_state("4", "%20", "myproject")
-        s.smartfocus_target_wid = "4"
+        state._save_smartfocus_state("w4a", "%20", "myproject")
+        s.smartfocus_target_wid = "w4a"
         s.smartfocus_pane_width = 120
         s.smartfocus_prev_lines = ["line1", "line2", "line3"]
         s.smartfocus_has_sent = True
@@ -151,13 +151,13 @@ class TestStopSignalWithSmartfocus(SimTestBase):
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
-        state._mark_busy("w4")
-        self.assertTrue(state._is_busy("w4"))
+        state._mark_busy("w4a")
+        self.assertTrue(state._is_busy("w4a"))
 
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
         self.h.tick(s)
 
-        self.assertFalse(state._is_busy("w4"))
+        self.assertFalse(state._is_busy("w4a"))
 
 
 class TestPermissionFlow(SimTestBase):
@@ -214,8 +214,8 @@ class TestPermissionFlow(SimTestBase):
         perm_msgs = self.h.tg.find_sent("permission")
         msg_id = perm_msgs[0]["msg_id"] if perm_msgs else None
 
-        # Second tick: inject callback for "Allow" (option 1 = perm_w4_1)
-        self.h.tg.inject_callback("perm_w4_1", message_id=msg_id,
+        # Second tick: inject callback for "Allow" (option 1 = perm_w4a_1)
+        self.h.tg.inject_callback("perm_w4a_1", message_id=msg_id,
                                   callback_id="cb_1")
         self.h.clock.advance(1)
         self.h.tick(s)
@@ -236,7 +236,7 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         s = self.h.make_listener_state()
 
         # Send message to activate smartfocus
-        self.h.tg.inject_text_message("w4 do something")
+        self.h.tg.inject_text_message("w4a do something")
         self.h.tick(s)
         initial_sent = len(self.h.tg.sent_messages)
 
@@ -245,7 +245,7 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             "● Working on it...\n"
             "First I'll check the files\n"
         )
-        state._clear_busy("w4")  # Clear so the route doesn't interfere
+        state._clear_busy("w4a")  # Clear so the route doesn't interfere
 
         # Tick to establish prev_lines
         self.h.clock.advance(1)
@@ -274,8 +274,8 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         s = self.h.make_listener_state()
 
         # Activate smartfocus
-        state._save_smartfocus_state("4", "%20", "myproject")
-        s.smartfocus_target_wid = "4"
+        state._save_smartfocus_state("w4a", "%20", "myproject")
+        s.smartfocus_target_wid = "w4a"
         s.smartfocus_prev_lines = ["some content"]
 
         # Set pane to show completed response
@@ -420,19 +420,19 @@ class TestFakeTmuxMultiCLI(SimTestBase):
     """Verify FakeTmux scan_cli_sessions() with multi-CLI support."""
 
     def test_scan_cli_sessions_single_claude(self):
-        """Single Claude session returns bare wid."""
+        """Single Claude session returns suffixed wid."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True, cli="claude")
         sessions = self.h.tmux.scan_cli_sessions()
-        self.assertIn("w4", sessions)
-        self.assertEqual(sessions["w4"].cli, "claude")
-        self.assertEqual(sessions["w4"].pane_target, "%20")
+        self.assertIn("w4a", sessions)
+        self.assertEqual(sessions["w4a"].cli, "claude")
+        self.assertEqual(sessions["w4a"].pane_target, "%20")
 
     def test_scan_cli_sessions_single_gemini(self):
-        """Single Gemini session returns bare wid."""
+        """Single Gemini session returns suffixed wid."""
         self.h.tmux.add_session("3", "%15", "gemproj", idle=True, cli="gemini")
         sessions = self.h.tmux.scan_cli_sessions()
-        self.assertIn("w3", sessions)
-        self.assertEqual(sessions["w3"].cli, "gemini")
+        self.assertIn("w3a", sessions)
+        self.assertEqual(sessions["w3a"].cli, "gemini")
 
     def test_scan_cli_sessions_mixed(self):
         """Claude and Gemini in different windows."""
@@ -440,14 +440,14 @@ class TestFakeTmuxMultiCLI(SimTestBase):
         self.h.tmux.add_session("5", "%21", "gemproj", idle=True, cli="gemini")
         sessions = self.h.tmux.scan_cli_sessions()
         self.assertEqual(len(sessions), 2)
-        self.assertEqual(sessions["w4"].cli, "claude")
-        self.assertEqual(sessions["w5"].cli, "gemini")
+        self.assertEqual(sessions["w4a"].cli, "claude")
+        self.assertEqual(sessions["w5a"].cli, "gemini")
 
     def test_session_info_unpacking(self):
         """SessionInfo can be unpacked as (pane_target, project)."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         sessions = self.h.tmux.scan_cli_sessions()
-        pane, project = sessions["w4"]
+        pane, project = sessions["w4a"]
         self.assertEqual(pane, "%20")
         self.assertEqual(project, "myproject")
 

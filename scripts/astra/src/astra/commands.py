@@ -76,7 +76,7 @@ def _interrupt_session(idx: str, sessions: dict):
                     f"tmux send-keys -t {p} C-u"], timeout=5)
     state._clear_busy(idx)
     state.load_active_prompt(idx)  # load = consume and delete
-    telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
+    telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx, sessions)} (`{project}`).")
 
 
 def _enable_accept_edits(pane: str):
@@ -212,7 +212,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 else:
                     status_content = raw_view
             status_content = status_content or "(empty)"
-            header = f"📋 {state._wid_label(win_idx)} — `{project}`:\n\n"
+            header = f"📋 {state._wid_label(win_idx, sessions)} — `{project}`:\n\n"
             telegram._send_long_message(header, status_content, win_idx)
         return None, sessions, last_win_idx
 
@@ -238,7 +238,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             state._clear_smartfocus_state()
             pw = tmux._get_pane_width(pane)
             df_content = content.clean_pane_status(tmux._capture_pane(pane, 20), pw) or "(empty)"
-            telegram.tg_send(f"🔬 Deep focus on {state._wid_label(idx)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{df_content[-3000:]}\n```")
+            telegram.tg_send(f"🔬 Deep focus on {state._wid_label(idx, sessions)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{df_content[-3000:]}\n```")
             return None, sessions, idx
         else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
@@ -267,7 +267,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             state._clear_smartfocus_state()
             pw = tmux._get_pane_width(pane)
             fc_content = content.clean_pane_status(tmux._capture_pane(pane, 20), pw) or "(empty)"
-            telegram.tg_send(f"🔍 Focusing on {state._wid_label(idx)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{fc_content[-3000:]}\n```")
+            telegram.tg_send(f"🔍 Focusing on {state._wid_label(idx, sessions)} (`{project}`). Send `/unfocus` to stop.\n\n```\n{fc_content[-3000:]}\n```")
             return None, sessions, idx
         else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
@@ -282,7 +282,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             idx = state._resolve_name(raw_target, sessions)
             if idx:
                 state._clear_window_state(idx)
-                telegram.tg_send(f"🧹 Cleared transient state for {state._wid_label(idx)}.")
+                telegram.tg_send(f"🧹 Cleared transient state for {state._wid_label(idx, sessions)}.")
                 return None, sessions, last_win_idx
             else:
                 telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
@@ -409,7 +409,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             elif "all" in wids:
                 status_msg = "\u26a1 God mode is *on* for all sessions."
             else:
-                labels = ", ".join(state._wid_label(w) for w in sorted(wids, key=lambda x: int(x) if x.isdigit() else 0))
+                def _sort_wid(x):
+                    m = re.match(r'^w?(\d+)', x)
+                    return int(m.group(1)) if m else 0
+                labels = ", ".join(state._wid_label(w, sessions) for w in sorted(wids, key=_sort_wid))
                 status_msg = f"\u26a1 God mode is *on* for {labels}."
             kb = tmux._command_sessions_keyboard("god", sessions)
             telegram.tg_send(status_msg, reply_markup=kb)
@@ -422,7 +425,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if off_target:
                 idx = state._resolve_name(off_target, sessions) or off_target
                 state._set_god_mode(idx, False)
-                telegram.tg_send(f"\u26a1 God mode *off* for {state._wid_label(idx)}.")
+                telegram.tg_send(f"\u26a1 God mode *off* for {state._wid_label(idx, sessions)}.")
             else:
                 state._clear_god_mode()
                 telegram.tg_send("\u26a1 God mode *off*.")
@@ -446,7 +449,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             idx = state._resolve_name(raw_target, sessions)
             if idx:
                 state._set_god_mode(idx, True)
-                telegram.tg_send(f"\u26a1 God mode *on* for {state._wid_label(idx)}.")
+                telegram.tg_send(f"\u26a1 God mode *on* for {state._wid_label(idx, sessions)}.")
                 pane_t, _ = sessions[idx]
                 idle, _ = routing._pane_idle_state(pane_t)
                 if idle:
@@ -468,10 +471,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         label = name_m.group(2).strip() if name_m.group(2) else None
         if label:
             state._save_session_name(idx, label)
-            telegram.tg_send(f"✏️ Session {state._wid_label(idx)} named `{label}`.")
+            telegram.tg_send(f"✏️ Session {state._wid_label(idx, sessions)} named `{label}`.")
         else:
             state._clear_session_name(idx)
-            telegram.tg_send(f"✏️ Session {state._wid_label(idx)} name cleared.")
+            telegram.tg_send(f"✏️ Session {state._wid_label(idx, sessions)} name cleared.")
         return None, sessions, last_win_idx
 
     # /new [claude|gemini] [dir]
@@ -561,9 +564,9 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             time.sleep(2)
             sessions = tmux.scan_claude_sessions()
             if idx in sessions:
-                telegram.tg_send(f"⚠️ {state._wid_label(idx)} (`{project}`) still running after Ctrl+C.")
+                telegram.tg_send(f"⚠️ {state._wid_label(idx, sessions)} (`{project}`) still running after Ctrl+C.")
             else:
-                telegram.tg_send(f"🛑 Killed {state._wid_label(idx)} (`{project}`).")
+                telegram.tg_send(f"🛑 Killed {state._wid_label(idx, sessions)} (`{project}`).")
             return None, sessions, last_win_idx
         else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
@@ -601,7 +604,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             time.sleep(2)
             sessions = tmux.scan_claude_sessions()
             if idx in sessions:
-                telegram.tg_send(f"⚠️ {state._wid_label(idx)} (`{project}`) still running — restart aborted.")
+                telegram.tg_send(f"⚠️ {state._wid_label(idx, sessions)} (`{project}`) still running — restart aborted.")
                 return None, sessions, last_win_idx
             # Clear stale state
             state._clear_busy(idx)
@@ -637,10 +640,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             sessions = tmux.scan_claude_sessions()
             if idx in sessions:
                 _, new_project = sessions[idx]
-                telegram.tg_send(f"🔄 Restarted {state._wid_label(idx)} (`{new_project}`).")
+                telegram.tg_send(f"🔄 Restarted {state._wid_label(idx, sessions)} (`{new_project}`).")
                 return None, sessions, idx
             else:
-                telegram.tg_send(f"⚠️ {state._wid_label(idx)} did not restart — pane may have closed.")
+                telegram.tg_send(f"⚠️ {state._wid_label(idx, sessions)} did not restart — pane may have closed.")
                 return None, sessions, last_win_idx
         else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
@@ -688,11 +691,11 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                     ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
                 ]])
                 telegram.tg_send(
-                    f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
+                    f"💾 {len(queued)} saved message(s) for {state._wid_label(idx, sessions)}:\n" + "\n".join(preview_lines),
                     reply_markup=saved_kb,
                 )
             else:
-                telegram.tg_send(f"No saved messages for {state._wid_label(idx)}.")
+                telegram.tg_send(f"No saved messages for {state._wid_label(idx, sessions)}.")
         else:
             # Scan all sessions for queued messages
             found_any = False
@@ -708,7 +711,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                         ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
                     ]])
                     telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(idx, sessions)}:\n" + "\n".join(preview_lines),
                         reply_markup=saved_kb,
                     )
             if not found_any:
@@ -723,7 +726,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         resolved = tmux.resolve_session_id(wid, sessions)
         if resolved:
             pane, project = sessions[resolved]
-            confirm = routing.route_to_pane(pane, resolved, prompt)
+            confirm = routing.route_to_pane(pane, resolved, prompt, sessions)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(resolved, confirm[:100])
             _maybe_activate_smartfocus(resolved, pane, project, confirm)
@@ -740,7 +743,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         name_idx = state._resolve_name(words[0], sessions)
         if name_idx is not None:
             pane, project = sessions[name_idx]
-            confirm = routing.route_to_pane(pane, name_idx, words[1].strip())
+            confirm = routing.route_to_pane(pane, name_idx, words[1].strip(), sessions)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(name_idx, confirm[:100])
             _maybe_activate_smartfocus(name_idx, pane, project, confirm)
@@ -755,7 +758,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
 
     if target_idx:
         pane, project = sessions[target_idx]
-        confirm = routing.route_to_pane(pane, target_idx, text)
+        confirm = routing.route_to_pane(pane, target_idx, text, sessions)
         telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
         config._log(target_idx, confirm[:100])
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)
@@ -810,7 +813,7 @@ def _handle_callback(callback: dict, sessions: dict,
                 label = "\u274c Denied"
             else:
                 label = f"Selected option {n}"
-            telegram.tg_send(f"{label} in {state._wid_label(wid)}",
+            telegram.tg_send(f"{label} in {state._wid_label(wid, sessions)}",
                              silent=state._is_silent(_CAT_CONFIRM))
             config._log("callback", f"perm {wid} option {n}")
         else:
@@ -824,7 +827,7 @@ def _handle_callback(callback: dict, sessions: dict,
         resolved = tmux.resolve_session_id(wid, sessions)
         if resolved:
             pane = sessions[resolved][0]
-            confirm = routing.route_to_pane(pane, resolved, n_str)
+            confirm = routing.route_to_pane(pane, resolved, n_str, sessions)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             last_win_idx = resolved
         return sessions, last_win_idx, None
@@ -861,7 +864,7 @@ def _handle_callback(callback: dict, sessions: dict,
             if msgs and resolved:
                 combined = "\n".join(m_q["text"] for m_q in msgs)
                 pane, project = sessions[resolved]
-                confirm = routing.route_to_pane(pane, resolved, combined)
+                confirm = routing.route_to_pane(pane, resolved, combined, sessions)
                 telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
                 _maybe_activate_smartfocus(resolved, pane, project, confirm)
                 last_win_idx = resolved
@@ -872,7 +875,7 @@ def _handle_callback(callback: dict, sessions: dict,
                 telegram.tg_send("No saved messages to send.")
         else:  # discard
             state._pop_queued_msgs(wid)
-            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(wid)}.",
+            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(wid, sessions)}.",
                              silent=state._is_silent(_CAT_CONFIRM))
         return sessions, last_win_idx, None
 

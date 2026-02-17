@@ -240,7 +240,7 @@ def _listen_tick(s):
                 continue
             if content._detect_interrupted(raw):
                 if win_idx not in locally_viewed:
-                    label = state._wid_label(wid)
+                    label = state._wid_label(wid, s.sessions)
                     telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
                                      silent=state._is_silent(_CAT_INTERRUPT))
                 else:
@@ -259,7 +259,7 @@ def _listen_tick(s):
             if content._detect_compacting(raw):
                 if wid not in s.compact_notified:
                     if win_idx not in locally_viewed:
-                        label = state._wid_label(wid)
+                        label = state._wid_label(wid, s.sessions)
                         telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
                                          silent=state._is_silent(_CAT_MONITOR))
                     else:
@@ -268,7 +268,7 @@ def _listen_tick(s):
             else:
                 if wid in s.compact_notified:
                     if win_idx not in locally_viewed:
-                        label = state._wid_label(wid)
+                        label = state._wid_label(wid, s.sessions)
                         telegram.tg_send(f"✅ {label} finished compacting.",
                                          silent=state._is_silent(_CAT_MONITOR))
                     s.compact_notified.discard(wid)
@@ -289,6 +289,7 @@ def _listen_tick(s):
         smartfocus_prev=s.smartfocus_prev_lines if smartfocus_state else None,
         smartfocus_has_sent=s.smartfocus_has_sent if smartfocus_state else False,
         locally_viewed=locally_viewed or None,
+        sessions=s.sessions,
     )
     # Re-read smartfocus state — process_signals may have cleared it
     smartfocus_state = state._load_smartfocus_state()
@@ -308,7 +309,7 @@ def _listen_tick(s):
             s.last_scan = time.time()
             if fw not in s.sessions:
                 state._clear_focus_state()
-                telegram.tg_send(f"🔍 Focus on {state._wid_label(fw)} ended — session gone.")
+                telegram.tg_send(f"🔍 Focus on {state._wid_label(fw, s.sessions)} ended — session gone.")
                 s.focus_target_wid = None
                 focus_state = None
         if focus_state:
@@ -320,7 +321,7 @@ def _listen_tick(s):
             if cleaned:
                 h = hash(cleaned)
                 if h != s.focus_last_hash and s.focus_last_hash != 0:
-                    header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
+                    header = f"🔍 {state._wid_label(fw, s.sessions)} (`{fproj}`):\n\n"
                     telegram._send_long_message(header, cleaned, fw, silent=state._is_silent(_CAT_MONITOR))
                 s.focus_last_hash = h
     elif s.focus_target_wid:
@@ -362,7 +363,7 @@ def _listen_tick(s):
                     if new:
                         new_text = "\n".join(new).strip()
                         if new_text:
-                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                            header = f"👁 {state._wid_label(sfw, s.sessions)} (`{sfproj}`):\n\n"
                             telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                             s.smartfocus_has_sent = True
                 s.smartfocus_prev_lines = cur_lines
@@ -389,7 +390,7 @@ def _listen_tick(s):
             s.last_scan = time.time()
             if dfw not in s.sessions:
                 state._clear_deepfocus_state()
-                telegram.tg_send(f"🔬 Deep focus on {state._wid_label(dfw)} ended — session gone.")
+                telegram.tg_send(f"🔬 Deep focus on {state._wid_label(dfw, s.sessions)} ended — session gone.")
                 s.deepfocus_target_wid = None
                 deepfocus_state = None
 
@@ -420,7 +421,7 @@ def _listen_tick(s):
         if debounce_ok or max_delay_ok:
             chunk = "\n".join(s.deepfocus_pending).strip()
             if chunk:
-                msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
+                msg = f"🔬 {state._wid_label(dfw, s.sessions)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
                 telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
                 config._save_last_msg(dfw, msg)
             s.deepfocus_pending = []
@@ -742,6 +743,14 @@ def cmd_listen():
     interrupted_notified = {idx for idx, st in statuses.items() if st == "interrupted"}
     god_wids = state._god_mode_wids()
     config._log("listen", f"Found {len(sessions)} CLI session(s).")
+    def _sort_wid(x):
+        m = re.match(r'^w?(\d+)', x)
+        return (int(m.group(1)) if m else 0, x)
+    for wid in sorted(sessions, key=_sort_wid):
+        info = sessions[wid]
+        proj = info.project if isinstance(info, tmux.SessionInfo) else info[1]
+        cli_tag = f" ({info.cli})" if isinstance(info, tmux.SessionInfo) else ""
+        config._log("listen", f"  {wid}: {proj}{cli_tag}")
     config._log("listen", f"God mode: {god_wids or 'off'}")
     config._log("listen", f"Local suppress: {'on' if state._is_local_suppress_enabled() else 'off'}")
     config._log("listen", "Press Ctrl+C to stop")

@@ -54,21 +54,13 @@ class FakeTmux:
 
         sessions = {}
         for win_idx, panes in by_window.items():
-            if len(panes) == 1:
-                ps = panes[0]
+            for i, ps in enumerate(panes):
+                suffix = chr(ord("a") + i)
                 info = _real_tmux.SessionInfo(
                     pane_target=ps.pane_target, project=ps.project,
-                    cli=ps.cli_profile, win_idx=win_idx, pane_suffix="",
+                    cli=ps.cli_profile, win_idx=win_idx, pane_suffix=suffix,
                 )
                 sessions[info.wid] = info
-            else:
-                for i, ps in enumerate(panes):
-                    suffix = chr(ord("a") + i)
-                    info = _real_tmux.SessionInfo(
-                        pane_target=ps.pane_target, project=ps.project,
-                        cli=ps.cli_profile, win_idx=win_idx, pane_suffix=suffix,
-                    )
-                    sessions[info.wid] = info
         return sessions
 
     def _capture_pane(self, pane, num_lines=20):

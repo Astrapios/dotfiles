@@ -179,7 +179,7 @@ class SessionInfo:
     project: str        # "myproject"
     cli: str            # "claude" or "gemini"
     win_idx: str        # "4"
-    pane_suffix: str    # "" for solo, "a"/"b" for multi-pane
+    pane_suffix: str    # "a" minimum, "b"/"c" for additional panes
 
     @property
     def wid(self) -> str:
@@ -201,8 +201,8 @@ class SessionInfo:
 def scan_cli_sessions() -> dict[str, SessionInfo]:
     """Scan tmux for panes running any registered CLI.
 
-    Returns {wid: SessionInfo} where wid is 'w4' for solo panes or
-    'w4a'/'w4b' when multiple CLIs share a window.
+    Returns {wid: SessionInfo} where wid always has a suffix (e.g. 'w4a',
+    'w1a'/'w1b').
 
     Uses #{pane_start_command} and #{pane_title} to identify CLIs like Gemini
     whose pane_current_command is 'node' rather than 'gemini'.
@@ -237,20 +237,14 @@ def scan_cli_sessions() -> dict[str, SessionInfo]:
             project = cwd.rstrip("/").rsplit("/", 1)[-1] if cwd else "?"
             by_window.setdefault(win_idx, []).append((target, project, profile.name))
 
-    # Assign suffixes: solo pane gets bare wid, multiple panes get a/b/c...
+    # Always assign a/b/c suffix — even solo panes get "a"
     sessions: dict[str, SessionInfo] = {}
     for win_idx, panes in by_window.items():
-        if len(panes) == 1:
-            target, project, cli = panes[0]
+        for i, (target, project, cli) in enumerate(panes):
+            suffix = chr(ord("a") + i)
             info = SessionInfo(pane_target=target, project=project, cli=cli,
-                               win_idx=win_idx, pane_suffix="")
+                               win_idx=win_idx, pane_suffix=suffix)
             sessions[info.wid] = info
-        else:
-            for i, (target, project, cli) in enumerate(panes):
-                suffix = chr(ord("a") + i)
-                info = SessionInfo(pane_target=target, project=project, cli=cli,
-                                   win_idx=win_idx, pane_suffix=suffix)
-                sessions[info.wid] = info
     return sessions
 
 
@@ -262,10 +256,12 @@ def resolve_session_id(raw_wid: str, sessions: dict) -> str | None:
     """
     if raw_wid in sessions:
         return raw_wid
-    # Bare w4 → try w4a (first pane in multi-pane window)
+    # Bare w4 → try w4a (only when unambiguous — no w4b sibling)
     if re.match(r'^w\d+$', raw_wid):
         suffixed = raw_wid + "a"
         if suffixed in sessions:
+            if raw_wid + "b" in sessions:
+                return None  # Ambiguous — multiple panes
             return suffixed
     # Numeric-only → try with w prefix
     if raw_wid.isdigit():
@@ -274,7 +270,15 @@ def resolve_session_id(raw_wid: str, sessions: dict) -> str | None:
             return wid
         suffixed = f"w{raw_wid}a"
         if suffixed in sessions:
+            if f"w{raw_wid}b" in sessions:
+                return None  # Ambiguous — multiple panes
             return suffixed
+    # Bare "3a" → try "w3a" (w-prefix stripped by command regexes)
+    m = re.match(r'^(\d+[a-z])$', raw_wid)
+    if m:
+        wid = f"w{raw_wid}"
+        if wid in sessions:
+            return wid
     return None
 
 
@@ -286,6 +290,15 @@ def _sort_session_keys(keys):
             return (int(m.group(1)), m.group(2))
         return (9999, str(k))
     return sorted(keys, key=key_func)
+
+
+def _display_wid(wid: str, sessions: dict) -> str:
+    """Return display-friendly wid — 'w3' for solo panes, 'w1a' for multi-pane."""
+    info = sessions.get(wid)
+    if isinstance(info, SessionInfo) and info.pane_suffix == "a":
+        if f"w{info.win_idx}b" not in sessions:
+            return f"w{info.win_idx}"
+    return wid
 
 
 def format_sessions_message(sessions: dict[str, tuple[str, str]],
@@ -306,27 +319,39 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]],
         if isinstance(v, SessionInfo):
             cli_types.add(v.cli)
     has_multi_cli = len(cli_types) > 1
+    # Pre-compute panes per window to detect multi-pane windows
+    _panes_per_window: dict[str, int] = {}
+    for idx in sessions:
+        val = sessions[idx]
+        if isinstance(val, SessionInfo):
+            _panes_per_window[val.win_idx] = _panes_per_window.get(val.win_idx, 0) + 1
+        else:
+            wi = re.match(r'^w?(\d+)', idx).group(1) if idx else idx
+            _panes_per_window[wi] = _panes_per_window.get(wi, 0) + 1
+
     lines = ["📋 *Active sessions:*"]
     for idx in _sort_session_keys(sessions):
         val = sessions[idx]
         if isinstance(val, SessionInfo):
             project = val.project
             cli_tag = f" · {val.cli.title()}" if has_multi_cli else ""
-            display_idx = val.wid
+            display_idx = _display_wid(idx, sessions)
             win_idx = val.win_idx
-            is_multi_pane = bool(val.pane_suffix)
+            is_multi_pane = _panes_per_window.get(win_idx, 1) > 1
         else:
             target, project = val
             cli_tag = ""
-            display_idx = idx if idx.startswith("w") else f"w{idx}"
+            display_idx = _display_wid(idx, sessions)
+            if display_idx == idx and not idx.startswith("w"):
+                display_idx = f"w{idx}"
             win_idx = re.match(r'^w?(\d+)', idx).group(1) if idx else idx
-            is_multi_pane = bool(re.search(r'[a-z]$', display_idx))
+            is_multi_pane = _panes_per_window.get(win_idx, 1) > 1
         # Name lookup: exact wid first, then bare window index (only for solo panes)
         name = names.get(idx, "")
         if not name and not is_multi_pane:
             name = names.get(win_idx, "") or names.get(f"w{win_idx}", "")
         label = f"`{display_idx} [{name}]`" if name else f"`{display_idx}`"
-        god = " ⚡" if state._is_god_mode_for(win_idx) else ""
+        god = " ⚡" if state._is_god_mode_for(idx) else ""
         status_icon = ""
         if statuses and idx in statuses:
             status_icon = f" {_status_icons.get(statuses[idx], '')}"
@@ -346,10 +371,9 @@ def _sessions_keyboard(sessions: dict) -> dict | None:
         val = sessions[idx]
         if isinstance(val, SessionInfo):
             project = val.project
-            display_idx = val.wid
         else:
             _, project = val
-            display_idx = idx if idx.startswith("w") else f"w{idx}"
+        display_idx = _display_wid(idx, sessions)
         name = names.get(idx, "")
         label = f"{display_idx} [{name}]" if name else f"{display_idx} {project}"
         buttons.append((label[:20], f"sess_{idx}"))
@@ -367,10 +391,9 @@ def _command_sessions_keyboard(cmd: str, sessions: dict) -> dict | None:
         val = sessions[idx]
         if isinstance(val, SessionInfo):
             project = val.project
-            display_idx = val.wid
         else:
             _, project = val
-            display_idx = idx if idx.startswith("w") else f"w{idx}"
+        display_idx = _display_wid(idx, sessions)
         name = names.get(idx, "")
         label = f"{display_idx} [{name}]" if name else f"{display_idx} {project}"
         buttons.append((label[:20], f"cmd_{cmd}_{display_idx}"))
