@@ -68,7 +68,7 @@ packages:
 - pypi: ./
   name: astra
   version: 0.15.3
-  sha256: 0ffd9a36b98a919a75cba302e44df60914195b4b26e5dab927596300c7659f38
+  sha256: 437b82910f1f396a9be49c4a4199ff83922395875b71e5b35a512cd19644e90b
   requires_dist:
   - requests>=2.28
   requires_python: '>=3.11'

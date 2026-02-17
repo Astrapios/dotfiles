@@ -277,20 +277,22 @@ def _load_session_names() -> dict[str, str]:
         return {}
 
 
-def _resolve_name(target: str, sessions: dict) -> str | None:
+def _resolve_name(target: str, sessions: dict | None = None) -> str | None:
     """Resolve a session name or numeric index to a session key.
     Handles bare numbers ('4' → 'w4'), full wids ('w4'), and names.
-    Returns the session key (e.g. 'w4') or None."""
+    Uses *sessions* if given, otherwise falls back to ``_current_sessions``.
+    Returns the session key (e.g. 'w4a') or None."""
     if not target:
         return None
+    sess = sessions if sessions is not None else _current_sessions
     from astra import tmux  # deferred to avoid circular import
-    resolved = tmux.resolve_session_id(target, sessions)
+    resolved = tmux.resolve_session_id(target, sess)
     if resolved:
         return resolved
     # Name lookup
     names = _load_session_names()
     for idx, name in names.items():
-        if name.lower() == target.lower() and idx in sessions:
+        if name.lower() == target.lower() and idx in sess:
             return idx
     return None
 

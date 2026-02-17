@@ -146,7 +146,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Settings:*",
             "`/autofocus [on|off]` — auto-monitor on send (default: on)",
             "`/local [on|off]` — suppress Telegram when viewing locally",
-            "`/notification [12..7|all|off]` — control which alerts buzz",
+            "`/notification [1..7|all|off]` — control which alerts buzz",
             "`/name wN [label]` — name a session",
             "",
             "*Session management:*",
@@ -185,7 +185,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if status_m:
         raw_target = status_m.group(1)
         num_lines = int(status_m.group(2)) if status_m.group(2) else 20
-        idx = state._resolve_name(raw_target, sessions) if raw_target else None
+        idx = state._resolve_name(raw_target) if raw_target else None
         targets = []
         if idx:
             targets = [(idx, sessions[idx])]
@@ -231,7 +231,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     dfocus_m = re.match(r"^/deepfocus\s+w?(\w[\w-]*)$", text.lower())
     if dfocus_m:
         raw_target = dfocus_m.group(1)
-        idx = state._resolve_name(raw_target, sessions)
+        idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
             state._save_deepfocus_state(idx, pane, project)
@@ -260,7 +260,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     focus_m = re.match(r"^/focus\s+w?(\w[\w-]*)$", text.lower())
     if focus_m:
         raw_target = focus_m.group(1)
-        idx = state._resolve_name(raw_target, sessions)
+        idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
             state._save_focus_state(idx, pane, project)
@@ -280,7 +280,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if clear_m:
         raw_target = clear_m.group(1)
         if raw_target:
-            idx = state._resolve_name(raw_target, sessions)
+            idx = state._resolve_name(raw_target)
             if idx:
                 state._clear_window_state(idx)
                 telegram.tg_send(f"🧹 Cleared transient state for {state._wid_label(idx)}.")
@@ -424,7 +424,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if off_m:
             off_target = off_m.group(1)
             if off_target:
-                idx = state._resolve_name(off_target, sessions) or off_target
+                idx = state._resolve_name(off_target) or off_target
                 state._set_god_mode(idx, False)
                 telegram.tg_send(f"\u26a1 God mode *off* for {state._wid_label(idx)}.")
             else:
@@ -447,7 +447,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         target_m = re.match(r"^w?(\w[\w-]*)$", arg)
         if target_m:
             raw_target = target_m.group(1)
-            idx = state._resolve_name(raw_target, sessions)
+            idx = state._resolve_name(raw_target)
             if idx:
                 state._set_god_mode(idx, True)
                 telegram.tg_send(f"\u26a1 God mode *on* for {state._wid_label(idx)}.")
@@ -468,7 +468,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     name_m = re.match(r"^/name\s+w?(\w[\w-]*)(?:\s+(.+))?$", text)
     if name_m:
         raw_target = name_m.group(1)
-        idx = state._resolve_name(raw_target, sessions) or raw_target
+        idx = state._resolve_name(raw_target) or raw_target
         label = name_m.group(2).strip() if name_m.group(2) else None
         if label:
             state._save_session_name(idx, label)
@@ -517,7 +517,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     int_m = re.match(r"^/interrupt(?:\s+w?(\w[\w-]*))?$", text.lower())
     if int_m:
         raw_target = int_m.group(1)
-        idx = state._resolve_name(raw_target, sessions) if raw_target else None
+        idx = state._resolve_name(raw_target) if raw_target else None
         if idx:
             _interrupt_session(idx, sessions)
             return None, sessions, idx
@@ -551,7 +551,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     kill_m = re.match(r"^/kill\s+w?(\w[\w-]*)$", text.lower())
     if kill_m:
         raw_target = kill_m.group(1)
-        idx = state._resolve_name(raw_target, sessions)
+        idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
             p = shlex.quote(pane)
@@ -588,7 +588,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     restart_m = re.match(r"^/restart\s+w?(\w[\w-]*)$", text.lower())
     if restart_m:
         raw_target = restart_m.group(1)
-        idx = state._resolve_name(raw_target, sessions)
+        idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
             # Save working directory before killing
@@ -655,7 +655,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     last_m = re.match(r"^/last(?:\s+w?(\w[\w-]*))?$", text.lower())
     if last_m:
         raw_target = last_m.group(1)
-        idx = state._resolve_name(raw_target, sessions) if raw_target else None
+        idx = state._resolve_name(raw_target) if raw_target else None
         if idx and idx in config._last_messages:
             telegram.tg_send(config._last_messages[idx])
         elif raw_target:
@@ -678,7 +678,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if saved_m:
         raw_target = saved_m.group(1)
         if raw_target:
-            idx = state._resolve_name(raw_target, sessions)
+            idx = state._resolve_name(raw_target)
             if not idx:
                 telegram.tg_send(f"⚠️ No session `{raw_target}`.")
                 return None, sessions, last_win_idx
@@ -741,7 +741,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     # Name prefix: first word matches a known session name
     words = text.split(None, 1)
     if len(words) == 2:
-        name_idx = state._resolve_name(words[0], sessions)
+        name_idx = state._resolve_name(words[0])
         if name_idx is not None:
             pane, project = sessions[name_idx]
             confirm = routing.route_to_pane(pane, name_idx, words[1].strip())

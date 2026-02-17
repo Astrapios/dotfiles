@@ -167,9 +167,12 @@ def scan_claude_sessions() -> dict[str, SessionInfo]:
     """Scan tmux for panes running any registered CLI.
 
     Returns {wid: SessionInfo} — SessionInfo supports ``pane, project = info``
-    unpacking for backward compat.
+    unpacking for backward compat.  Also updates ``state._current_sessions``
+    so display helpers like ``_wid_label`` stay current.
     """
-    return scan_cli_sessions()
+    result = scan_cli_sessions()
+    state._current_sessions = result
+    return result
 
 
 @dataclass

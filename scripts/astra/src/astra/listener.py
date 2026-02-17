@@ -177,7 +177,6 @@ def _listen_tick(s):
             if text.lower() == "/start":
                 state._clear_signals(include_state=True)
                 s.sessions = tmux.scan_claude_sessions()
-                state._current_sessions = s.sessions
                 s.last_scan = time.time()
                 s.paused = False
                 s.focus_target_wid = None
@@ -308,7 +307,6 @@ def _listen_tick(s):
         fp, fproj = focus_state["pane"], focus_state["project"]
         if fw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
-            state._current_sessions = s.sessions
             s.last_scan = time.time()
             if fw not in s.sessions:
                 state._clear_focus_state()
@@ -346,7 +344,6 @@ def _listen_tick(s):
             sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
             if sfw not in s.sessions:
                 s.sessions = tmux.scan_claude_sessions()
-                state._current_sessions = s.sessions
                 s.last_scan = time.time()
                 if sfw not in s.sessions:
                     state._clear_smartfocus_state()
@@ -391,7 +388,6 @@ def _listen_tick(s):
 
         if dfw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
-            state._current_sessions = s.sessions
             s.last_scan = time.time()
             if dfw not in s.sessions:
                 state._clear_deepfocus_state()
@@ -721,7 +717,6 @@ def cmd_listen():
                     pass
 
     sessions = tmux.scan_claude_sessions()
-    state._current_sessions = sessions
     last_scan = time.time()
 
     # Consume existing updates to avoid replaying old messages

@@ -146,14 +146,25 @@ Telegram commands (inside listener):
   /autofocus [on|off]  Auto-monitor on send (default: on)
   /local [on|off]      Suppress Telegram when viewing locally
   /notification [1..7|all|off]  Control which alerts buzz
-  /name wN label       Name a session
+  /name wN [label]     Name a session (omit label to clear)
   /new [claude|gemini] [dir]  Start new session
   /restart wN          Kill and relaunch session
   /kill wN             Exit a session
   /clear [wN]          Reset transient state
   /log [N]             Show last N journal lines (default 30)
   /stop / /start       Pause / resume listener
-  /quit                Shut down listener""")
+  /quit                Shut down listener
+
+Aliases:
+  s / s4 / s4 10       /status / /status w4 / /status w4 10
+  f4 / df4 / uf        /focus w4 / /deepfocus w4 / /unfocus
+  i4 / sv / ?          /interrupt w4 / /saved / /help
+  g4 / ga / goff       /god w4 / /god all / /god off
+  af / lv / noti       /autofocus / /local / /notification
+  c / c4 / r4          /clear / /clear w4 / /restart w4
+
+Routing: prefix with wN (e.g. 'w4 fix the bug').
+  Solo panes: w4 or w4a. Multi-pane: w1a, w1b.""")
 
 
 def main():
