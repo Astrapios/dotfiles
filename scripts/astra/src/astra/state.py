@@ -274,10 +274,16 @@ def _load_session_names() -> dict[str, str]:
 
 
 def _resolve_name(target: str, sessions: dict) -> str | None:
-    """Resolve a session name or numeric index to a window index.
-    Returns the index string (e.g. '4') or None."""
-    if target in sessions:
-        return target
+    """Resolve a session name or numeric index to a session key.
+    Handles bare numbers ('4' → 'w4'), full wids ('w4'), and names.
+    Returns the session key (e.g. 'w4') or None."""
+    if not target:
+        return None
+    from astra import tmux  # deferred to avoid circular import
+    resolved = tmux.resolve_session_id(target, sessions)
+    if resolved:
+        return resolved
+    # Name lookup
     names = _load_session_names()
     for idx, name in names.items():
         if name.lower() == target.lower() and idx in sessions:
@@ -285,14 +291,17 @@ def _resolve_name(target: str, sessions: dict) -> str | None:
     return None
 
 
-def _wid_label(idx: str) -> str:
-    """Format a window index with its name for display.
+def _wid_label(wid: str) -> str:
+    """Format a wid with its name for display.
+    Accepts full wid ('w4') or bare index ('4').
     Returns '`w4 [auth]`' or just '`w4`' if unnamed."""
+    if not wid.startswith("w"):
+        wid = f"w{wid}"
     names = _load_session_names()
-    name = names.get(idx, "")
+    name = names.get(wid, "")
     if name:
-        return f"`w{idx} [{name}]`"
-    return f"`w{idx}`"
+        return f"`{wid} [{name}]`"
+    return f"`{wid}`"
 
 
 def _save_queued_msg(wid: str, text: str):
@@ -384,21 +393,24 @@ def _cleanup_stale_busy(active_sessions: dict):
     if not os.path.isdir(config.SIGNAL_DIR):
         return
     for fname in os.listdir(config.SIGNAL_DIR):
-        m = re.match(r'^_busy_w(\d+)\.json$', fname)
+        m = re.match(r'^_busy_(w\d+[a-z]?)\.json$', fname)
         if not m:
             continue
-        idx = m.group(1)
-        if idx not in active_sessions:
+        wid = m.group(1)
+        if wid not in active_sessions:
             try:
                 os.remove(os.path.join(config.SIGNAL_DIR, fname))
             except OSError:
                 pass
 
 
-def _is_god_mode_for(w_idx: str) -> bool:
-    """Check if god mode is enabled for a specific window index."""
+def _is_god_mode_for(wid: str) -> bool:
+    """Check if god mode is enabled for a specific wid (e.g. 'w4' or bare '4')."""
     wids = _god_mode_wids()
-    return "all" in wids or w_idx in wids
+    if "all" in wids:
+        return True
+    # Check both bare and full wid format for compat
+    return wid in wids or wid.lstrip("w") in wids
 
 
 def _god_mode_wids() -> list[str]:
@@ -458,7 +470,8 @@ def _clear_window_state(wid: str):
     Also clears focus/deepfocus/smartfocus if they target this window."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return
-    idx = wid.lstrip("w")
+    if not wid.startswith("w"):
+        wid = f"w{wid}"
     prefixes = ("_active_prompt_", "_busy_", "_bash_cmd_", "_saved_prompt_")
     for p in prefixes:
         path = os.path.join(config.SIGNAL_DIR, f"{p}{wid}.json")
@@ -471,7 +484,7 @@ def _clear_window_state(wid: str):
                             (_load_deepfocus_state, _clear_deepfocus_state),
                             (_load_smartfocus_state, _clear_smartfocus_state)):
         st = loader()
-        if st and st.get("wid") == idx:
+        if st and st.get("wid") == wid:
             clearer()
 
 

@@ -92,7 +92,7 @@ def _build_pending_prompt(files: list[dict]) -> tuple[str, dict]:
             icon = "📷" if f["type"] == "photo" else "📎"
             lines.append(f"  {icon} `{name}`")
         msg = f"📎 {len(files)} files received:\n" + "\n".join(lines)
-    msg += "\n\nReply with instructions for Claude:"
+    msg += "\n\nReply with instructions:"
     return msg, kb
 
 
@@ -193,7 +193,7 @@ def _listen_tick(s):
                 s.smartfocus_prev_lines = []
                 s.smartfocus_has_sent = False
                 statuses = routing._get_session_statuses(s.sessions)
-                s.interrupted_notified = {f"w{idx}" for idx, st in statuses.items() if st == "interrupted"}
+                s.interrupted_notified = {idx for idx, st in statuses.items() if st == "interrupted"}
                 resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
                 telegram.tg_send("▶️ Resumed.\n\n" + tmux.format_sessions_message(s.sessions, statuses=statuses,
                                                                                    locally_viewed=resume_viewed or None),
@@ -223,8 +223,8 @@ def _listen_tick(s):
     # --- Interrupt detection (no hook fires on Esc interrupt) ---
     if time.time() - s.last_interrupt_check > 5:
         s.last_interrupt_check = time.time()
-        for idx, (pane, project) in s.sessions.items():
-            wid = f"w{idx}"
+        for wid, (pane, project) in s.sessions.items():
+            win_idx = re.match(r'^w?(\d+)', wid).group(1)
             try:
                 raw = tmux._capture_pane(pane, 15)
             except Exception:
@@ -239,41 +239,41 @@ def _listen_tick(s):
             if wid in s.interrupted_notified:
                 continue
             if content._detect_interrupted(raw):
-                if idx not in locally_viewed:
-                    label = state._wid_label(idx)
+                if win_idx not in locally_viewed:
+                    label = state._wid_label(wid)
                     telegram.tg_send(f"⏹ {label} (`{project}`) was interrupted — waiting for instructions.",
                                      silent=state._is_silent(_CAT_INTERRUPT))
                 else:
-                    config._log("local", f"suppressed interrupt for w{idx} ({project})")
+                    config._log("local", f"suppressed interrupt for {wid} ({project})")
                 s.interrupted_notified.add(wid)
         # Clear for gone sessions
-        s.interrupted_notified -= s.interrupted_notified - {f"w{i}" for i in s.sessions}
+        s.interrupted_notified -= s.interrupted_notified - set(s.sessions)
 
         # --- Auto-compact detection ---
-        for idx, (pane, project) in s.sessions.items():
-            wid = f"w{idx}"
+        for wid, (pane, project) in s.sessions.items():
+            win_idx = re.match(r'^w?(\d+)', wid).group(1)
             try:
                 raw = tmux._capture_pane(pane, 15)
             except Exception:
                 continue
             if content._detect_compacting(raw):
                 if wid not in s.compact_notified:
-                    if idx not in locally_viewed:
-                        label = state._wid_label(idx)
+                    if win_idx not in locally_viewed:
+                        label = state._wid_label(wid)
                         telegram.tg_send(f"⏳ {label} (`{project}`) is auto-compacting context\u2026",
                                          silent=state._is_silent(_CAT_MONITOR))
                     else:
-                        config._log("local", f"suppressed compact for w{idx} ({project})")
+                        config._log("local", f"suppressed compact for {wid} ({project})")
                     s.compact_notified.add(wid)
             else:
                 if wid in s.compact_notified:
-                    if idx not in locally_viewed:
-                        label = state._wid_label(idx)
+                    if win_idx not in locally_viewed:
+                        label = state._wid_label(wid)
                         telegram.tg_send(f"✅ {label} finished compacting.",
                                          silent=state._is_silent(_CAT_MONITOR))
                     s.compact_notified.discard(wid)
         # Clear for gone sessions
-        s.compact_notified -= s.compact_notified - {f"w{i}" for i in s.sessions}
+        s.compact_notified -= s.compact_notified - set(s.sessions)
 
     focus_state = state._load_focus_state()
     deepfocus_state = state._load_deepfocus_state()
@@ -501,20 +501,19 @@ def _listen_tick(s):
                         msg, reply_markup=kb,
                         silent=state._is_silent(_CAT_CONFIRM))
                     continue
-                target_idx = None
+                target_wid = None
                 remaining_text = caption
-                m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
-                if m and m.group(1) in s.sessions:
-                    target_idx = m.group(1)
+                m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
+                if m and f"w{m.group(1)}" in s.sessions:
+                    target_wid = f"w{m.group(1)}"
                     remaining_text = m.group(2).strip()
                 elif len(s.sessions) == 1:
-                    target_idx = next(iter(s.sessions))
+                    target_wid = next(iter(s.sessions))
                 elif s.last_win_idx and s.last_win_idx in s.sessions:
-                    target_idx = s.last_win_idx
+                    target_wid = s.last_win_idx
 
-                if target_idx:
-                    pane, project = s.sessions[target_idx]
-                    wid = f"w{target_idx}"
+                if target_wid:
+                    pane, project = s.sessions[target_wid]
                     if len(paths) == 1:
                         instruction = f"Read {paths[0]}"
                     else:
@@ -525,26 +524,26 @@ def _listen_tick(s):
                     paths_display = "`, `".join(paths)
 
                     # Busy check — queue if session is working
-                    if state._is_busy(wid):
-                        state._save_queued_msg(wid, instruction)
-                        telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
+                    if state._is_busy(target_wid):
+                        state._save_queued_msg(target_wid, instruction)
+                        telegram.tg_send(f"💾 Photo saved for `{target_wid}` (busy):\n`{paths_display}`",
                                          silent=state._is_silent(_CAT_CONFIRM))
-                        s.last_win_idx = target_idx
+                        s.last_win_idx = target_wid
                         continue
 
                     is_idle, typed_text = routing._pane_idle_state(pane)
                     if not is_idle:
-                        state._save_queued_msg(wid, instruction)
-                        telegram.tg_send(f"💾 Photo saved for `w{target_idx}` (busy):\n`{paths_display}`",
+                        state._save_queued_msg(target_wid, instruction)
+                        telegram.tg_send(f"💾 Photo saved for `{target_wid}` (busy):\n`{paths_display}`",
                                          silent=state._is_silent(_CAT_CONFIRM))
-                        s.last_win_idx = target_idx
+                        s.last_win_idx = target_wid
                         continue
 
                     p = shlex.quote(pane)
 
                     # Save locally typed text before clearing
                     if typed_text:
-                        state._save_queued_msg(wid, typed_text)
+                        state._save_queued_msg(target_wid, typed_text)
                         subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
                         time.sleep(0.2)
 
@@ -553,11 +552,11 @@ def _listen_tick(s):
                     delay = "0.5" if len(paths) > 1 else "0.3"
                     cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep {delay} && tmux send-keys -t {p} Enter"
                     subprocess.run(["bash", "-c", cmd], timeout=10)
-                    state._mark_busy(wid)
-                    confirm = f"📷 Photo sent to `w{target_idx}` (`{project}`):\n`{paths_display}`"
+                    state._mark_busy(target_wid)
+                    confirm = f"📷 Photo sent to `{target_wid}` (`{project}`):\n`{paths_display}`"
                     telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-                    commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
-                    s.last_win_idx = target_idx
+                    commands._maybe_activate_smartfocus(target_wid, pane, project, confirm)
+                    s.last_win_idx = target_wid
                 else:
                     paths_display = "`, `".join(paths)
                     telegram.tg_send(f"📷 Photo saved to `{paths_display}` — no target session.\n{tmux.format_sessions_message(s.sessions)}",
@@ -593,55 +592,54 @@ def _listen_tick(s):
                         msg, reply_markup=kb,
                         silent=state._is_silent(_CAT_CONFIRM))
                     continue
-                target_idx = None
+                target_wid = None
                 remaining_text = caption
-                m = re.match(r"^w(\d+)\s*(.*)", caption, re.DOTALL) if caption else None
-                if m and m.group(1) in s.sessions:
-                    target_idx = m.group(1)
+                m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
+                if m and f"w{m.group(1)}" in s.sessions:
+                    target_wid = f"w{m.group(1)}"
                     remaining_text = m.group(2).strip()
                 elif len(s.sessions) == 1:
-                    target_idx = next(iter(s.sessions))
+                    target_wid = next(iter(s.sessions))
                 elif s.last_win_idx and s.last_win_idx in s.sessions:
-                    target_idx = s.last_win_idx
+                    target_wid = s.last_win_idx
 
-                if target_idx:
-                    pane, project = s.sessions[target_idx]
-                    wid = f"w{target_idx}"
+                if target_wid:
+                    pane, project = s.sessions[target_wid]
                     instruction = f"Read {path}"
                     if remaining_text:
                         instruction += f" — {remaining_text}"
 
                     # Busy check — queue if session is working
-                    if state._is_busy(wid):
-                        state._save_queued_msg(wid, instruction)
-                        telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
+                    if state._is_busy(target_wid):
+                        state._save_queued_msg(target_wid, instruction)
+                        telegram.tg_send(f"💾 Document saved for `{target_wid}` (busy):\n`{file_name}`",
                                          silent=state._is_silent(_CAT_CONFIRM))
-                        s.last_win_idx = target_idx
+                        s.last_win_idx = target_wid
                         continue
 
                     is_idle, typed_text = routing._pane_idle_state(pane)
                     if not is_idle:
-                        state._save_queued_msg(wid, instruction)
-                        telegram.tg_send(f"💾 Document saved for `w{target_idx}` (busy):\n`{file_name}`",
+                        state._save_queued_msg(target_wid, instruction)
+                        telegram.tg_send(f"💾 Document saved for `{target_wid}` (busy):\n`{file_name}`",
                                          silent=state._is_silent(_CAT_CONFIRM))
-                        s.last_win_idx = target_idx
+                        s.last_win_idx = target_wid
                         continue
 
                     p = shlex.quote(pane)
 
                     # Save locally typed text before clearing
                     if typed_text:
-                        state._save_queued_msg(wid, typed_text)
+                        state._save_queued_msg(target_wid, typed_text)
                         subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
                         time.sleep(0.2)
 
                     cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.3 && tmux send-keys -t {p} Enter"
                     subprocess.run(["bash", "-c", cmd], timeout=10)
-                    state._mark_busy(wid)
-                    confirm = f"📎 Document sent to `w{target_idx}` (`{project}`):\n`{file_name}`"
+                    state._mark_busy(target_wid)
+                    confirm = f"📎 Document sent to `{target_wid}` (`{project}`):\n`{file_name}`"
                     telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-                    commands._maybe_activate_smartfocus(target_idx, pane, project, confirm)
-                    s.last_win_idx = target_idx
+                    commands._maybe_activate_smartfocus(target_wid, pane, project, confirm)
+                    s.last_win_idx = target_wid
                 else:
                     telegram.tg_send(f"📎 Document saved to `{path}` — no target session.\n{tmux.format_sessions_message(s.sessions)}",
                                      reply_markup=tmux._sessions_keyboard(s.sessions))
@@ -665,7 +663,7 @@ def _listen_tick(s):
         if s.pending_file and not text.startswith("/"):
             if s.pending_file.get("prompt_msg_id"):
                 telegram._remove_inline_keyboard(s.pending_file["prompt_msg_id"])
-            wn_m = re.match(r"^(w\d+)\s+(.*)", text, re.DOTALL)
+            wn_m = re.match(r"^(w\d+[a-z]?)\s+(.*)", text, re.DOTALL)
             prefix = ""
             user_text = text.strip()
             if wn_m:
@@ -741,9 +739,9 @@ def cmd_listen():
                      reply_markup=telegram._build_reply_keyboard())
     # Pre-seed interrupted set so we don't send redundant notifications
     # for sessions already shown as 🔴 in the startup message
-    interrupted_notified = {f"w{idx}" for idx, st in statuses.items() if st == "interrupted"}
+    interrupted_notified = {idx for idx, st in statuses.items() if st == "interrupted"}
     god_wids = state._god_mode_wids()
-    config._log("listen", f"Found {len(sessions)} Claude session(s).")
+    config._log("listen", f"Found {len(sessions)} CLI session(s).")
     config._log("listen", f"God mode: {god_wids or 'off'}")
     config._log("listen", f"Local suppress: {'on' if state._is_local_suppress_enabled() else 'off'}")
     config._log("listen", "Press Ctrl+C to stop")

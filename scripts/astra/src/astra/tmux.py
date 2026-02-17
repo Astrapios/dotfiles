@@ -1,7 +1,10 @@
 """Pane capture, session scanning, formatting."""
+from __future__ import annotations
+
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 
 from astra import config, telegram, state
 
@@ -160,25 +163,129 @@ def _get_locally_viewed_windows() -> set[str]:
         return set()
 
 
-def scan_claude_sessions() -> dict[str, tuple[str, str]]:
-    """Scan tmux for panes running claude. Returns {window_index: (pane_target, project)}."""
-    sessions = {}
+def scan_claude_sessions() -> dict[str, SessionInfo]:
+    """Scan tmux for panes running any registered CLI.
+
+    Returns {wid: SessionInfo} — SessionInfo supports ``pane, project = info``
+    unpacking for backward compat.
+    """
+    return scan_cli_sessions()
+
+
+@dataclass
+class SessionInfo:
+    """Information about a detected CLI session."""
+    pane_target: str    # "%20"
+    project: str        # "myproject"
+    cli: str            # "claude" or "gemini"
+    win_idx: str        # "4"
+    pane_suffix: str    # "" for solo, "a"/"b" for multi-pane
+
+    @property
+    def wid(self) -> str:
+        """Full session ID, e.g. 'w4' or 'w4a'."""
+        return f"w{self.win_idx}{self.pane_suffix}"
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable CLI name from profile."""
+        from astra import profiles
+        p = profiles.get_profile(self.cli)
+        return p.display_name if p else self.cli.title()
+
+    def __iter__(self):
+        """Allow ``pane, project = session_info`` unpacking."""
+        return iter((self.pane_target, self.project))
+
+
+def scan_cli_sessions() -> dict[str, SessionInfo]:
+    """Scan tmux for panes running any registered CLI.
+
+    Returns {wid: SessionInfo} where wid is 'w4' for solo panes or
+    'w4a'/'w4b' when multiple CLIs share a window.
+
+    Uses #{pane_start_command} and #{pane_title} to identify CLIs like Gemini
+    whose pane_current_command is 'node' rather than 'gemini'.
+    """
+    from astra import profiles
+
+    raw_panes: list[tuple[str, str, str, str, str, str]] = []
     try:
         result = subprocess.run(
             ["tmux", "list-panes", "-a", "-F",
-             "#{window_index}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}"],
+             "#{window_index}\t#{session_name}:#{window_index}.#{pane_index}"
+             "\t#{pane_current_command}\t#{pane_current_path}"
+             "\t#{pane_start_command}\t#{pane_title}"],
             capture_output=True, text=True, timeout=5,
         )
         for line in result.stdout.strip().splitlines():
             parts = line.split("\t")
-            if len(parts) == 4:
-                win_idx, target, cmd, cwd = parts
-                if cmd == "claude":
-                    project = cwd.rstrip("/").rsplit("/", 1)[-1] if cwd else "?"
-                    sessions[win_idx] = (target, project)
+            if len(parts) >= 6:
+                raw_panes.append((parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]))
+            elif len(parts) >= 4:
+                raw_panes.append((parts[0], parts[1], parts[2], parts[3],
+                                  parts[4] if len(parts) > 4 else "",
+                                  parts[5] if len(parts) > 5 else ""))
     except Exception:
         pass
+
+    # Group matched panes by window index
+    by_window: dict[str, list[tuple[str, str, str]]] = {}  # win_idx → [(target, project, cli)]
+    for win_idx, target, cmd, cwd, start_cmd, title in raw_panes:
+        profile = profiles.identify_cli(cmd, start_cmd, title)
+        if profile:
+            project = cwd.rstrip("/").rsplit("/", 1)[-1] if cwd else "?"
+            by_window.setdefault(win_idx, []).append((target, project, profile.name))
+
+    # Assign suffixes: solo pane gets bare wid, multiple panes get a/b/c...
+    sessions: dict[str, SessionInfo] = {}
+    for win_idx, panes in by_window.items():
+        if len(panes) == 1:
+            target, project, cli = panes[0]
+            info = SessionInfo(pane_target=target, project=project, cli=cli,
+                               win_idx=win_idx, pane_suffix="")
+            sessions[info.wid] = info
+        else:
+            for i, (target, project, cli) in enumerate(panes):
+                suffix = chr(ord("a") + i)
+                info = SessionInfo(pane_target=target, project=project, cli=cli,
+                                   win_idx=win_idx, pane_suffix=suffix)
+                sessions[info.wid] = info
     return sessions
+
+
+def resolve_session_id(raw_wid: str, sessions: dict) -> str | None:
+    """Resolve a wid string to a key in sessions dict.
+
+    Handles: direct match, bare 'w4' → 'w4a' fallback, and name resolution.
+    Works with both old-style {idx: (pane, project)} and new {wid: SessionInfo} dicts.
+    """
+    if raw_wid in sessions:
+        return raw_wid
+    # Bare w4 → try w4a (first pane in multi-pane window)
+    if re.match(r'^w\d+$', raw_wid):
+        suffixed = raw_wid + "a"
+        if suffixed in sessions:
+            return suffixed
+    # Numeric-only → try with w prefix
+    if raw_wid.isdigit():
+        wid = f"w{raw_wid}"
+        if wid in sessions:
+            return wid
+        suffixed = f"w{raw_wid}a"
+        if suffixed in sessions:
+            return suffixed
+    return None
+
+
+def _sort_session_keys(keys):
+    """Sort session keys numerically, handling both '4' and 'w4a' formats."""
+    def key_func(k):
+        m = re.match(r'^w?(\d+)([a-z]?)$', str(k))
+        if m:
+            return (int(m.group(1)), m.group(2))
+        return (9999, str(k))
+    return sorted(keys, key=key_func)
 
 
 def format_sessions_message(sessions: dict[str, tuple[str, str]],
@@ -190,20 +297,41 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]],
     locally_viewed: optional set of window indices currently viewed in tmux.
     """
     if not sessions:
-        return "⚠️ No Claude sessions found in tmux."
+        return "⚠️ No active sessions found in tmux."
     _status_icons = {"idle": "🟢", "busy": "🟡", "interrupted": "🔴"}
     names = state._load_session_names()
-    lines = ["📋 *Active Claude sessions:*"]
-    for idx in sorted(sessions, key=int):
-        target, project = sessions[idx]
+    # Detect if multiple CLI types are present
+    cli_types = set()
+    for v in sessions.values():
+        if isinstance(v, SessionInfo):
+            cli_types.add(v.cli)
+    has_multi_cli = len(cli_types) > 1
+    lines = ["📋 *Active sessions:*"]
+    for idx in _sort_session_keys(sessions):
+        val = sessions[idx]
+        if isinstance(val, SessionInfo):
+            project = val.project
+            cli_tag = f" · {val.cli.title()}" if has_multi_cli else ""
+            display_idx = val.wid
+            win_idx = val.win_idx
+            is_multi_pane = bool(val.pane_suffix)
+        else:
+            target, project = val
+            cli_tag = ""
+            display_idx = idx if idx.startswith("w") else f"w{idx}"
+            win_idx = re.match(r'^w?(\d+)', idx).group(1) if idx else idx
+            is_multi_pane = bool(re.search(r'[a-z]$', display_idx))
+        # Name lookup: exact wid first, then bare window index (only for solo panes)
         name = names.get(idx, "")
-        label = f"`w{idx} [{name}]`" if name else f"`w{idx}`"
-        god = " ⚡" if state._is_god_mode_for(idx) else ""
+        if not name and not is_multi_pane:
+            name = names.get(win_idx, "") or names.get(f"w{win_idx}", "")
+        label = f"`{display_idx} [{name}]`" if name else f"`{display_idx}`"
+        god = " ⚡" if state._is_god_mode_for(win_idx) else ""
         status_icon = ""
         if statuses and idx in statuses:
             status_icon = f" {_status_icons.get(statuses[idx], '')}"
-        local_icon = " 👁" if locally_viewed and idx in locally_viewed else ""
-        lines.append(f"  {label} — `{project}`{status_icon}{god}{local_icon}")
+        local_icon = " 👁" if locally_viewed and (idx in locally_viewed or win_idx in locally_viewed) else ""
+        lines.append(f"  {label} — `{project}`{status_icon}{cli_tag}{god}{local_icon}")
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)
 
@@ -214,10 +342,16 @@ def _sessions_keyboard(sessions: dict) -> dict | None:
         return None
     names = state._load_session_names()
     buttons = []
-    for idx in sorted(sessions, key=int):
-        _, project = sessions[idx]
+    for idx in _sort_session_keys(sessions):
+        val = sessions[idx]
+        if isinstance(val, SessionInfo):
+            project = val.project
+            display_idx = val.wid
+        else:
+            _, project = val
+            display_idx = idx if idx.startswith("w") else f"w{idx}"
         name = names.get(idx, "")
-        label = f"w{idx} [{name}]" if name else f"w{idx} {project}"
+        label = f"{display_idx} [{name}]" if name else f"{display_idx} {project}"
         buttons.append((label[:20], f"sess_{idx}"))
     rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
     return telegram._build_inline_keyboard(rows)
@@ -229,10 +363,16 @@ def _command_sessions_keyboard(cmd: str, sessions: dict) -> dict | None:
         return None
     names = state._load_session_names()
     buttons = []
-    for idx in sorted(sessions, key=int):
-        _, project = sessions[idx]
+    for idx in _sort_session_keys(sessions):
+        val = sessions[idx]
+        if isinstance(val, SessionInfo):
+            project = val.project
+            display_idx = val.wid
+        else:
+            _, project = val
+            display_idx = idx if idx.startswith("w") else f"w{idx}"
         name = names.get(idx, "")
-        label = f"w{idx} [{name}]" if name else f"w{idx} {project}"
-        buttons.append((label[:20], f"cmd_{cmd}_{idx}"))
+        label = f"{display_idx} [{name}]" if name else f"{display_idx} {project}"
+        buttons.append((label[:20], f"cmd_{cmd}_{display_idx}"))
     rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
     return telegram._build_inline_keyboard(rows)

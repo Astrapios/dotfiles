@@ -33,7 +33,7 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
             return text
         return _ALIASES[stripped]
     # Digit-containing aliases always resolve (unambiguous)
-    m = re.match(r"^s(\d+)?(?:\s+(\d+))?$", stripped)
+    m = re.match(r"^s(\d+[a-z]?)?(?:\s+(\d+))?$", stripped)
     if m:
         parts = ["/status"]
         if m.group(1):
@@ -41,22 +41,22 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
         if m.group(2):
             parts.append(m.group(2))
         return " ".join(parts)
-    m = re.match(r"^f(\d+)$", stripped)
+    m = re.match(r"^f(\d+[a-z]?)$", stripped)
     if m:
         return f"/focus w{m.group(1)}"
-    m = re.match(r"^df(\d+)$", stripped)
+    m = re.match(r"^df(\d+[a-z]?)$", stripped)
     if m:
         return f"/deepfocus w{m.group(1)}"
-    m = re.match(r"^i(\d+)$", stripped)
+    m = re.match(r"^i(\d+[a-z]?)$", stripped)
     if m:
         return f"/interrupt w{m.group(1)}"
-    m = re.match(r"^g(\d+)$", stripped)
+    m = re.match(r"^g(\d+[a-z]?)$", stripped)
     if m:
         return f"/god w{m.group(1)}"
-    m = re.match(r"^c(\d+)$", stripped)
+    m = re.match(r"^c(\d+[a-z]?)$", stripped)
     if m:
         return f"/clear w{m.group(1)}"
-    m = re.match(r"^r(\d+)$", stripped)
+    m = re.match(r"^r(\d+[a-z]?)$", stripped)
     if m:
         return f"/restart w{m.group(1)}"
     # noti <args> → /notification <args>
@@ -67,16 +67,15 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
 
 
 def _interrupt_session(idx: str, sessions: dict):
-    """Interrupt a Claude session: Escape, clear prompt, clear busy/prompt state."""
+    """Interrupt a CLI session: Escape, clear prompt, clear busy/prompt state."""
     pane, project = sessions[idx]
-    wid = f"w{idx}"
     p = shlex.quote(pane)
     # Escape interrupts current operation, Ctrl+U clears the prompt line
     subprocess.run(["bash", "-c",
                     f"tmux send-keys -t {p} Escape && sleep 0.1 && "
                     f"tmux send-keys -t {p} C-u"], timeout=5)
-    state._clear_busy(wid)
-    state.load_active_prompt(wid)  # load = consume and delete
+    state._clear_busy(idx)
+    state.load_active_prompt(idx)  # load = consume and delete
     telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
 
 
@@ -150,9 +149,9 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/name wN [label]` — name a session",
             "",
             "*Session management:*",
-            "`/new [dir]` — start new Claude session",
+            "`/new [claude|gemini] [dir]` — start new session",
             "`/restart wN` — kill and relaunch with `claude -c`",
-            "`/kill wN` — exit a Claude session (Ctrl+C x3)",
+            "`/kill wN` — exit a session (Ctrl+C x3)",
             "`/clear [wN]` — reset transient state",
             "`/log [N]` — show last N journal lines (default 30)",
             "`/stop` / `/quit` — pause / shut down listener",
@@ -166,7 +165,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`c` clear | `c4` clear w4 | `r4` restart w4",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
-            "*Photos:* send a photo to have Claude read it. Add `wN` in caption to target.",
+            "*Photos:* send a photo to have the CLI read it. Add `wN` in caption to target.",
         ]
         telegram.tg_send("\n".join(help_lines), reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
@@ -224,7 +223,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if kb:
             telegram.tg_send("🔬 Deep focus on which session?", reply_markup=kb)
         else:
-            telegram.tg_send("⚠️ No Claude sessions found.")
+            telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
     # /deepfocus wN|name
@@ -253,7 +252,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if kb:
             telegram.tg_send("🔍 Focus on which session?", reply_markup=kb)
         else:
-            telegram.tg_send("⚠️ No Claude sessions found.")
+            telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
     # /focus wN|name
@@ -282,8 +281,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if raw_target:
             idx = state._resolve_name(raw_target, sessions)
             if idx:
-                wid = f"w{idx}"
-                state._clear_window_state(wid)
+                state._clear_window_state(idx)
                 telegram.tg_send(f"🧹 Cleared transient state for {state._wid_label(idx)}.")
                 return None, sessions, last_win_idx
             else:
@@ -344,7 +342,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 labels = ", ".join(f"`w{v}`" for v in sorted(viewed, key=int))
                 lines.append(f"Currently viewed: {labels}")
             else:
-                lines.append("No tmux client attached or viewing a Claude window.")
+                lines.append("No tmux client attached or viewing a session window.")
             lines.append("\n`/local on` | `/local off`")
             telegram.tg_send("\n".join(lines))
         return None, sessions, last_win_idx
@@ -470,33 +468,43 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         label = name_m.group(2).strip() if name_m.group(2) else None
         if label:
             state._save_session_name(idx, label)
-            telegram.tg_send(f"✏️ Session `w{idx}` named `{label}`.")
+            telegram.tg_send(f"✏️ Session {state._wid_label(idx)} named `{label}`.")
         else:
             state._clear_session_name(idx)
-            telegram.tg_send(f"✏️ Session `w{idx}` name cleared.")
+            telegram.tg_send(f"✏️ Session {state._wid_label(idx)} name cleared.")
         return None, sessions, last_win_idx
 
-    # /new [dir]
+    # /new [claude|gemini] [dir]
     new_m = re.match(r"^/new(?:\s+(.+))?$", text)
     if new_m:
-        dir_arg = new_m.group(1).strip() if new_m.group(1) else None
+        from astra import profiles
+        args = new_m.group(1).strip().split(None, 1) if new_m.group(1) else []
+        cli_name = "claude"
+        dir_arg = None
+        if args and profiles.get_profile(args[0].lower()):
+            cli_name = args[0].lower()
+            dir_arg = args[1].strip() if len(args) > 1 else None
+        elif args:
+            dir_arg = new_m.group(1).strip()
+        profile = profiles.get_profile(cli_name) or profiles.CLAUDE
         if dir_arg:
             work_dir = os.path.expanduser(dir_arg)
         else:
             ts = time.strftime("%m%d-%H%M")
-            work_dir = os.path.expanduser(f"~/projects/claude-{ts}")
+            work_dir = os.path.expanduser(f"~/projects/{cli_name}-{ts}")
         os.makedirs(work_dir, exist_ok=True)
         try:
             result = subprocess.run(
                 ["tmux", "new-window", "-d", "-P", "-F", "#{window_index}",
-                 f"bash -c 'cd {shlex.quote(work_dir)} && claude'"],
+                 f"bash -c 'cd {shlex.quote(work_dir)} && {profile.launch_cmd}'"],
                 capture_output=True, text=True, timeout=10,
             )
             new_idx = result.stdout.strip()
             sessions = tmux.scan_claude_sessions()
+            new_wid = f"w{new_idx}"
             proj = work_dir.rstrip("/").rsplit("/", 1)[-1]
-            telegram.tg_send(f"🚀 Started Claude in `w{new_idx}` (`{proj}`):\n`{work_dir}`")
-            return None, sessions, new_idx
+            telegram.tg_send(f"🚀 Started {profile.display_name} in `{new_wid}` (`{proj}`):\n`{work_dir}`")
+            return None, sessions, new_wid
         except Exception as e:
             telegram.tg_send(f"⚠️ Failed to start session: `{e}`")
             return None, sessions, last_win_idx
@@ -522,7 +530,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if kb:
                 telegram.tg_send("⏹ Interrupt which session?", reply_markup=kb)
             else:
-                telegram.tg_send("⚠️ No Claude sessions found.")
+                telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
     # /kill (bare — show session picker)
@@ -532,7 +540,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if kb:
             telegram.tg_send("🛑 Kill which session?", reply_markup=kb)
         else:
-            telegram.tg_send("⚠️ No Claude sessions found.")
+            telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
     # /kill wN|name
@@ -569,7 +577,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if kb:
             telegram.tg_send("🔄 Restart which session?", reply_markup=kb)
         else:
-            telegram.tg_send("⚠️ No Claude sessions found.")
+            telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
     # /restart wN|name
@@ -579,7 +587,6 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         idx = state._resolve_name(raw_target, sessions)
         if idx:
             pane, project = sessions[idx]
-            wid = f"w{idx}"
             # Save working directory before killing
             cwd = tmux._get_pane_cwd(pane)
             p = shlex.quote(pane)
@@ -597,8 +604,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send(f"⚠️ {state._wid_label(idx)} (`{project}`) still running — restart aborted.")
                 return None, sessions, last_win_idx
             # Clear stale state
-            state._clear_busy(wid)
-            for suffix in (f"_active_prompt_{wid}.json", f"_bash_cmd_{wid}.json"):
+            state._clear_busy(idx)
+            for suffix in (f"_active_prompt_{idx}.json", f"_bash_cmd_{idx}.json"):
                 try:
                     os.remove(os.path.join(config.SIGNAL_DIR, suffix))
                 except OSError:
@@ -612,9 +619,17 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             else:
                 source_cmd = ""
             cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
+            # Detect CLI type for the restart command
+            from astra import profiles
+            val = sessions.get(idx) if idx in sessions else None  # already removed above
+            restart_cmd = profiles.CLAUDE.restart_cmd
+            if isinstance(val, tmux.SessionInfo):
+                p_obj = profiles.get_profile(val.cli)
+                if p_obj:
+                    restart_cmd = p_obj.restart_cmd
             subprocess.run(
                 ["bash", "-c",
-                 f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + 'claude -c')} && "
+                 f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + restart_cmd)} && "
                  f"sleep 0.1 && tmux send-keys -t {p} Enter"],
                 timeout=10,
             )
@@ -663,15 +678,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if not idx:
                 telegram.tg_send(f"⚠️ No session `{raw_target}`.")
                 return None, sessions, last_win_idx
-            wid = f"w{idx}"
-            queued = state._load_queued_msgs(wid)
+            queued = state._load_queued_msgs(idx)
             if queued:
                 preview_lines = []
                 for i, m_q in enumerate(queued, 1):
                     preview_lines.append(f"{i}. `{m_q['text'][:100]}`")
                 saved_kb = telegram._build_inline_keyboard([[
-                    ("\u2709\ufe0f Send", f"saved_send_{wid}"),
-                    ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                    ("\u2709\ufe0f Send", f"saved_send_{idx}"),
+                    ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
                 ]])
                 telegram.tg_send(
                     f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
@@ -682,17 +696,16 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         else:
             # Scan all sessions for queued messages
             found_any = False
-            for idx in sorted(sessions, key=int):
-                wid = f"w{idx}"
-                queued = state._load_queued_msgs(wid)
+            for idx in tmux._sort_session_keys(sessions):
+                queued = state._load_queued_msgs(idx)
                 if queued:
                     found_any = True
                     preview_lines = []
                     for i, m_q in enumerate(queued, 1):
                         preview_lines.append(f"{i}. `{m_q['text'][:100]}`")
                     saved_kb = telegram._build_inline_keyboard([[
-                        ("\u2709\ufe0f Send", f"saved_send_{wid}"),
-                        ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
+                        ("\u2709\ufe0f Send", f"saved_send_{idx}"),
+                        ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
                     ]])
                     telegram.tg_send(
                         f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
@@ -703,19 +716,20 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         return None, sessions, last_win_idx
 
     # Parse wN prefix
-    m = re.match(r"^w(\d+)\s+(.*)", text, re.DOTALL)
+    m = re.match(r"^w(\d+[a-z]?)\s+(.*)", text, re.DOTALL)
     if m:
-        win_idx = m.group(1)
+        wid = f"w{m.group(1)}"
         prompt = m.group(2).strip()
-        if win_idx in sessions:
-            pane, project = sessions[win_idx]
-            confirm = routing.route_to_pane(pane, win_idx, prompt)
+        resolved = tmux.resolve_session_id(wid, sessions)
+        if resolved:
+            pane, project = sessions[resolved]
+            confirm = routing.route_to_pane(pane, resolved, prompt)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-            config._log(f"w{win_idx}", confirm[:100])
-            _maybe_activate_smartfocus(win_idx, pane, project, confirm)
-            return None, sessions, win_idx
+            config._log(resolved, confirm[:100])
+            _maybe_activate_smartfocus(resolved, pane, project, confirm)
+            return None, sessions, resolved
         else:
-            telegram.tg_send(f"⚠️ No Claude session at `w{win_idx}`.\n{tmux.format_sessions_message(sessions)}",
+            telegram.tg_send(f"⚠️ No session at `{wid}`.\n{tmux.format_sessions_message(sessions)}",
                              reply_markup=tmux._sessions_keyboard(sessions),
                              silent=state._is_silent(_CAT_ERROR))
             return None, sessions, last_win_idx
@@ -728,7 +742,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             pane, project = sessions[name_idx]
             confirm = routing.route_to_pane(pane, name_idx, words[1].strip())
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-            config._log(f"w{name_idx}", confirm[:100])
+            config._log(name_idx, confirm[:100])
             _maybe_activate_smartfocus(name_idx, pane, project, confirm)
             return None, sessions, name_idx
 
@@ -743,11 +757,11 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         pane, project = sessions[target_idx]
         confirm = routing.route_to_pane(pane, target_idx, text)
         telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-        config._log(f"w{target_idx}", confirm[:100])
+        config._log(target_idx, confirm[:100])
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)
         return None, sessions, target_idx
     elif len(sessions) == 0:
-        telegram.tg_send("⚠️ No Claude sessions found. Send `/sessions` to rescan.",
+        telegram.tg_send("⚠️ No CLI sessions found. Send `/sessions` to rescan.",
                          silent=state._is_silent(_CAT_ERROR))
     else:
         telegram.tg_send(f"⚠️ Multiple sessions — prefix with `wN`.\n{tmux.format_sessions_message(sessions)}",
@@ -769,7 +783,7 @@ def _handle_callback(callback: dict, sessions: dict,
         telegram._remove_inline_keyboard(msg_id)
 
     # Clear keyboard tracker for any wid-based callback
-    wid_m = re.search(r"(w\d+)", cb_data)
+    wid_m = re.search(r"(w\d+[a-z]?)", cb_data)
     if wid_m:
         config._clear_keyboard_msg(wid_m.group(1))
 
@@ -781,7 +795,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Permission callback: perm_{wid}_{n}
-    m = re.match(r"^perm_(w\d+)_(\d+)$", cb_data)
+    m = re.match(r"^perm_(w\d+[a-z]?)_(\d+)$", cb_data)
     if m:
         wid, n = m.group(1), int(m.group(2))
         prompt = state.load_active_prompt(wid)
@@ -796,8 +810,7 @@ def _handle_callback(callback: dict, sessions: dict,
                 label = "\u274c Denied"
             else:
                 label = f"Selected option {n}"
-            w_idx = wid.lstrip("w")
-            telegram.tg_send(f"{label} in {state._wid_label(w_idx)}",
+            telegram.tg_send(f"{label} in {state._wid_label(wid)}",
                              silent=state._is_silent(_CAT_CONFIRM))
             config._log("callback", f"perm {wid} option {n}")
         else:
@@ -805,58 +818,61 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Question callback: q_{wid}_{n}
-    m = re.match(r"^q_(w\d+)_(\d+)$", cb_data)
+    m = re.match(r"^q_(w\d+[a-z]?)_(\d+)$", cb_data)
     if m:
         wid, n_str = m.group(1), m.group(2)
-        win_idx = wid.lstrip("w")
-        if win_idx in sessions:
-            pane = sessions[win_idx][0]
-            confirm = routing.route_to_pane(pane, win_idx, n_str)
+        resolved = tmux.resolve_session_id(wid, sessions)
+        if resolved:
+            pane = sessions[resolved][0]
+            confirm = routing.route_to_pane(pane, resolved, n_str)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-            last_win_idx = win_idx
+            last_win_idx = resolved
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|restart|last|god)_(w?)(\d+)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|restart|last|god)_(w?\d+[a-z]?)$", cb_data)
     if m:
-        cmd, _, idx = m.group(1), m.group(2), m.group(3)
-        cmd_text = f"/{cmd} w{idx}"
+        cmd, wid_part = m.group(1), m.group(2)
+        wid_str = wid_part if wid_part.startswith("w") else f"w{wid_part}"
+        cmd_text = f"/{cmd} {wid_str}"
         _, sessions, last_win_idx = _handle_command(
             cmd_text, sessions, last_win_idx)
         return sessions, last_win_idx, None
 
     # Session select: sess_{wid}
-    m = re.match(r"^sess_(\d+)$", cb_data)
+    m = re.match(r"^sess_(w?\d+[a-z]?)$", cb_data)
     if m:
-        idx = m.group(1)
-        last_win_idx = idx
-        cmd_text = f"/status w{idx}"
+        wid = m.group(1)
+        if not wid.startswith("w"):
+            wid = f"w{wid}"
+        last_win_idx = wid
+        cmd_text = f"/status {wid}"
         _, sessions, last_win_idx = _handle_command(
             cmd_text, sessions, last_win_idx)
         return sessions, last_win_idx, None
 
     # Saved message callbacks: saved_send_{wid}, saved_discard_{wid}
-    m = re.match(r"^saved_(send|discard)_(w\d+)$", cb_data)
+    m = re.match(r"^saved_(send|discard)_(w\d+[a-z]?)$", cb_data)
     if m:
         action_type, wid = m.group(1), m.group(2)
-        win_idx = wid.lstrip("w")
         if action_type == "send":
             msgs = state._pop_queued_msgs(wid)
-            if msgs and win_idx in sessions:
-                combined = "\n".join(m["text"] for m in msgs)
-                pane, project = sessions[win_idx]
-                confirm = routing.route_to_pane(pane, win_idx, combined)
+            resolved = tmux.resolve_session_id(wid, sessions)
+            if msgs and resolved:
+                combined = "\n".join(m_q["text"] for m_q in msgs)
+                pane, project = sessions[resolved]
+                confirm = routing.route_to_pane(pane, resolved, combined)
                 telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
-                _maybe_activate_smartfocus(win_idx, pane, project, confirm)
-                last_win_idx = win_idx
+                _maybe_activate_smartfocus(resolved, pane, project, confirm)
+                last_win_idx = resolved
             elif msgs:
-                telegram.tg_send(f"⚠️ Session `w{win_idx}` no longer active.",
+                telegram.tg_send(f"⚠️ Session `{wid}` no longer active.",
                                  silent=state._is_silent(_CAT_ERROR))
             else:
                 telegram.tg_send("No saved messages to send.")
         else:  # discard
             state._pop_queued_msgs(wid)
-            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(win_idx)}.",
+            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(wid)}.",
                              silent=state._is_silent(_CAT_CONFIRM))
         return sessions, last_win_idx, None
 

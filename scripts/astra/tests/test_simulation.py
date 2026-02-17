@@ -80,7 +80,7 @@ class TestTextMessageRouting(SimTestBase):
         # Smartfocus should be activated
         sf = state._load_smartfocus_state()
         self.assertIsNotNone(sf)
-        self.assertEqual(sf["wid"], "4")
+        self.assertEqual(sf["wid"], "w4")
         self.assertEqual(sf["pane"], "%20")
 
     def test_single_session_no_prefix_needed(self):
@@ -414,6 +414,84 @@ class TestPausedMode(SimTestBase):
 
         self.assertEqual(result, "quit")
         self.h.assert_sent("Bye")
+
+
+class TestFakeTmuxMultiCLI(SimTestBase):
+    """Verify FakeTmux scan_cli_sessions() with multi-CLI support."""
+
+    def test_scan_cli_sessions_single_claude(self):
+        """Single Claude session returns bare wid."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True, cli="claude")
+        sessions = self.h.tmux.scan_cli_sessions()
+        self.assertIn("w4", sessions)
+        self.assertEqual(sessions["w4"].cli, "claude")
+        self.assertEqual(sessions["w4"].pane_target, "%20")
+
+    def test_scan_cli_sessions_single_gemini(self):
+        """Single Gemini session returns bare wid."""
+        self.h.tmux.add_session("3", "%15", "gemproj", idle=True, cli="gemini")
+        sessions = self.h.tmux.scan_cli_sessions()
+        self.assertIn("w3", sessions)
+        self.assertEqual(sessions["w3"].cli, "gemini")
+
+    def test_scan_cli_sessions_mixed(self):
+        """Claude and Gemini in different windows."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True, cli="claude")
+        self.h.tmux.add_session("5", "%21", "gemproj", idle=True, cli="gemini")
+        sessions = self.h.tmux.scan_cli_sessions()
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual(sessions["w4"].cli, "claude")
+        self.assertEqual(sessions["w5"].cli, "gemini")
+
+    def test_session_info_unpacking(self):
+        """SessionInfo can be unpacked as (pane_target, project)."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        sessions = self.h.tmux.scan_cli_sessions()
+        pane, project = sessions["w4"]
+        self.assertEqual(pane, "%20")
+        self.assertEqual(project, "myproject")
+
+
+class TestStopSignalCliField(SimTestBase):
+    """Verify stop signals carry cli field through the listener."""
+
+    def test_stop_signal_with_cli_claude(self):
+        """Stop signal with cli='claude' generates proper display name."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tmux.set_pane_content("4",
+            "● Here is my response\n"
+            "Some content here\n"
+            "❯ "
+        )
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject", cli="claude")
+        self.h.tick(s)
+
+        # Should have sent a "finished" message mentioning Claude Code
+        finished_msgs = self.h.tg.find_sent("finished")
+        self.assertTrue(len(finished_msgs) > 0)
+
+    def test_stop_signal_with_cli_gemini(self):
+        """Stop signal with cli='gemini' generates proper display name."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tmux.set_pane_content("4",
+            "● Here is my response\n"
+            "Some content here\n"
+            "❯ "
+        )
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject", cli="gemini")
+        self.h.tick(s)
+
+        # Should have sent a "finished" message mentioning Gemini
+        finished_msgs = self.h.tg.find_sent("finished")
+        self.assertTrue(len(finished_msgs) > 0)
+        # The message should use "Gemini" display name
+        self.h.assert_sent("Gemini")
 
 
 if __name__ == "__main__":

@@ -396,9 +396,9 @@ def _extract_chat_messages(data: dict) -> list[dict]:
         reply_text = reply_msg.get("text", "") or reply_msg.get("caption", "")
         reply_wid = None
         if reply_text:
-            wid_m = re.search(r"w(\d+)", reply_text)
+            wid_m = re.search(r"w(\d+[a-z]?)", reply_text)
             if wid_m:
-                reply_wid = wid_m.group(1)
+                reply_wid = wid_m.group(0)
 
         photos = msg.get("photo")
         if photos:

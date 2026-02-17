@@ -66,6 +66,11 @@ echo "  astra service enabled (start with: systemctl --user start astra)"
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md
 
+# Gemini settings symlink
+echo "  installing Gemini CLI hooks..."
+mkdir -p ~/.gemini
+ln -sf $SCRIPT_PATH/scripts/gemini_settings.json ~/.gemini/settings.json
+
 # Telegram credentials
 if [ ! -f ~/.config/astra.env ] && [ ! -f ~/.config/tg_hook.env ]; then
     if $YES; then

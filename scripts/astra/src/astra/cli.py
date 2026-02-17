@@ -37,8 +37,21 @@ def cmd_send_doc(path: str, caption: str = ""):
     print(f"Document sent: {path}")
 
 
+def _detect_cli_from_event(event: str) -> str:
+    """Detect which CLI fired the hook based on event name."""
+    from astra import profiles
+    for profile in profiles.all_profiles():
+        if event in profile.event_map:
+            return profile.name
+    return "claude"  # default fallback
+
+
 def cmd_hook():
-    """Read hook JSON from stdin, write signal files for listen to process."""
+    """Read hook JSON from stdin, write signal files for listen to process.
+
+    Normalizes event and tool names from different CLIs (Claude, Gemini)
+    into internal names via profile event_map/tool_map.
+    """
     if not config.TG_HOOKS_ENABLED:
         sys.stdin.read()
         return
@@ -54,11 +67,18 @@ def cmd_hook():
     event = data.get("hook_event_name", "")
     tool = data.get("tool_name", "")
 
-    config._log("hook", f"event={event} tool={tool} keys={list(data.keys())}")
+    # Detect CLI and normalize event/tool names
+    cli_name = _detect_cli_from_event(event)
+    from astra import profiles
+    profile = profiles.get_profile(cli_name) or profiles.CLAUDE
+    internal_event = profile.event_map.get(event, "")
+    internal_tool = profile.tool_map.get(tool, "")
 
-    if event == "Stop":
-        state.write_signal("stop", data)
-    elif event == "Notification":
+    config._log("hook", f"cli={cli_name} event={event}→{internal_event} tool={tool}→{internal_tool} keys={list(data.keys())}")
+
+    if internal_event == "stop":
+        state.write_signal("stop", data, cli=cli_name)
+    elif internal_event == "notification":
         ntype = data.get("notification_type", "")
         msg = data.get("message", "")
         config._log("hook", f"notification type={ntype} msg={msg[:200]}")
@@ -67,7 +87,7 @@ def cmd_hook():
                 return
             wid = tmux.get_window_id() or "unknown"
             bash_cmd = ""
-            if "bash" in msg.lower():
+            if "bash" in msg.lower() or internal_tool == "shell":
                 cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
                 try:
                     with open(cmd_file) as f:
@@ -75,13 +95,13 @@ def cmd_hook():
                     os.remove(cmd_file)
                 except (OSError, json.JSONDecodeError):
                     pass
-            state.write_signal("permission", data, cmd=bash_cmd, message=msg)
-    elif event == "PreToolUse":
-        if tool == "EnterPlanMode":
-            state.write_signal("plan", data)
-        elif tool == "AskUserQuestion":
-            state.write_signal("question", data, questions=data.get("tool_input", {}).get("questions", []))
-        elif tool == "Bash":
+            state.write_signal("permission", data, cmd=bash_cmd, message=msg, cli=cli_name)
+    elif internal_event == "pre_tool":
+        if internal_tool == "plan":
+            state.write_signal("plan", data, cli=cli_name)
+        elif internal_tool == "question":
+            state.write_signal("question", data, questions=data.get("tool_input", {}).get("questions", []), cli=cli_name)
+        elif internal_tool == "shell":
             os.makedirs(config.SIGNAL_DIR, exist_ok=True)
             wid = tmux.get_window_id() or "unknown"
             cmd = data.get("tool_input", {}).get("command", "")
@@ -92,13 +112,13 @@ def cmd_hook():
 
 def cmd_help():
     """Print CLI usage information."""
-    print("""astra — Telegram bridge for Claude Code
+    print("""astra — Telegram bridge for Claude Code & Gemini CLI
 
 Usage: astra <command> [args...]
 
 Commands:
   listen              Start the Telegram listener daemon
-  hook                Read Claude hook JSON from stdin (called by hooks)
+  hook                Read hook JSON from stdin (called by hooks)
   notify <message>    Send a one-shot notification to Telegram
   ask <question>      Send a question, wait for reply, print to stdout
   send-photo <path> [caption]  Send a photo to Telegram
@@ -111,7 +131,7 @@ Setup:
   3. Save credentials to ~/.config/astra.env:
        TELEGRAM_BOT_TOKEN=your-bot-token
        TELEGRAM_CHAT_ID=your-chat-id
-  4. Configure Claude Code hooks (see claude_settings.json)
+  4. Configure hooks (see claude_settings.json / gemini_settings.json)
   5. Run: astra listen
 
 Telegram commands (inside listener):
@@ -127,9 +147,9 @@ Telegram commands (inside listener):
   /local [on|off]      Suppress Telegram when viewing locally
   /notification [1..7|all|off]  Control which alerts buzz
   /name wN label       Name a session
-  /new [dir]           Start new Claude session
-  /restart wN          Kill and relaunch with claude -c
-  /kill wN             Exit a Claude session
+  /new [claude|gemini] [dir]  Start new session
+  /restart wN          Kill and relaunch session
+  /kill wN             Exit a session
   /clear [wN]          Reset transient state
   /log [N]             Show last N journal lines (default 30)
   /stop / /start       Pause / resume listener

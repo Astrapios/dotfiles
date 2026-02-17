@@ -1,6 +1,6 @@
 # Astra
 
-Telegram bridge for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Control and monitor Claude Code sessions from your phone via a Telegram bot.
+Telegram bridge for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). Control and monitor CLI sessions from your phone via a Telegram bot.
 
 Named after Astrapios, the Lightning-Bringer — the script watches for signals and carries them between worlds.
 
@@ -8,21 +8,22 @@ Named after Astrapios, the Lightning-Bringer — the script watches for signals 
 
 - **Permission forwarding** — Claude needs to run a command or edit a file? Get the prompt on Telegram with Allow/Deny buttons
 - **Session monitoring** — Watch responses stream in real-time, or get notified when Claude finishes
-- **Multi-session routing** — Run multiple Claude sessions in tmux and route messages by `w4`, `w5` prefix
+- **Multi-CLI support** — Works with both Claude Code and Gemini CLI, with automatic detection and CLI-specific UI handling
+- **Multi-session routing** — Run multiple CLI sessions in tmux and route messages by `w4`, `w5` prefix (or `w4a`, `w4b` for multi-pane windows)
 - **Message queuing** — Send messages to busy sessions; they're delivered when Claude becomes idle
 - **God mode** — Auto-accept all permissions for trusted sessions, with compact receipts
 
 ## Architecture
 
 ```
-Claude Code hooks ──► astra hook ──► signal files ──► astra listen ──► Telegram Bot
-                       (stdin)        (/tmp/astra_signals/)              (polling)
+CLI hooks ──────────► astra hook ──► signal files ──► astra listen ──► Telegram Bot
+(Claude/Gemini)        (stdin)        (/tmp/astra_signals/)              (polling)
                                                                             │
                                                                       Your phone
                                                                       Telegram app
 ```
 
-- **`astra hook`** — Called by Claude Code hooks (Stop, Notification, PreToolUse). Reads JSON from stdin, writes signal files
+- **`astra hook`** — Called by CLI hooks (Claude: Stop/Notification/PreToolUse; Gemini: AfterAgent/Notification/BeforeTool). Reads JSON from stdin, normalizes event/tool names, writes signal files
 - **`astra listen`** — Single daemon that polls Telegram for your messages and processes signal files. Routes messages to the right tmux pane, handles permissions, monitors output
 - Signal files decouple the hook calls (which run inside Claude's process) from the Telegram communication
 

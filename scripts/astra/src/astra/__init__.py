@@ -1,5 +1,5 @@
 """
-Astra — Telegram bridge for Claude Code hooks.
+Astra — Telegram bridge for Claude Code & Gemini CLI hooks.
 
 Usage:
   astra notify "message"        - Send a message, don't wait
@@ -7,13 +7,14 @@ Usage:
   astra send-photo path [caption] - Send a photo to Telegram
   astra send-doc path [caption]   - Send a file as a document to Telegram
   astra hook                    - Read hook JSON from stdin, write signal for listen
-  astra listen                  - Auto-detect Claude sessions, route messages by wN prefix
+  astra listen                  - Auto-detect CLI sessions, route messages by wN prefix
 """
 
 # Import submodules in dependency order (no circular imports at module level)
 from . import config
 from . import telegram
 from . import state
+from . import profiles
 from . import tmux
 from . import content
 from . import signals
@@ -39,11 +40,17 @@ from .telegram import (
     tg_wait_reply, _poll_updates, _download_tg_file, _extract_chat_messages,
 )
 
+# profiles
+from .profiles import (
+    CLIProfile, register_profile, get_profile, all_profiles, identify_cli,
+    CLAUDE, GEMINI,
+)
+
 # tmux
 from .tmux import (
     get_window_id, get_pane_project, _get_pane_command, _get_pane_cwd, _get_pane_width, _get_cursor_x,
     _join_wrapped_lines, _capture_pane, _get_locally_viewed_windows,
-    scan_claude_sessions,
+    scan_claude_sessions, scan_cli_sessions, SessionInfo, resolve_session_id,
     format_sessions_message, _sessions_keyboard, _command_sessions_keyboard,
 )
 

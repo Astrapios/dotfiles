@@ -14,9 +14,20 @@ _CAT_QUESTION = 3
 _CAT_CONFIRM = 7
 
 
-def _format_question_msg(tag: str, project: str, question: dict) -> str:
+def _display_name_for(cli: str = "") -> str:
+    """Get display name for a CLI type."""
+    from astra import profiles
+    if cli:
+        p = profiles.get_profile(cli)
+        if p:
+            return p.display_name
+    return "Claude Code"
+
+
+def _format_question_msg(tag: str, project: str, question: dict, cli: str = "") -> str:
     """Format a single AskUserQuestion question for Telegram."""
-    parts = [f"❓{tag} Claude Code (`{project}`) asks:\n"]
+    dn = _display_name_for(cli)
+    parts = [f"❓{tag} {dn} (`{project}`) asks:\n"]
     parts.append(question.get("question", "?"))
     opts = question.get("options", [])
     for i, opt in enumerate(opts, 1):
@@ -69,9 +80,12 @@ def process_signals(focused_wids: set[str] | None = None,
         pane = signal.get("pane", "")
         wid = signal.get("wid", "")
         project = signal.get("project", "unknown")
-        w_idx = wid.lstrip("w") if wid else ""
-        tag = f" {state._wid_label(w_idx)}" if w_idx else ""
-        is_local = bool(locally_viewed and w_idx in locally_viewed)
+        cli = signal.get("cli", "claude")
+        dn = _display_name_for(cli)
+        tag = f" {state._wid_label(wid)}" if wid else ""
+        # locally_viewed contains bare window indices; extract from wid
+        win_idx = re.match(r'^w?(\d+)', wid).group(1) if wid else ""
+        is_local = bool(locally_viewed and win_idx in locally_viewed)
 
         if pane:
             project = tmux.get_pane_project(pane) or project
@@ -85,7 +99,7 @@ def process_signals(focused_wids: set[str] | None = None,
         if event == "stop":
             state._clear_busy(wid)
             sf = state._load_smartfocus_state()
-            was_smartfocus = sf and sf["wid"] == w_idx
+            was_smartfocus = sf and sf["wid"] == wid
             if was_smartfocus:
                 state._clear_smartfocus_state()
 
@@ -94,7 +108,7 @@ def process_signals(focused_wids: set[str] | None = None,
                 ("\U0001f50d Focus", f"cmd_focus_{wid}"),
             ]])
 
-            if focused_wids and w_idx in focused_wids:
+            if focused_wids and wid in focused_wids:
                 pass
             elif is_local:
                 pass  # Locally viewed — skip Telegram notification
@@ -159,7 +173,7 @@ def process_signals(focused_wids: set[str] | None = None,
                 else:
                     pw = 0
                 cleaned = content.clean_pane_content(raw, "stop", pw) if raw else "(could not capture pane)"
-                header = f"✅{tag} Claude Code (`{project}`) finished:\n\n"
+                header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
                 telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
 
             # Check for queued messages (always, regardless of focus)
@@ -175,13 +189,13 @@ def process_signals(focused_wids: set[str] | None = None,
                         ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
                     ]])
                     telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(w_idx)}:\n{preview}",
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(wid)}:\n{preview}",
                         reply_markup=saved_kb,
                         silent=state._is_silent(_CAT_CONFIRM),
                     )
 
             # God mode: ensure accept-edits is on when session becomes idle
-            if pane and w_idx and state._is_god_mode_for(w_idx):
+            if pane and wid and state._is_god_mode_for(wid):
                 from astra import commands  # deferred to avoid circular
                 commands._enable_accept_edits(pane)
 
@@ -190,7 +204,7 @@ def process_signals(focused_wids: set[str] | None = None,
 
             # God mode: auto-accept and send compact receipt (skip plan approvals)
             is_plan_perm = "plan" in signal.get("message", "").lower()
-            if w_idx and state._is_god_mode_for(w_idx) and not is_plan_perm:
+            if wid and state._is_god_mode_for(wid) and not is_plan_perm:
                 routing._select_option(pane, 1)  # Accept IMMEDIATELY — always runs
                 desc = bash_cmd[:200] if bash_cmd else (signal.get("message", "") or "permission")
                 config._log("god", f"Auto-allowed {wid} ({project}): {desc}")
@@ -220,13 +234,13 @@ def process_signals(focused_wids: set[str] | None = None,
                             code_block = f"```\n{perm_context}\n\n{bash_cmd[:2000]}\n```"
                         else:
                             code_block = f"```\n{bash_cmd[:2000]}\n```"
-                        msg = f"🔧{tag} Claude Code (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
+                        msg = f"🔧{tag} {dn} (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
                         kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                         config._save_last_msg(wid, msg)
                         config._save_keyboard_msg(wid, kb_id)
                     else:
                         title = perm_header or "needs permission"
-                        header_str = f"🔧{tag} Claude Code (`{project}`) {title}:\n\n{context_str}"
+                        header_str = f"🔧{tag} {dn} (`{project}`) {title}:\n\n{context_str}"
                         if perm_body:
                             kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
                         else:
@@ -273,7 +287,7 @@ def process_signals(focused_wids: set[str] | None = None,
                      ("\u274c Deny", f"perm_{wid}_{deny_at}")],
                 ])
                 free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
-                msg = f"🗺{tag} Claude Code (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
+                msg = f"🗺{tag} {dn} (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
                 kb_id = telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
                 config._save_keyboard_msg(wid, kb_id)
@@ -289,7 +303,7 @@ def process_signals(focused_wids: set[str] | None = None,
                 first_opts = len(questions[0].get("options", []))
                 remaining = questions[1:] if len(questions) > 1 else None
                 if not is_local:
-                    msg = _format_question_msg(tag, project, questions[0])
+                    msg = _format_question_msg(tag, project, questions[0], cli=cli)
                     opts = questions[0].get("options", [])
                     q_buttons = [(opt.get("label", "?")[:20], f"q_{wid}_{i}")
                                  for i, opt in enumerate(opts, 1)]
@@ -304,7 +318,7 @@ def process_signals(focused_wids: set[str] | None = None,
                                          remaining_qs=remaining,
                                          project=project)
             elif not is_local:
-                msg = f"❓{tag} Claude Code (`{project}`) asks:\n\n(check terminal)"
+                msg = f"❓{tag} {dn} (`{project}`) asks:\n\n(check terminal)"
                 telegram.tg_send(msg, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
 
@@ -313,7 +327,7 @@ def process_signals(focused_wids: set[str] | None = None,
         except OSError:
             pass
         if wid:
-            last_wid = wid.lstrip("w")
+            last_wid = wid
         local_tag = " [local]" if is_local else ""
         config._log("signal", f"{event} for {wid} ({project}){local_tag}")
 

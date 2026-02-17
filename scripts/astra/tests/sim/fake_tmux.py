@@ -1,7 +1,7 @@
 """Fake tmux layer for simulation tests.
 
-I/O functions (scan_claude_sessions, _capture_pane, etc.) return
-from pre-configured state.  Pure functions (_join_wrapped_lines,
+I/O functions (scan_claude_sessions, scan_cli_sessions, _capture_pane, etc.)
+return from pre-configured state.  Pure functions (_join_wrapped_lines,
 format_sessions_message, _sessions_keyboard) delegate to the real
 implementations.
 
@@ -28,6 +28,8 @@ class PaneState:
     width: int = 120
     cursor_x: int = 0
     command: str = "node"  # pane_command (default to something Claude-like)
+    cli_profile: str = "claude"  # "claude" or "gemini"
+    start_command: str = ""  # full start command (for Gemini detection)
 
 
 class FakeTmux:
@@ -40,7 +42,34 @@ class FakeTmux:
     # --- I/O fakes ---
 
     def scan_claude_sessions(self):
-        return {idx: (ps.pane_target, ps.project) for idx, ps in self.panes.items()}
+        return self.scan_cli_sessions()
+
+    def scan_cli_sessions(self):
+        """Return {wid: SessionInfo} mirroring the real scan_cli_sessions."""
+        # Group by real window index (strip _N suffix for multi-pane keys)
+        by_window: dict[str, list[PaneState]] = {}
+        for key, ps in self.panes.items():
+            win_idx = key.split("_")[0]
+            by_window.setdefault(win_idx, []).append(ps)
+
+        sessions = {}
+        for win_idx, panes in by_window.items():
+            if len(panes) == 1:
+                ps = panes[0]
+                info = _real_tmux.SessionInfo(
+                    pane_target=ps.pane_target, project=ps.project,
+                    cli=ps.cli_profile, win_idx=win_idx, pane_suffix="",
+                )
+                sessions[info.wid] = info
+            else:
+                for i, ps in enumerate(panes):
+                    suffix = chr(ord("a") + i)
+                    info = _real_tmux.SessionInfo(
+                        pane_target=ps.pane_target, project=ps.project,
+                        cli=ps.cli_profile, win_idx=win_idx, pane_suffix=suffix,
+                    )
+                    sessions[info.wid] = info
+        return sessions
 
     def _capture_pane(self, pane, num_lines=20):
         for ps in self.panes.values():
@@ -96,19 +125,57 @@ class FakeTmux:
     # --- Test helpers ---
 
     def add_session(self, win_idx, pane_target, project, content="", width=120,
-                    idle=False, ansi_content=""):
-        """Register a simulated Claude session.
+                    idle=False, ansi_content="", cli="claude"):
+        """Register a simulated CLI session.
 
-        If *idle* is True, sets content to show an idle prompt (``❯``).
+        If *idle* is True, sets content to show an idle prompt (``❯`` for Claude,
+        ``>`` for Gemini).
         """
         if idle and not content:
-            content = "❯ "
+            if cli == "gemini":
+                content = "> "
+            else:
+                content = "❯ "
         self.panes[win_idx] = PaneState(
             pane_target=pane_target,
             project=project,
             content=content,
             ansi_content=ansi_content,
             width=width,
+            cli_profile=cli,
+            start_command=f"/usr/bin/{cli}" if not content else "",
+        )
+
+    def add_multi_pane_session(self, win_idx, pane_target, project, cli="claude",
+                               content="", idle=False, ansi_content="", width=120):
+        """Add a pane to a window that already has sessions.
+
+        Uses a synthetic unique key (win_idx + suffix) since FakeTmux stores
+        panes by key. The scan_cli_sessions() method groups by win_idx.
+        """
+        # Find next available sub-key for this window
+        existing = [k for k in self.panes if k.startswith(win_idx + "_")]
+        if win_idx not in self.panes and not existing:
+            # First pane — store with bare win_idx, but we need to re-key
+            # for multi-pane to work. Move existing pane to win_idx_0.
+            self.add_session(win_idx + "_0", pane_target, project, content, width,
+                            idle, ansi_content, cli)
+            return
+        suffix = len(existing) + (1 if win_idx in self.panes else 0)
+        key = f"{win_idx}_{suffix}"
+        if idle and not content:
+            if cli == "gemini":
+                content = "> "
+            else:
+                content = "❯ "
+        self.panes[key] = PaneState(
+            pane_target=pane_target,
+            project=project,
+            content=content,
+            ansi_content=ansi_content,
+            width=width,
+            cli_profile=cli,
+            start_command=f"/usr/bin/{cli}",
         )
 
     def set_pane_content(self, win_idx, content):

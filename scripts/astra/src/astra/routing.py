@@ -1,4 +1,6 @@
 """Pane routing and option selection."""
+from __future__ import annotations
+
 import re
 import shlex
 import subprocess
@@ -46,8 +48,9 @@ def _has_colored_spinner(ansi_raw: str) -> bool:
     return False
 
 
-def _is_ui_chrome(s: str) -> bool:
-    """Check if a stripped line is Claude Code UI chrome (not real content)."""
+def _is_ui_chrome(s: str, profile=None) -> bool:
+    """Check if a stripped line is CLI UI chrome (not real content).
+    profile: CLIProfile for CLI-specific busy indicator (defaults to Claude)."""
     if not s:
         return True
     if re.match(r'^[─━]{3,}$', s):
@@ -73,8 +76,9 @@ def _is_ui_chrome(s: str) -> bool:
         return True
     if re.match(r'^\+\d+ more lines \(', s):
         return True
-    # Status bar below prompt: "1 file +2 -2 · esc to interrupt" (may be truncated to "esc to interr…")
-    if "esc to interr" in s:
+    # Status bar below prompt (CLI-specific busy indicator)
+    busy_ind = (profile.busy_indicator if profile else "esc to interr")
+    if busy_ind and busy_ind in s:
         return True
     if re.match(r'^\d+ files? [+-]', s):
         return True
@@ -86,37 +90,42 @@ def _is_ui_chrome(s: str) -> bool:
     return False
 
 
-def _pane_idle_state(pane: str) -> tuple[bool, str]:
-    """Check if a pane is idle (has ❯ prompt). Returns (is_idle, typed_text).
+def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
+    """Check if a pane is idle (has prompt). Returns (is_idle, typed_text).
 
     Finds the last non-chrome line (skipping separators, hints, spinners)
-    and checks if it's a ❯ prompt. Old ❯ lines from submitted commands
+    and checks if it's a prompt. Old prompt lines from submitted commands
     in earlier lines are correctly ignored.
-    typed_text is any text on the same line after ❯ (locally typed input).
+    typed_text is any text on the same line after the prompt char (locally typed input).
     Uses cursor position to exclude grayed-out auto-suggestions.
-    Also checks for "esc to interr" below the prompt — if present,
-    Claude is actively running and the pane is NOT idle.
+    Also checks for busy indicator below the prompt — if present,
+    CLI is actively running and the pane is NOT idle.
     Checks for colored (non-grey) spinner symbols via ANSI capture
     as an additional busy signal.
     """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_re = profile.prompt_re
+    busy_ind = profile.busy_indicator
     try:
         raw = tmux._capture_pane(pane, 15)
     except Exception:
         return False, ""
-    saw_esc_to_interrupt = False
+    saw_busy_indicator = False
     saw_potential_spinner = False
     for line in reversed(raw.splitlines()):
         s = line.strip()
-        if "esc to interr" in s:
-            saw_esc_to_interrupt = True
+        if busy_ind and busy_ind in s:
+            saw_busy_indicator = True
         # Track potential active spinner (non-word symbol + word, no timing)
         if re.match(r'^[^\w\s●❯─━⏵⏸] \w', s) and not re.search(r'\d+[hms]', s):
             saw_potential_spinner = True
-        if _is_ui_chrome(s):
+        if _is_ui_chrome(s, profile=profile):
             continue
-        m = re.match(r'^(\s*❯\s*)(.*)', line)
+        m = re.match(rf'^(\s*{re.escape(profile.prompt_char)}\s*)(.*)', line)
         if m:
-            if saw_esc_to_interrupt:
+            if saw_busy_indicator:
                 return False, ""
             # Colored spinner below prompt = active thinking/working
             if saw_potential_spinner:
@@ -164,8 +173,8 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
     navigation + Enter. Otherwise sends raw text.
     Returns a confirmation message for Telegram.
     """
-    wid = f"w{win_idx}"
-    label = state._wid_label(win_idx)
+    wid = f"w{win_idx}" if not win_idx.startswith("w") else win_idx
+    label = state._wid_label(wid)
     prompt = state.load_active_prompt(wid)
 
     if prompt:

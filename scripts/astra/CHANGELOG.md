@@ -5,6 +5,33 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.15.1
+
+- Always show "Active sessions" header (not "Active Claude sessions")
+- Show CLI type (Claude/Gemini) per session when multiple CLIs present
+- Fix multi-pane name inheritance — `w1a`/`w1b` no longer inherit bare window-level names
+- `scan_claude_sessions()` returns `SessionInfo` objects preserving CLI metadata
+- Migrate session dict keys to full wid format (`w4`, `w1a`) throughout codebase
+
+## 0.15.0
+
+- **Multi-CLI support** — add Gemini CLI alongside Claude Code with full hook/routing parity
+- Add `CLIProfile` registry (`profiles.py`) with UI patterns, event/tool name mappings per CLI
+- Add `SessionInfo` dataclass and `scan_cli_sessions()` for type-aware session scanning
+- Add `resolve_session_id()` with bare `w4` → `w4a` fallback for multi-pane windows
+- Update all wid regexes to accept optional letter suffix (`w4a`, `w4b`) for multi-pane routing
+- Hook normalization: map Gemini events (`AfterAgent`→stop, `BeforeTool`→pre\_tool) and tools (`run_shell_command`→shell) to internal names
+- All content/routing parsing functions accept optional `profile` parameter for CLI-specific patterns
+- Dynamic display names in Telegram messages (shows "Gemini" instead of "Claude Code" for Gemini signals)
+- `/new` command accepts optional CLI type: `/new gemini [dir]`
+- `/restart` uses profile-specific restart command (`gemini -r latest` for Gemini)
+- Add `gemini_settings.json` hook config and `install.zsh` Gemini setup
+- Detect Gemini via `#{pane_title}` (shows `◇  Ready`) since `pane_start_command` is empty
+- Migrate session dict keys from bare indices (`"4"`) to full wid format (`"w4"`, `"w1a"`) throughout codebase
+- Gemini detection via `pane_title` fallback (pane\_start\_command is empty; uses `◇` diamond or "Gemini" in title)
+- Gemini UI patterns discovered from live session: `✦` response bullet, `esc to cancel` busy indicator, braille spinner, box-drawing tool calls
+- 39 new tests for profiles, session IDs, hook normalization, display names, and multi-CLI simulation
+
 ## 0.14.2
 
 - **Detect active spinner as busy signal** — capture pane with ANSI codes (`tmux capture-pane -e`) and detect non-grey colored spinner symbols (✢, ✶, ⠐, etc.) as a definitive busy indicator; fixes false idle detection when Claude is thinking but `esc to interrupt` hasn't appeared yet

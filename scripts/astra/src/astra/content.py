@@ -1,15 +1,21 @@
 """Noise filtering, response extraction, permission parsing."""
+from __future__ import annotations
+
 import difflib
 import re
 
 from astra import tmux
 
 
-def _extract_pane_permission(pane: str) -> tuple[str, str, list[str], str]:
+def _extract_pane_permission(pane: str, profile=None) -> tuple[str, str, list[str], str]:
     """Extract content and options from a permission dialog in a tmux pane.
     Returns (header, content between last dot and options, list of options, context).
-    Context is Claude's response text (● bullet that isn't a tool call) above the tool bullet.
-    Uses progressive capture (30→80→200 lines) to ensure plan content is fully captured."""
+    Context is CLI response text (● bullet that isn't a tool call) above the tool bullet.
+    Uses progressive capture (30→80→200 lines) to ensure plan content is fully captured.
+    profile: CLIProfile to use for pattern matching (defaults to Claude)."""
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
     # Progressive capture: try increasing sizes
     lines = []
     options = []
@@ -106,9 +112,14 @@ def _extract_pane_permission(pane: str) -> tuple[str, str, list[str], str]:
     return header, body, options, context
 
 
-def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
+def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str]:
     """Filter common UI noise from captured pane content.
-    If keep_status=True, preserves thinking/spinner status lines."""
+    If keep_status=True, preserves thinking/spinner status lines.
+    profile: CLIProfile to use for pattern matching (defaults to Claude)."""
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_char = profile.prompt_char
     lines = raw.splitlines()
     while lines and not lines[-1].strip():
         lines.pop()
@@ -117,14 +128,14 @@ def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
     for line in lines:
         s = line.strip()
         # Prompt lines: keep in status mode (context), strip in response mode
-        if s.startswith("❯"):
+        if s.startswith(prompt_char):
             if keep_status:
                 in_prompt = False
                 filtered.append(line.rstrip())
             else:
                 in_prompt = True
             continue
-        # Skip wrapped continuations of a filtered ❯ prompt line
+        # Skip wrapped continuations of a filtered prompt line
         if in_prompt:
             indent = len(line) - len(line.lstrip())
             if indent >= 2 and s and not re.match(r'[●•─━❯✻⏵⏸>*\-\d]', s):
@@ -157,82 +168,109 @@ def _filter_noise(raw: str, keep_status: bool = False) -> list[str]:
     return filtered
 
 
-def _has_response_start(raw: str) -> bool:
-    """Check if captured pane content contains the ● text bullet that starts a response."""
+def _has_response_start(raw: str, profile=None) -> bool:
+    """Check if captured pane content contains the response bullet that starts a response."""
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_char = profile.prompt_char
+    bullet = profile.response_bullet
+    tool_re = profile.tool_header_re
+    if not bullet:
+        return False  # Gemini TBD — no known bullet
     lines = raw.splitlines()
     end = len(lines)
     for i in range(len(lines) - 1, -1, -1):
-        if lines[i].strip().startswith("❯"):
+        if lines[i].strip().startswith(prompt_char):
             end = i
             break
     for i in range(end - 1, -1, -1):
         s = lines[i].strip()
-        if s.startswith("●") and not re.match(r'^● \w+\(', s):
+        if s.startswith(bullet) and not re.match(tool_re, s):
             return True
     return False
 
 
-def _detect_interrupted(raw: str) -> bool:
-    """Check if pane content shows Claude was interrupted (Esc pressed mid-response).
+def _detect_interrupted(raw: str, profile=None) -> bool:
+    """Check if pane content shows CLI was interrupted (Esc pressed mid-response).
 
-    Looks for the '⎿  Interrupted ·' pattern between the last response and the ❯ prompt.
+    Looks for the interrupted pattern between the last response and the prompt.
     """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_char = profile.prompt_char
+    pattern = profile.interrupted_pattern
+    if not pattern:
+        return False
     lines = raw.splitlines()
-    # Walk backward from end, find last ❯
+    # Walk backward from end, find last prompt
     end = -1
     for i in range(len(lines) - 1, -1, -1):
         s = lines[i].strip()
-        if s.startswith("❯"):
+        if s.startswith(prompt_char):
             end = i
             break
     if end < 0:
         return False
-    # Check the few lines just above ❯ for the interrupted marker
+    # Check the few lines just above prompt for the interrupted marker
     for i in range(end - 1, max(end - 6, -1), -1):
-        if "Interrupted" in lines[i] and "·" in lines[i]:
+        if pattern in lines[i] and "·" in lines[i]:
             return True
     return False
 
 
-def _detect_compacting(raw: str) -> bool:
-    """Check if pane content shows Claude is auto-compacting context.
+def _detect_compacting(raw: str, profile=None) -> bool:
+    """Check if pane content shows CLI is auto-compacting context.
 
-    Looks for 'Compacting' (present participle) in status/spinner lines,
-    which appears during compaction but not after ('compacted').
+    Looks for compacting pattern in status/spinner lines.
     """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    pattern = profile.compacting_pattern
+    if not pattern or pattern == r"$^":
+        return False
     for line in raw.splitlines():
-        if re.search(r'[Cc]ompacting', line):
+        if re.search(pattern, line):
             return True
     return False
 
 
-def clean_pane_content(raw: str, event: str, pane_width: int = 0) -> str:
+def clean_pane_content(raw: str, event: str, pane_width: int = 0, profile=None) -> str:
     """Clean captured tmux pane content."""
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_char = profile.prompt_char
+    bullet = profile.response_bullet
+    tool_re = profile.tool_header_re
     lines = raw.splitlines()
     if event == "stop":
         end = len(lines)
         for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip().startswith("❯"):
+            if lines[i].strip().startswith(prompt_char):
                 end = i
                 break
         start = -1
-        for i in range(end - 1, -1, -1):
-            s = lines[i].strip()
-            if s.startswith("●") and not re.match(r'^● \w+\(', s):
-                start = i
-                break
+        if bullet:
+            for i in range(end - 1, -1, -1):
+                s = lines[i].strip()
+                if s.startswith(bullet) and not re.match(tool_re, s):
+                    start = i
+                    break
         if start < 0:
             return ""  # No response boundary found
         lines = lines[start:end]
-    filtered = _filter_noise("\n".join(lines))
+    filtered = _filter_noise("\n".join(lines), profile=profile)
     if pane_width:
         filtered = tmux._join_wrapped_lines(filtered, pane_width)
     return "\n".join(filtered).strip()
 
 
-def clean_pane_status(raw: str, pane_width: int = 0) -> str:
+def clean_pane_status(raw: str, pane_width: int = 0, profile=None) -> str:
     """Clean captured pane content for /status display."""
-    filtered = _filter_noise(raw, keep_status=True)
+    filtered = _filter_noise(raw, keep_status=True, profile=profile)
     if pane_width:
         filtered = tmux._join_wrapped_lines(filtered, pane_width)
     return "\n".join(filtered).strip()
