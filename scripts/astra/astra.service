@@ -1,5 +1,5 @@
 [Unit]
-Description=Astra Telegram bridge for Claude Code
+Description=Astra Telegram bridge for Claude Code & Gemini CLI
 After=network-online.target
 Wants=network-online.target
 # Auto-reload uses os.execv (same PID, not a restart).
