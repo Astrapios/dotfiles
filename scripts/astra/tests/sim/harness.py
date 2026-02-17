@@ -58,9 +58,10 @@ class SimulationHarness:
 
         # --- Patch tmux I/O on the tmux module ---
         tmux_methods = [
-            "scan_claude_sessions", "_capture_pane", "_get_pane_width",
-            "_get_cursor_x", "_get_pane_command", "_get_locally_viewed_windows",
-            "_join_wrapped_lines", "format_sessions_message", "_sessions_keyboard",
+            "scan_claude_sessions", "_capture_pane", "_capture_pane_ansi",
+            "_get_pane_width", "_get_cursor_x", "_get_pane_command",
+            "_get_locally_viewed_windows", "_join_wrapped_lines",
+            "format_sessions_message", "_sessions_keyboard",
         ]
         import astra.tmux as tmux_mod
         for name in tmux_methods:

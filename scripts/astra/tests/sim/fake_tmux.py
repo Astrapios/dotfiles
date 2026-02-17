@@ -24,6 +24,7 @@ class PaneState:
     pane_target: str  # e.g. "%20"
     project: str  # e.g. "myproject"
     content: str = ""  # raw pane content (as returned by _capture_pane)
+    ansi_content: str = ""  # ANSI-coded content (for _capture_pane_ansi)
     width: int = 120
     cursor_x: int = 0
     command: str = "node"  # pane_command (default to something Claude-like)
@@ -45,6 +46,14 @@ class FakeTmux:
         for ps in self.panes.values():
             if ps.pane_target == pane:
                 lines = ps.content.split("\n")
+                return "\n".join(lines[-num_lines:])
+        return ""
+
+    def _capture_pane_ansi(self, pane, num_lines=20):
+        for ps in self.panes.values():
+            if ps.pane_target == pane:
+                content = ps.ansi_content or ps.content
+                lines = content.split("\n")
                 return "\n".join(lines[-num_lines:])
         return ""
 
@@ -86,7 +95,8 @@ class FakeTmux:
 
     # --- Test helpers ---
 
-    def add_session(self, win_idx, pane_target, project, content="", width=120, idle=False):
+    def add_session(self, win_idx, pane_target, project, content="", width=120,
+                    idle=False, ansi_content=""):
         """Register a simulated Claude session.
 
         If *idle* is True, sets content to show an idle prompt (``❯``).
@@ -97,6 +107,7 @@ class FakeTmux:
             pane_target=pane_target,
             project=project,
             content=content,
+            ansi_content=ansi_content,
             width=width,
         )
 
@@ -108,6 +119,10 @@ class FakeTmux:
         """Set pane content to show an idle ``❯`` prompt."""
         self.panes[win_idx].content = "❯ "
         self.panes[win_idx].cursor_x = 2
+
+    def set_pane_ansi_content(self, win_idx, ansi_content):
+        """Update the ANSI-coded content of a pane."""
+        self.panes[win_idx].ansi_content = ansi_content
 
     def set_locally_viewed(self, *win_indices):
         """Set which windows are being locally viewed."""

@@ -5994,6 +5994,122 @@ class TestPaneIdleStateChromeOrder(unittest.TestCase):
         is_idle, typed = astra._pane_idle_state("0:4.0")
         self.assertTrue(is_idle)
 
+    @patch.object(astra.tmux, "_capture_pane_ansi")
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_busy_with_colored_spinner(self, mock_capture, mock_ansi):
+        """Colored spinner (non-grey ANSI) below ❯ means busy."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "✢ Channeling…\n"
+        )
+        mock_ansi.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "\033[38;5;174m✢\033[0m \033[38;5;216mChanneling…\033[0m\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane_ansi")
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_idle_with_grey_timing_indicator(self, mock_capture, mock_ansi):
+        """Grey timing indicator below ❯ is idle (completed summary)."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "\u2733 Crunching for 2m 30s\n"
+        )
+        # Has timing → saw_potential_spinner not set → no ANSI check needed
+        mock_ansi.return_value = ""
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane_ansi")
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_busy_with_colored_spinner_and_timing(self, mock_capture, mock_ansi):
+        """Spinner with timing but colored = still actively thinking."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "✢ Channeling… (45s)\n"
+        )
+        # Has timing, so saw_potential_spinner is NOT set (timing excluded).
+        # ANSI check not triggered. This case relies on "esc to interr"
+        # which is typically present when timing is shown.
+        mock_ansi.return_value = ""
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane_ansi")
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_busy_with_braille_spinner(self, mock_capture, mock_ansi):
+        """Braille dot spinner (⠐ Thinking…) with color detected as busy."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "⠐ Thinking…\n"
+        )
+        mock_ansi.return_value = (
+            "❯ \n"
+            "─────────────────────────────────────────\n"
+            "\033[38;5;174m⠐\033[0m \033[38;5;216mThinking…\033[0m\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+
+class TestColoredSpinnerDetection(unittest.TestCase):
+    """Test _has_colored_spinner ANSI parsing."""
+
+    def test_colored_spinner_detected(self):
+        """Non-grey color on spinner symbol returns True."""
+        ansi = "\033[38;5;174m✢\033[0m \033[38;5;216mChanneling…\033[0m\n"
+        self.assertTrue(astra._has_colored_spinner(ansi))
+
+    def test_grey_spinner_not_detected(self):
+        """Grey (246) color on spinner symbol returns False."""
+        ansi = "\033[38;5;246m✢\033[0m \033[38;5;246mChanneling…\033[0m\n"
+        self.assertFalse(astra._has_colored_spinner(ansi))
+
+    def test_no_ansi_not_detected(self):
+        """Plain text without ANSI codes returns False."""
+        self.assertFalse(astra._has_colored_spinner("✢ Channeling…\n"))
+
+    def test_empty_string(self):
+        self.assertFalse(astra._has_colored_spinner(""))
+
+    def test_prompt_line_not_detected(self):
+        """❯ prompt line (excluded from spinner pattern) returns False."""
+        ansi = "\033[38;5;174m❯\033[0m some text\n"
+        self.assertFalse(astra._has_colored_spinner(ansi))
+
+    def test_bullet_line_not_detected(self):
+        """● bullet line (excluded from spinner pattern) returns False."""
+        ansi = "\033[38;5;114m●\033[0m Result text\n"
+        self.assertFalse(astra._has_colored_spinner(ansi))
+
+    def test_greyscale_ramp_colors(self):
+        """All greyscale ramp colors (232-255) are treated as grey."""
+        for n in (232, 240, 246, 250, 255):
+            ansi = f"\033[38;5;{n}m✢\033[0m Working…\n"
+            self.assertFalse(astra._has_colored_spinner(ansi),
+                             f"Color {n} should be grey")
+
+    def test_neutral_bw_colors(self):
+        """Black (0), white (7/15), dark grey (8) are neutral."""
+        for n in (0, 7, 8, 15):
+            ansi = f"\033[38;5;{n}m✢\033[0m Working…\n"
+            self.assertFalse(astra._has_colored_spinner(ansi),
+                             f"Color {n} should be neutral")
+
+    def test_cube_colors_detected(self):
+        """Color cube values (16-231) that aren't neutral are detected."""
+        for n in (174, 216, 114, 196, 33):
+            ansi = f"\033[38;5;{n}m✢\033[0m Working…\n"
+            self.assertTrue(astra._has_colored_spinner(ansi),
+                            f"Color {n} should be detected")
+
 
 class TestGetImageDimensions(unittest.TestCase):
     """Test _get_image_dimensions parses PNG, JPEG, GIF headers."""

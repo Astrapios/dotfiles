@@ -19,6 +19,33 @@ def _select_option(pane: str, n: int):
     subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
 
 
+_ANSI_STRIP_RE = re.compile(r'\033\[[0-9;]*m')
+_ANSI_256_COLOR_RE = re.compile(r'\033\[38;5;(\d+)m')
+
+
+def _has_colored_spinner(ansi_raw: str) -> bool:
+    """Detect active Claude Code spinner via non-grey ANSI color codes.
+
+    Active spinners (✢ Channeling…, ✶ Working…, etc.) use colored
+    escape codes (e.g. 38;5;174 salmon), while completed summaries and
+    chrome use grey (232-255) or dim.
+    """
+    for line in ansi_raw.splitlines():
+        stripped = _ANSI_STRIP_RE.sub('', line).strip()
+        if not stripped:
+            continue
+        # Match spinner pattern: non-word symbol + space + word
+        if not re.match(r'^[^\w\s●❯─━⏵⏸] \w', stripped):
+            continue
+        # Check for non-grey 256-color codes on this line
+        for m in _ANSI_256_COLOR_RE.finditer(line):
+            n = int(m.group(1))
+            # 232-255 greyscale ramp, 0/7/8/15 neutral black/white/grey
+            if not (232 <= n <= 255 or n in (0, 7, 8, 15)):
+                return True
+    return False
+
+
 def _is_ui_chrome(s: str) -> bool:
     """Check if a stripped line is Claude Code UI chrome (not real content)."""
     if not s:
@@ -69,22 +96,36 @@ def _pane_idle_state(pane: str) -> tuple[bool, str]:
     Uses cursor position to exclude grayed-out auto-suggestions.
     Also checks for "esc to interr" below the prompt — if present,
     Claude is actively running and the pane is NOT idle.
+    Checks for colored (non-grey) spinner symbols via ANSI capture
+    as an additional busy signal.
     """
     try:
         raw = tmux._capture_pane(pane, 15)
     except Exception:
         return False, ""
     saw_esc_to_interrupt = False
+    saw_potential_spinner = False
     for line in reversed(raw.splitlines()):
         s = line.strip()
         if "esc to interr" in s:
             saw_esc_to_interrupt = True
+        # Track potential active spinner (non-word symbol + word, no timing)
+        if re.match(r'^[^\w\s●❯─━⏵⏸] \w', s) and not re.search(r'\d+[hms]', s):
+            saw_potential_spinner = True
         if _is_ui_chrome(s):
             continue
         m = re.match(r'^(\s*❯\s*)(.*)', line)
         if m:
             if saw_esc_to_interrupt:
                 return False, ""
+            # Colored spinner below prompt = active thinking/working
+            if saw_potential_spinner:
+                try:
+                    ansi_raw = tmux._capture_pane_ansi(pane, 15)
+                    if _has_colored_spinner(ansi_raw):
+                        return False, ""
+                except Exception:
+                    pass
             # Use cursor position to exclude auto-suggestions
             cursor_x = tmux._get_cursor_x(pane)
             if cursor_x is not None:

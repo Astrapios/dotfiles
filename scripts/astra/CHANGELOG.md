@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.14.2
+
+- **Detect active spinner as busy signal** — capture pane with ANSI codes (`tmux capture-pane -e`) and detect non-grey colored spinner symbols (✢, ✶, ⠐, etc.) as a definitive busy indicator; fixes false idle detection when Claude is thinking but `esc to interrupt` hasn't appeared yet
+
 ## 0.14.1
 
 - **Fix idle detection on narrow panes** — status line `esc to interr…` (truncated by tmux) was not recognized as busy, causing sessions to show as idle while Claude was actively running
