@@ -603,11 +603,18 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                     os.remove(os.path.join(config.SIGNAL_DIR, suffix))
                 except OSError:
                     pass
-            # Relaunch with claude -c (continue last conversation)
+            # Re-source shell config so PATH is fresh, then relaunch
+            shell = tmux._get_pane_command(pane) or ""
+            if "zsh" in shell:
+                source_cmd = "source ~/.zshrc && "
+            elif "bash" in shell:
+                source_cmd = "source ~/.bashrc && "
+            else:
+                source_cmd = ""
             cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
             subprocess.run(
                 ["bash", "-c",
-                 f"tmux send-keys -t {p} -l {shlex.quote(cd_cmd + 'claude -c')} && "
+                 f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + 'claude -c')} && "
                  f"sleep 0.1 && tmux send-keys -t {p} Enter"],
                 timeout=10,
             )

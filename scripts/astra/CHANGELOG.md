@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.13.1
+
+- **Re-source shell config on `/restart`** — runs `source ~/.zshrc` (or `~/.bashrc`) before relaunching Claude, ensuring PATH and env vars are fresh
+
 ## 0.13.0
 
 - **Local view suppression** — auto-detect when a tmux client is viewing a Claude session and skip redundant Telegram notifications for that session

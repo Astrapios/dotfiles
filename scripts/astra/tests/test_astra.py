@@ -6826,7 +6826,8 @@ class TestRestartCommand(unittest.TestCase):
     @patch("subprocess.run")
     @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
-    def test_restart_success(self, mock_cwd, mock_scan, mock_run, mock_send):
+    @patch.object(astra.tmux, "_get_pane_command", return_value="zsh")
+    def test_restart_success(self, mock_cmd, mock_cwd, mock_scan, mock_run, mock_send):
         """Restart kills, clears state, relaunches, reports success."""
         # First scan: session gone (killed). Second scan: session back (restarted).
         mock_scan.side_effect = [
@@ -6851,9 +6852,10 @@ class TestRestartCommand(unittest.TestCase):
         first_run = mock_run.call_args_list[0]
         cmd_str = first_run[0][0][2]
         self.assertEqual(cmd_str.count("C-c"), 3)
-        # Verify claude -c was sent (second subprocess.run call)
+        # Verify claude -c was sent with shell re-source (second subprocess.run call)
         second_run = mock_run.call_args_list[1]
         cmd_str2 = second_run[0][0][2]
+        self.assertIn("source ~/.zshrc", cmd_str2)
         self.assertIn("claude -c", cmd_str2)
         self.assertIn("/home/user/myproj", cmd_str2)
         # State files should be cleaned
@@ -6877,7 +6879,8 @@ class TestRestartCommand(unittest.TestCase):
     @patch("subprocess.run")
     @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.tmux, "_get_pane_cwd", return_value="/home/user/myproj")
-    def test_restart_relaunch_fails(self, mock_cwd, mock_scan, mock_run, mock_send):
+    @patch.object(astra.tmux, "_get_pane_command", return_value="zsh")
+    def test_restart_relaunch_fails(self, mock_cmd, mock_cwd, mock_scan, mock_run, mock_send):
         """Restart warns if session doesn't come back after relaunch."""
         mock_scan.side_effect = [
             {"5": ("0:5.0", "other")},  # after kill: w4 gone
