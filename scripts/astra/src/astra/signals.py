@@ -97,7 +97,7 @@ def process_signals(focused_wids: set[str] | None = None,
                     wid = resolved
 
         dn = _display_name_for(cli)
-        tag = f" {state._wid_label(wid, sessions)}" if wid else ""
+        tag = f" {state._wid_label(wid)}" if wid else ""
         # locally_viewed contains bare window indices; extract from wid
         win_idx = re.match(r'^w?(\d+)', wid).group(1) if wid else ""
         is_local = bool(locally_viewed and win_idx in locally_viewed)
@@ -204,7 +204,7 @@ def process_signals(focused_wids: set[str] | None = None,
                         ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
                     ]])
                     telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(wid, sessions)}:\n{preview}",
+                        f"💾 {len(queued)} saved message(s) for {state._wid_label(wid)}:\n{preview}",
                         reply_markup=saved_kb,
                         silent=state._is_silent(_CAT_CONFIRM),
                     )

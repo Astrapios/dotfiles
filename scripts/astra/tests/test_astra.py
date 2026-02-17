@@ -7,7 +7,7 @@ import struct
 import sys
 import textwrap
 import unittest
-from unittest.mock import ANY, MagicMock, patch, call
+from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import astra
@@ -1709,7 +1709,7 @@ class TestHandleCommand(unittest.TestCase):
             "w4a hello", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -1736,7 +1736,7 @@ class TestHandleCommand(unittest.TestCase):
         action, _, last = astra._handle_command(
             "hello", self.sessions, "w5a")
         self.assertEqual(last, "w5a")
-        mock_route.assert_called_once_with("0:5.0", "w5a", "hello", ANY)
+        mock_route.assert_called_once_with("0:5.0", "w5a", "hello")
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_no_sessions(self, mock_send):
@@ -2188,7 +2188,7 @@ class TestHandleCallback(unittest.TestCase):
     def test_question_select(self, mock_route, mock_send, mock_answer, mock_remove):
         callback = {"id": "cb1", "data": "q_w4a_1", "message_id": 42}
         sessions, last, action = astra._handle_callback(callback, self.sessions, None)
-        mock_route.assert_called_once_with("0:4.0", "w4a", "1", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "1")
         self.assertEqual(last, "w4a")
         self.assertIsNone(action)
 
@@ -3559,7 +3559,7 @@ class TestNamePrefixRouting(unittest.TestCase):
             "auth fix the bug", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "fix the bug", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "fix the bug")
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unknown_word_falls_through(self, mock_send):
@@ -3576,7 +3576,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         action, _, last = astra._handle_command(
             "w4a hello", self.sessions, None)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -3585,7 +3585,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         action, _, last = astra._handle_command(
             "Auth fix it", self.sessions, None)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "fix it", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "fix it")
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -3595,7 +3595,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         action, _, _ = astra._handle_command(
             "hello", sessions, None)
         # Should route to single session as no-prefix fallback
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
 
 
 class TestQueuedMessageState(unittest.TestCase):
@@ -4038,7 +4038,7 @@ class TestSavedCallbacks(unittest.TestCase):
         astra._save_queued_msg("w4a", "hello")
         callback = {"id": "cb1", "data": "saved_send_w4a", "message_id": 42}
         sessions, last, action = astra._handle_callback(callback, self.sessions, None)
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
         self.assertEqual(last, "w4a")
         # Queue should be empty now
         self.assertEqual(astra._load_queued_msgs("w4a"), [])
@@ -4053,7 +4053,7 @@ class TestSavedCallbacks(unittest.TestCase):
         callback = {"id": "cb1", "data": "saved_send_w4a", "message_id": 42}
         astra._handle_callback(callback, self.sessions, None)
         # Should combine with newlines
-        mock_route.assert_called_once_with("0:4.0", "w4a", "a\nb", ANY)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "a\nb")
 
     @patch.object(astra.telegram, "_remove_inline_keyboard")
     @patch.object(astra.telegram, "_answer_callback_query")

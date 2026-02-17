@@ -6,6 +6,10 @@ import time
 
 from astra import config
 
+# Current sessions dict, set by entry points (listener tick, command handler).
+# Used by _wid_label() to display shortened wids without threading sessions everywhere.
+_current_sessions: dict = {}
+
 
 def write_signal(event: str, data: dict, **extra):
     """Write a signal file for the listen loop to process."""
@@ -291,19 +295,19 @@ def _resolve_name(target: str, sessions: dict) -> str | None:
     return None
 
 
-def _wid_label(wid: str, sessions: dict | None = None) -> str:
+def _wid_label(wid: str) -> str:
     """Format a wid with its name for display.
     Accepts full wid ('w4a') or bare index ('4').
-    When *sessions* is provided, strips suffix for solo panes ('w3a' → 'w3').
-    Returns '`w3 [auth]`' or just '`w3`' if unnamed."""
+    Uses ``_current_sessions`` (set by entry points) to strip suffix for solo
+    panes ('w3a' → 'w3').  Returns '`w3 [auth]`' or just '`w3`' if unnamed."""
     if not wid.startswith("w"):
         wid = f"w{wid}"
     names = _load_session_names()
     name = names.get(wid, "")
     display = wid
-    if sessions:
+    if _current_sessions:
         from astra import tmux
-        display = tmux._display_wid(wid, sessions)
+        display = tmux._display_wid(wid, _current_sessions)
     if not name and display != wid:
         name = names.get(display, "")
     if name:
