@@ -1,7 +1,4 @@
 {
-  "env": {
-    "CLAUDE_ASTRA": "1"
-  },
   "hooks": {
     "Notification": [
       {

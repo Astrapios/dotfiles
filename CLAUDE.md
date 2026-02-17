@@ -57,7 +57,7 @@ Always update both `pyproject.toml` version and `CHANGELOG.md` together with the
 
 ### Credentials
 
-Telegram secrets stored in `~/.config/astra.env` (not tracked). Hook activation requires env var `CLAUDE_ASTRA=1` (set in `claude_settings.json`).
+Telegram secrets stored in `~/.config/astra.env` (not tracked). Hooks are enabled by default; set `NO_ASTRA=1` in a project's settings to disable for that session.
 
 ### Documentation
 

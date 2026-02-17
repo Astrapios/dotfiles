@@ -26,7 +26,7 @@ _creds = _load_env_file("~/.config/astra.env") or _load_env_file("~/.config/tg_h
 
 BOT = os.environ.get("TELEGRAM_BOT_TOKEN", "") or _creds.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "") or _creds.get("TELEGRAM_CHAT_ID", "")
-TG_HOOKS_ENABLED = os.environ.get("CLAUDE_ASTRA", "") == "1"
+TG_HOOKS_ENABLED = "NO_ASTRA" not in os.environ
 TG_MAX = 4096  # Telegram message character limit
 SIGNAL_DIR = "/tmp/astra_signals"
 

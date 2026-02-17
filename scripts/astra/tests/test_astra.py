@@ -1825,7 +1825,7 @@ class TestCmdHookEdgeCases(unittest.TestCase):
 
     @patch("sys.stdin")
     def test_hooks_disabled_consumes_stdin(self, mock_stdin):
-        """With CLAUDE_ASTRA != '1', stdin is consumed but no signal written."""
+        """With NO_ASTRA set, stdin is consumed but no signal written."""
         astra.config.TG_HOOKS_ENABLED = False
         mock_stdin.read.return_value = '{"hook_event_name": "Stop"}'
         astra.cmd_hook()

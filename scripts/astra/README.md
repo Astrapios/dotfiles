@@ -77,9 +77,6 @@ Copy or symlink `claude_settings.json` to `~/.claude/settings.json` (or merge wi
 
 ```json
 {
-  "env": {
-    "CLAUDE_ASTRA": "1"
-  },
   "hooks": {
     "Notification": [
       { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }

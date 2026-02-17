@@ -8,6 +8,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 ## 0.13.1
 
 - **Re-source shell config on `/restart`** — runs `source ~/.zshrc` (or `~/.bashrc`) before relaunching Claude, ensuring PATH and env vars are fresh
+- **Hooks enabled by default** — remove `CLAUDE_ASTRA=1` opt-in; set `NO_ASTRA=1` to disable hooks for a session instead
 
 ## 0.13.0
 
