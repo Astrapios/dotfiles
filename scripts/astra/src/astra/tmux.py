@@ -178,11 +178,12 @@ def scan_claude_sessions() -> dict[str, SessionInfo]:
 @dataclass
 class SessionInfo:
     """Information about a detected CLI session."""
-    pane_target: str    # "%20"
+    pane_target: str    # "main:1.0"
     project: str        # "myproject"
     cli: str            # "claude" or "gemini"
     win_idx: str        # "4"
     pane_suffix: str    # "a" minimum, "b"/"c" for additional panes
+    pane_id: str = ""   # "%2" — TMUX_PANE format for signal matching
 
     @property
     def wid(self) -> str:
@@ -212,41 +213,43 @@ def scan_cli_sessions() -> dict[str, SessionInfo]:
     """
     from astra import profiles
 
-    raw_panes: list[tuple[str, str, str, str, str, str]] = []
+    raw_panes: list[tuple[str, str, str, str, str, str, str]] = []
     try:
         result = subprocess.run(
             ["tmux", "list-panes", "-a", "-F",
              "#{window_index}\t#{session_name}:#{window_index}.#{pane_index}"
              "\t#{pane_current_command}\t#{pane_current_path}"
-             "\t#{pane_start_command}\t#{pane_title}"],
+             "\t#{pane_start_command}\t#{pane_title}\t#{pane_id}"],
             capture_output=True, text=True, timeout=5,
         )
         for line in result.stdout.strip().splitlines():
             parts = line.split("\t")
-            if len(parts) >= 6:
-                raw_panes.append((parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]))
+            if len(parts) >= 7:
+                raw_panes.append(tuple(parts[:7]))
+            elif len(parts) >= 6:
+                raw_panes.append((*parts[:6], ""))
             elif len(parts) >= 4:
                 raw_panes.append((parts[0], parts[1], parts[2], parts[3],
                                   parts[4] if len(parts) > 4 else "",
-                                  parts[5] if len(parts) > 5 else ""))
+                                  parts[5] if len(parts) > 5 else "", ""))
     except Exception:
         pass
 
     # Group matched panes by window index
-    by_window: dict[str, list[tuple[str, str, str]]] = {}  # win_idx → [(target, project, cli)]
-    for win_idx, target, cmd, cwd, start_cmd, title in raw_panes:
+    by_window: dict[str, list[tuple[str, str, str, str]]] = {}  # win_idx → [(target, project, cli, pane_id)]
+    for win_idx, target, cmd, cwd, start_cmd, title, pane_id in raw_panes:
         profile = profiles.identify_cli(cmd, start_cmd, title)
         if profile:
             project = cwd.rstrip("/").rsplit("/", 1)[-1] if cwd else "?"
-            by_window.setdefault(win_idx, []).append((target, project, profile.name))
+            by_window.setdefault(win_idx, []).append((target, project, profile.name, pane_id))
 
     # Always assign a/b/c suffix — even solo panes get "a"
     sessions: dict[str, SessionInfo] = {}
     for win_idx, panes in by_window.items():
-        for i, (target, project, cli) in enumerate(panes):
+        for i, (target, project, cli, pane_id) in enumerate(panes):
             suffix = chr(ord("a") + i)
             info = SessionInfo(pane_target=target, project=project, cli=cli,
-                               win_idx=win_idx, pane_suffix=suffix)
+                               win_idx=win_idx, pane_suffix=suffix, pane_id=pane_id)
             sessions[info.wid] = info
     return sessions
 

@@ -59,6 +59,7 @@ class FakeTmux:
                 info = _real_tmux.SessionInfo(
                     pane_target=ps.pane_target, project=ps.project,
                     cli=ps.cli_profile, win_idx=win_idx, pane_suffix=suffix,
+                    pane_id=ps.pane_target,
                 )
                 sessions[info.wid] = info
         return sessions

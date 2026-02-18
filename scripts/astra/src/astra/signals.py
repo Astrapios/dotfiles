@@ -85,9 +85,10 @@ def process_signals(focused_wids: set[str] | None = None,
 
         # Resolve bare wid (e.g. "w4") to actual session key (e.g. "w4a")
         if sessions and wid and wid not in sessions:
-            # Match by pane target (most accurate)
+            # Match by pane ID or pane target (most accurate)
             for sid, info in sessions.items():
-                if isinstance(info, tmux.SessionInfo) and info.pane_target == pane:
+                if isinstance(info, tmux.SessionInfo) and \
+                   (info.pane_id == pane or info.pane_target == pane):
                     wid = sid
                     break
             else:

@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.2
+
+- **Fix god mode and signal routing in multi-pane windows** — hook signals use TMUX_PANE format (`%2`) but session scan used `session:window.pane` format (`main:1.0`); pane target matching never matched, so bare `wN` wids in multi-pane windows (e.g. Claude + Gemini in w1) couldn't resolve to the correct `wNa`/`wNb` suffix. Added `pane_id` field to `SessionInfo`, captured during scan, matched during signal processing.
+
 ## 0.16.1
 
 - **Fix Gemini stop output capture** — stop handler, `/last` command, focus mode, and smartfocus all defaulted to Claude's profile (`●`/`❯`) when extracting response content; Gemini responses (`✦`/`>`) returned empty. Now pass the correct CLI profile throughout signal processing, content extraction, and monitoring paths.

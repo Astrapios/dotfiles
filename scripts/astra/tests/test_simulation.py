@@ -224,6 +224,39 @@ class TestPermissionFlow(SimTestBase):
         self.assertTrue(len(self.h.subprocess_calls) > 0)
 
 
+class TestMultiPanePermission(SimTestBase):
+    """Scenario: Permission signal in multi-pane window resolves via pane_id."""
+
+    def test_god_mode_resolves_multi_pane(self):
+        """God mode auto-accepts permission even when window has multiple CLIs."""
+        from unittest.mock import patch as _patch
+        # Window 1 has Claude (w1a) and Gemini (w1b)
+        self.h.tmux.add_session("1", "%2", "myproject")
+        self.h.tmux.add_multi_pane_session("1", "%27", "myproject", cli="gemini")
+        s = self.h.make_listener_state()
+
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls -la\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again for this tool\n"
+            "  3. No\n"
+            "  Enter to select · ↑/↓ to navigate\n"
+        )
+        self.h.tmux.set_pane_content("1", perm_content)
+
+        # Signal has bare "w1" wid — must resolve to w1a via pane_id match
+        self.h.inject_signal("permission", "w1", pane="%2",
+                             project="myproject", cmd="ls -la")
+        # Override the harness god mode mock for this test
+        with _patch.object(state, "_is_god_mode_for", side_effect=lambda w: w == "w1a"):
+            self.h.tick(s)
+
+        # God mode should have auto-accepted (send-keys called)
+        self.h.assert_sent("Auto-allowed")
+
+
 class TestSmartfocusAcrossTicks(SimTestBase):
     """Scenario 4: Smartfocus across multiple ticks.
 
