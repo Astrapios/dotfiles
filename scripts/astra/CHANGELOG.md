@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.6
+
+- **God mode quiet/loud toggle** — `/god quiet` (alias `gq`) suppresses god mode receipt messages on Telegram; `/god loud` (alias `gl`) re-enables them; bare `/god` status shows "(quiet)" when suppressed
+
 ## 0.16.5
 
 - **God mode via PreToolUse hooks** — all PreToolUse hooks (Bash, Read, Edit, Write) output `{"decision": "approve"}` in god mode, bypassing Claude Code's permission dialog; each writes a `god_approve` signal with the tool type so the listener sends descriptive receipts: `⚡ Ran`, `⚡ Read`, `⚡ Edited`, `⚡ Wrote`

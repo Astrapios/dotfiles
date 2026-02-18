@@ -153,6 +153,7 @@ Telegram commands (inside listener):
   /status [wN] [lines] List sessions or show output
   /interrupt [wN]      Interrupt current task (Esc)
   /god [wN|all|off]    Auto-accept permissions (god mode)
+  /god quiet|loud      Suppress/enable god mode receipts
   /focus wN            Watch completed responses
   /deepfocus wN        Stream all output in real-time
   /unfocus             Stop monitoring
@@ -175,6 +176,7 @@ Aliases:
   f4 / df4 / uf        /focus w4 / /deepfocus w4 / /unfocus
   i4 / sv / ?          /interrupt w4 / /saved / /help
   g4 / ga / goff       /god w4 / /god all / /god off
+  gq / gl              /god quiet / /god loud
   af / lv / noti       /autofocus / /local / /notification
   c / c4 / r4          /clear / /clear w4 / /restart w4
 

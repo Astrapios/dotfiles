@@ -12,8 +12,9 @@ _CAT_ERROR = 4
 _CAT_CONFIRM = 7
 
 _ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus",
-                            "lv": "/local", "ga": "/god all", "goff": "/god off", "c": "/clear",
-                            "noti": "/notification"}
+                            "lv": "/local", "ga": "/god all", "goff": "/god off",
+                            "gq": "/god quiet", "gl": "/god loud",
+                            "c": "/clear", "noti": "/notification"}
 
 
 def _any_active_prompt() -> bool:
@@ -137,6 +138,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/status [wN] [lines]` — list sessions or show output",
             "`/interrupt [wN]` — interrupt current task (Esc)",
             "`/god [wN|all|off]` — auto-accept permissions",
+            "`/god quiet|loud` — suppress/enable receipts",
             "`/focus wN` — watch completed responses",
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
@@ -417,6 +419,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                     return int(m.group(1)) if m else 0
                 labels = ", ".join(state._wid_label(w) for w in sorted(wids, key=_sort_wid))
                 status_msg = f"\u26a1 God mode is *on* for {labels}."
+            if state._is_god_quiet():
+                status_msg += " (quiet)"
             kb = tmux._command_sessions_keyboard("god", sessions)
             telegram.tg_send(status_msg, reply_markup=kb)
             return None, sessions, last_win_idx
@@ -432,6 +436,16 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             else:
                 state._clear_god_mode()
                 telegram.tg_send("\u26a1 God mode *off*.")
+            return None, sessions, last_win_idx
+
+        # /god quiet|loud
+        if arg.lower() in ("quiet", "q"):
+            state._set_god_quiet(True)
+            telegram.tg_send("\u26a1 God mode receipts *suppressed*.")
+            return None, sessions, last_win_idx
+        if arg.lower() in ("loud", "l"):
+            state._set_god_quiet(False)
+            telegram.tg_send("\u26a1 God mode receipts *enabled*.")
             return None, sessions, last_win_idx
 
         # /god all

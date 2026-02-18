@@ -334,7 +334,7 @@ def process_signals(focused_wids: set[str] | None = None,
             label = {"shell": "Ran", "read": "Read", "edit": "Edited",
                      "write": "Wrote"}.get(tool_type, "Approved")
             config._log("god", f"{label} {wid} ({project}): {desc}")
-            if not is_local:
+            if not is_local and not state._is_god_quiet():
                 telegram._fire_and_forget(
                     telegram.tg_send,
                     f"\u26a1{tag} {label} (`{project}`): `{desc}`",

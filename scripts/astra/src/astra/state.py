@@ -608,3 +608,22 @@ def _clear_god_mode():
             config._log("god", f"Cleared god mode file: {path}")
         except OSError:
             pass
+
+
+def _is_god_quiet() -> bool:
+    """Check if god mode receipts are suppressed."""
+    return os.path.exists(os.path.join(config.SIGNAL_DIR, "_god_quiet.json"))
+
+
+def _set_god_quiet(quiet: bool):
+    """Enable or disable god mode receipt suppression."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(config.SIGNAL_DIR, "_god_quiet.json")
+    if quiet:
+        with open(path, "w") as f:
+            json.dump({"ts": time.time()}, f)
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
