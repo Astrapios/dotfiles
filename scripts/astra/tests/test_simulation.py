@@ -494,5 +494,132 @@ class TestStopSignalCliField(SimTestBase):
         self.h.assert_sent("Gemini")
 
 
+class TestStartupDialogDetection(SimTestBase):
+    """Scenario: Startup dialog detection (e.g. Gemini trust folder).
+
+    When a session is not idle and not marked busy (no hooks fired),
+    the listener scans for numbered-option dialogs and forwards them.
+    """
+
+    def test_gemini_trust_dialog_forwarded(self):
+        """Gemini trust dialog → Telegram notification with buttons."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
+                                content=(
+                                    " > 1. Trust this folder\n"
+                                    "   2. Don't trust\n"
+                                ))
+        s = self.h.make_listener_state()
+        # No _busy_ file, not idle → dialog candidate
+
+        # Advance past the 5s scan interval
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+
+        # Should have sent a dialog notification
+        self.h.assert_sent("dialog")
+        self.h.assert_sent("Trust this folder")
+
+    def test_dialog_not_re_sent(self):
+        """Same dialog should not be sent twice."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
+                                content=(
+                                    " > 1. Trust this folder\n"
+                                    "   2. Don't trust\n"
+                                ))
+        s = self.h.make_listener_state()
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+
+        self.h.tick(s)
+        first_count = len(self.h.tg.find_sent("dialog"))
+
+        self.h.clock.advance(6)
+        self.h.tick(s)
+        second_count = len(self.h.tg.find_sent("dialog"))
+
+        self.assertEqual(first_count, second_count,
+                         "Dialog notification sent twice for same state")
+
+    def test_dialog_cleared_on_idle(self):
+        """After session goes idle, dialog_notified resets for future dialogs."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
+                                content=(
+                                    " > 1. Trust this folder\n"
+                                    "   2. Don't trust\n"
+                                ))
+        s = self.h.make_listener_state()
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+
+        # Now session goes idle (dialog answered)
+        self.h.tmux.set_pane_content("5", " >   \n")
+        self.h.tmux.panes["5"].cursor_x = 1
+        self.h.clock.advance(6)
+        self.h.tick(s)
+
+        # dialog_notified should be cleared
+        self.assertNotIn("w5a", s.dialog_notified)
+
+    def test_busy_session_skipped(self):
+        """Session marked busy via hooks is not scanned for dialog."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
+                                content=(
+                                    "⠋ Working on something (esc to cancel, 5s)\n"
+                                ))
+        s = self.h.make_listener_state()
+        state._mark_busy("w5a")
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+
+        self.h.assert_not_sent("dialog")
+        state._clear_busy("w5a")
+
+    def test_idle_session_skipped(self):
+        """Idle session is not scanned for dialog."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini", idle=True)
+        s = self.h.make_listener_state()
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+
+        self.h.assert_not_sent("dialog")
+
+    def test_active_prompt_skipped(self):
+        """Session with active prompt file is not scanned for dialog."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
+                                content=(
+                                    " > 1. Trust this folder\n"
+                                    "   2. Don't trust\n"
+                                ))
+        s = self.h.make_listener_state()
+        # Pre-create active prompt (simulating hook-based prompt)
+        state.save_active_prompt("w5a", "%30", total=2)
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+
+        self.h.assert_not_sent("dialog")
+
+    def test_claude_hookless_dialog_detected(self):
+        """Claude session with dialog but no hooks fired → detected."""
+        self.h.tmux.add_session("4", "%20", "myproject",
+                                content=(
+                                    "  ❯ 1. Yes, clear context\n"
+                                    "    2. No\n"
+                                    "    3. Edit the plan\n"
+                                    "    4. Type something.\n"
+                                ))
+        s = self.h.make_listener_state()
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+
+        # Should detect the dialog even for Claude
+        self.h.assert_sent("dialog")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,6 +112,54 @@ def _extract_pane_permission(pane: str, profile=None) -> tuple[str, str, list[st
     return header, body, options, context
 
 
+def _detect_numbered_dialog(raw: str) -> tuple[str, list[str]] | None:
+    """Detect a numbered-option dialog in pane content (e.g. Gemini trust dialog).
+
+    Returns (question_text, [option_labels]) or None.
+    Only matches when options appear in the bottom portion of the pane
+    and are NOT inside a tool-call box (which uses ✓ ToolName format).
+    """
+    lines = raw.splitlines()
+    if not lines:
+        return None
+
+    # Look for numbered options in the last 10 lines
+    # Strip box-drawing borders (│) before matching
+    options: list[str] = []
+    for line in lines[-10:]:
+        stripped = re.sub(r'^[│┃]\s*', '', line).rstrip()
+        stripped = re.sub(r'\s*[│┃]$', '', stripped)
+        m = re.match(r'^\s*[❯>●○\s]*(\d+)\.\s+(.+)', stripped)
+        if m:
+            options.append(m.group(2).strip())
+
+    if not options:
+        return None
+
+    # Discriminator: tool-call boxes use "✓  ToolName" format, not numbered options
+    # Also skip if we only see a single option (likely not a dialog)
+    if len(options) < 2:
+        return None
+
+    # Extract question text: look for non-option text above the options
+    question = ""
+    for line in reversed(lines[:-10] if len(lines) > 10 else lines):
+        s = line.strip()
+        # Skip box drawing, empty lines, UI chrome
+        if not s or re.match(r'^[╭╰│─┊┃▀▄]{1,}', s):
+            continue
+        # Skip the option lines themselves
+        if re.match(r'^\s*[❯>●○\s]*\d+\.\s+', s):
+            continue
+        # Skip status/chrome
+        if re.match(r'^[▀▄]{3,}$', s) or 'no sandbox' in s:
+            continue
+        question = s
+        break
+
+    return (question, options)
+
+
 def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str]:
     """Filter common UI noise from captured pane content.
     If keep_status=True, preserves thinking/spinner status lines.

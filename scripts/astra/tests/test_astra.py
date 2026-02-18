@@ -845,12 +845,9 @@ class TestPlanSignalBypassesGodMode(unittest.TestCase):
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(astra.content, "_extract_pane_permission",
-                  return_value=("wants to enter plan mode", "", ["1. Yes", "2. No"], ""))
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch("time.sleep")
-    def test_plan_not_auto_accepted_in_god_mode(self, mock_sleep, mock_send, mock_perm):
-        """Even with god mode on, plan signal sends to Telegram instead of auto-accepting."""
+    def test_plan_not_auto_accepted_in_god_mode(self, mock_send):
+        """Even with god mode on, plan signal sends notification to Telegram."""
         astra.state._set_god_mode("all", True)
         # Write a plan signal
         astra.state.write_signal("plan", {
@@ -859,7 +856,7 @@ class TestPlanSignalBypassesGodMode(unittest.TestCase):
             "cwd": "/tmp/test",
         })
         astra.signals.process_signals()
-        # Should have sent a Telegram message (not auto-accepted)
+        # Should have sent a Telegram message (informational notification)
         mock_send.assert_called()
         msg = mock_send.call_args[0][0]
         self.assertIn("plan mode", msg)
@@ -7405,6 +7402,335 @@ class TestSortSessionKeys(unittest.TestCase):
     def test_suffixed_keys(self):
         keys = ["w1b", "w1a", "w3a", "w2"]
         self.assertEqual(astra.tmux._sort_session_keys(keys), ["w1a", "w1b", "w2", "w3a"])
+
+
+class TestDialogOptionNotIdle(unittest.TestCase):
+    """Test _pane_idle_state returns busy for dialog option lines."""
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_numbered_option_after_prompt_char(self, mock_capture):
+        """❯ followed by numbered option (plan approval) is NOT idle."""
+        mock_capture.return_value = (
+            "  ❯ 1. Yes, clear context and start implementation\n"
+            "    2. No\n"
+            "    3. Edit the plan\n"
+            "    4. Type something.\n"
+            "Enter to select · ↑/↓ to navigate\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_normal_prompt_still_idle(self, mock_capture):
+        """Normal ❯ prompt (not a dialog) is still idle."""
+        mock_capture.return_value = "some output\n  ❯ \n"
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_prompt_with_regular_text_idle(self, mock_capture):
+        """❯ with normal typed text (not numbered option) is idle."""
+        mock_capture.return_value = "some output\n  ❯ fix the auth bug\n"
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "fix the auth bug")
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_ask_user_question_dialog(self, mock_capture):
+        """AskUserQuestion dialog with ❯ selector is NOT idle."""
+        mock_capture.return_value = (
+            "  ❯ 1. Add tests (Recommended)\n"
+            "    2. Skip tests\n"
+            "    3. Type something.\n"
+            "    4. Chat about this\n"
+            "Enter to select · ↑/↓ to navigate · ctrl+g to edit in Vim · Esc to cancel\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_dialog_option_not_idle(self, mock_capture):
+        """Gemini > prompt with numbered option is NOT idle."""
+        astra.state._current_sessions = {
+            "w1a": astra.SessionInfo("%30", "myproj", "gemini", "1", "a"),
+        }
+        mock_capture.return_value = (
+            " > 1. Trust this folder\n"
+            "   2. Don't trust\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        self.assertFalse(is_idle)
+        astra.state._current_sessions = {}
+
+
+class TestPermissionFreeTextDetection(unittest.TestCase):
+    """Test that permission handler detects free text options."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/astra_test_perm_freetext"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+
+    def tearDown(self):
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def _write_signal(self, event, **extra):
+        signal = {"event": event, "pane": "%20", "wid": "w4a", "project": "test", **extra}
+        fname = f"{time.time():.6f}_test.json"
+        with open(os.path.join(self.signal_dir, fname), "w") as f:
+            json.dump(signal, f)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
+                  return_value=("", "", [
+                      "1. Yes, proceed",
+                      "2. Always allow",
+                      "3. Type here to tell Claude what to do instead...",
+                      "4. Deny"
+                  ], ""))
+    @patch.object(astra.state, "save_active_prompt")
+    def test_free_text_option_detected(self, mock_save, mock_extract, mock_proj, mock_send):
+        """Permission with 'Type here to tell Claude...' sets free_text_at."""
+        self._write_signal("permission", cmd="echo test")
+        astra.process_signals()
+        # Check save_active_prompt was called with free_text_at=2 (option 3 → index 2)
+        mock_save.assert_called_once()
+        kwargs = mock_save.call_args
+        self.assertEqual(kwargs[1].get("free_text_at") or kwargs[0][3] if len(kwargs[0]) > 3 else kwargs[1].get("free_text_at"), 2)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
+                  return_value=("", "", ["1. Yes", "2. Always allow", "3. Deny"], ""))
+    @patch.object(astra.state, "save_active_prompt")
+    def test_no_free_text_option(self, mock_save, mock_extract, mock_proj, mock_send):
+        """Standard permission without 'Type here' has no free_text_at."""
+        self._write_signal("permission", cmd="echo test")
+        astra.process_signals()
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args[1] if mock_save.call_args[1] else {}
+        self.assertIsNone(call_kwargs.get("free_text_at"))
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
+                  return_value=("", "", [
+                      "1. Yes",
+                      "2. Type something different",
+                      "3. Deny"
+                  ], ""))
+    @patch.object(astra.state, "save_active_prompt")
+    def test_type_something_detected(self, mock_save, mock_extract, mock_proj, mock_send):
+        """'Type something' pattern also detected as free text."""
+        self._write_signal("permission", cmd="echo test")
+        astra.process_signals()
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args[1] if mock_save.call_args[1] else {}
+        self.assertEqual(call_kwargs.get("free_text_at"), 1)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
+                  return_value=("", "", [
+                      "1. Yes, proceed",
+                      "2. Type here to tell Claude...",
+                      "3. Deny"
+                  ], ""))
+    @patch.object(astra.state, "save_active_prompt")
+    def test_free_text_hint_in_message(self, mock_save, mock_extract, mock_proj, mock_send):
+        """Message includes free text hint when Type option detected."""
+        self._write_signal("permission", cmd="echo test")
+        astra.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertIn("type a message to give feedback", msg)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
+                  return_value=("", "", ["1. Yes", "2. No"], ""))
+    @patch.object(astra.state, "save_active_prompt")
+    def test_no_free_text_hint_without_type_option(self, mock_save, mock_extract, mock_proj, mock_send):
+        """Message omits free text hint for standard permissions."""
+        self._write_signal("permission", cmd="echo test")
+        astra.process_signals()
+        msg = mock_send.call_args[0][0]
+        self.assertNotIn("type a message", msg)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "get_pane_project", return_value="proj")
+    @patch.object(astra.content, "_extract_pane_permission",
+                  return_value=("", "", ["1. Yes", "2. Always allow", "3. Deny"], ""))
+    @patch.object(astra.state, "save_active_prompt")
+    def test_numeric_shortcuts_for_all_options(self, mock_save, mock_extract, mock_proj, mock_send):
+        """All options get numeric shortcuts (1, 2, 3...)."""
+        self._write_signal("permission", cmd="echo test")
+        astra.process_signals()
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args[1] if mock_save.call_args[1] else {}
+        shortcuts = call_kwargs.get("shortcuts", {})
+        self.assertEqual(shortcuts.get("1"), 1)
+        self.assertEqual(shortcuts.get("2"), 2)
+        self.assertEqual(shortcuts.get("3"), 3)
+
+
+class TestDetectNumberedDialog(unittest.TestCase):
+    """Test _detect_numbered_dialog for startup dialogs."""
+
+    def test_gemini_trust_dialog(self):
+        """Gemini trust folder dialog detected correctly."""
+        raw = (
+            "╭──────────────────────────────────╮\n"
+            "│  Do you trust the files in this  │\n"
+            "│  folder?                         │\n"
+            "│                                  │\n"
+            "│  ● 1. Trust this folder          │\n"
+            "│    2. Don't trust                │\n"
+            "╰──────────────────────────────────╯\n"
+        )
+        result = astra.content._detect_numbered_dialog(raw)
+        self.assertIsNotNone(result)
+        question, options = result
+        self.assertEqual(len(options), 2)
+        self.assertIn("Trust this folder", options[0])
+
+    def test_simple_numbered_dialog(self):
+        """Simple numbered options without box drawing."""
+        raw = (
+            " > 1. Trust this folder\n"
+            "   2. Don't trust\n"
+        )
+        result = astra.content._detect_numbered_dialog(raw)
+        self.assertIsNotNone(result)
+        _, options = result
+        self.assertEqual(len(options), 2)
+
+    def test_normal_idle_pane_no_dialog(self):
+        """Normal idle pane has no dialog."""
+        raw = (
+            "✦ Here is the result.\n"
+            "\n"
+            " >   \n"
+            "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n"
+        )
+        result = astra.content._detect_numbered_dialog(raw)
+        self.assertIsNone(result)
+
+    def test_single_option_not_dialog(self):
+        """A single numbered item is not a dialog (needs 2+)."""
+        raw = "  1. Only one option here\n"
+        result = astra.content._detect_numbered_dialog(raw)
+        self.assertIsNone(result)
+
+    def test_tool_call_not_dialog(self):
+        """Tool call box drawing (✓ ToolName) is not a dialog."""
+        raw = (
+            "╭─ ✓  ReadFile path/to/file ─╮\n"
+            "│  contents here...            │\n"
+            "╰─────────────────────────────╯\n"
+        )
+        result = astra.content._detect_numbered_dialog(raw)
+        self.assertIsNone(result)
+
+    def test_question_text_extracted(self):
+        """Question text above options is extracted."""
+        raw = (
+            "Do you trust the files in this folder?\n"
+            "\n"
+            "  1. Yes, trust\n"
+            "  2. No, skip\n"
+        )
+        result = astra.content._detect_numbered_dialog(raw)
+        self.assertIsNotNone(result)
+        question, options = result
+        self.assertIn("trust", question.lower())
+
+
+class TestHasActivePrompt(unittest.TestCase):
+    """Test has_active_prompt non-destructive check."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/astra_test_has_prompt"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        astra.config.SIGNAL_DIR = self.signal_dir
+
+    def tearDown(self):
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    def test_no_prompt_returns_false(self):
+        self.assertFalse(astra.state.has_active_prompt("w4a"))
+
+    def test_with_prompt_returns_true(self):
+        astra.state.save_active_prompt("w4a", "%20", total=3)
+        self.assertTrue(astra.state.has_active_prompt("w4a"))
+
+    def test_non_destructive(self):
+        """has_active_prompt does not consume the prompt file."""
+        astra.state.save_active_prompt("w4a", "%20", total=3)
+        self.assertTrue(astra.state.has_active_prompt("w4a"))
+        # Still exists after check
+        self.assertTrue(astra.state.has_active_prompt("w4a"))
+        # Can still load it
+        prompt = astra.state.load_active_prompt("w4a")
+        self.assertIsNotNone(prompt)
+        self.assertEqual(prompt["total"], 3)
+
+
+class TestCustomLabelsInPermCallback(unittest.TestCase):
+    """Test that perm_ callback uses custom labels from prompt."""
+
+    def setUp(self):
+        self.signal_dir = "/tmp/astra_test_custom_labels"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+
+    def tearDown(self):
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    def test_custom_label_used(self, mock_select, mock_send, mock_rm_kb, mock_ack):
+        """When prompt has labels dict, callback uses the label text."""
+        astra.state.save_active_prompt("w4a", "%20", total=2,
+                                        shortcuts={"1": 1, "2": 2},
+                                        labels={"1": "Trust this folder", "2": "Don't trust"})
+        from astra.commands import _handle_callback
+        cb = {"id": "cb123", "data": "perm_w4a_1", "message_id": 0}
+        _handle_callback(cb, {}, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Trust this folder", msg)
+
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "_select_option")
+    def test_fallback_to_default_labels(self, mock_select, mock_send, mock_rm_kb, mock_ack):
+        """Without labels dict, falls back to 'Allowed'/'Denied'."""
+        astra.state.save_active_prompt("w4a", "%20", total=2,
+                                        shortcuts={"1": 1, "2": 2})
+        from astra.commands import _handle_callback
+        cb = {"id": "cb123", "data": "perm_w4a_1", "message_id": 0}
+        _handle_callback(cb, {}, None)
+        msg = mock_send.call_args[0][0]
+        self.assertIn("Allowed", msg)
 
 
 if __name__ == "__main__":

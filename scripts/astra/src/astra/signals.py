@@ -237,6 +237,17 @@ def process_signals(focused_wids: set[str] | None = None,
                         max_opt = max(max_opt, int(m_opt.group(1)))
                 opts_text = "\n".join(options)
                 n = max_opt or 3
+
+                # Detect free-text option (e.g. "4. Type here to tell Claude...")
+                free_text_at = None
+                for o in options:
+                    if re.search(r'\btype\b.*\b(here|something|your)\b', o, re.IGNORECASE):
+                        m_ft = re.match(r'(\d+)', o)
+                        if m_ft:
+                            free_text_at = int(m_ft.group(1)) - 1
+                        break
+                free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
+
                 if not is_local:
                     perm_kb = telegram._build_inline_keyboard([[
                         ("\u2705 Allow", f"perm_{wid}_1"),
@@ -249,7 +260,7 @@ def process_signals(focused_wids: set[str] | None = None,
                             code_block = f"```\n{perm_context}\n\n{bash_cmd[:2000]}\n```"
                         else:
                             code_block = f"```\n{bash_cmd[:2000]}\n```"
-                        msg = f"🔧{tag} {dn} (`{project}`) needs permission:\n\n{code_block}\n{opts_text}"
+                        msg = f"🔧{tag} {dn} (`{project}`) needs permission:\n\n{code_block}\n{opts_text}{free_text_hint}"
                         kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                         config._save_last_msg(wid, msg)
                         config._save_keyboard_msg(wid, kb_id)
@@ -257,60 +268,31 @@ def process_signals(focused_wids: set[str] | None = None,
                         title = perm_header or "needs permission"
                         header_str = f"🔧{tag} {dn} (`{project}`) {title}:\n\n{context_str}"
                         if perm_body:
-                            kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text, silent=state._is_silent(_CAT_PERMISSION))
+                            kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text + free_text_hint, silent=state._is_silent(_CAT_PERMISSION))
                         else:
-                            msg = f"{header_str}{opts_text}"
+                            msg = f"{header_str}{opts_text}{free_text_hint}"
                             kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                             config._save_last_msg(wid, msg)
                         config._save_keyboard_msg(wid, kb_id)
                 # Always save prompt so Telegram fallback works if user switches away
+                shortcuts = {"y": 1, "yes": 1, "allow": 1,
+                             "approve": 1,
+                             "n": n, "no": n, "deny": n}
+                # Add numeric shortcuts for all options
+                for i in range(1, n + 1):
+                    shortcuts[str(i)] = i
                 state.save_active_prompt(wid, pane, total=n,
-                                         shortcuts={"y": 1, "yes": 1, "allow": 1,
-                                                    "approve": 1,
-                                                    "n": n, "no": n, "deny": n})
+                                         shortcuts=shortcuts,
+                                         free_text_at=free_text_at)
 
         elif event == "plan":
-            # PreToolUse fires before the dialog — wait for it to appear
-            time.sleep(2)
-            perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
-            if options and not any(o.startswith("1.") for o in options):
-                options.insert(0, "1. Yes")
-            max_opt = 0
-            for o in options:
-                m_opt = re.match(r'(\d+)', o)
-                if m_opt:
-                    max_opt = max(max_opt, int(m_opt.group(1)))
-            opts_text = "\n".join(options)
-            deny_at = max_opt or 2
-
-            # Check if dialog has a free text option ("Type something.")
-            free_text_at = None
-            total = deny_at
-            try:
-                raw = tmux._capture_pane(pane, 10)
-                for line in raw.splitlines():
-                    if re.match(r'^\s*Type (something|your)', line.strip()):
-                        free_text_at = deny_at
-                        total = deny_at + 2  # + "Type something" + "Chat about this"
-                        break
-            except Exception:
-                pass
-
+            # EnterPlanMode is auto-approved by Claude Code — no blocking dialog.
+            # Send an informational notification (no buttons, no active prompt).
+            # If a blocking dialog somehow appears, startup dialog detection handles it.
             if not is_local:
-                plan_kb = telegram._build_inline_keyboard([
-                    [("\u2705 Approve", f"perm_{wid}_1"),
-                     ("\u274c Deny", f"perm_{wid}_{deny_at}")],
-                ])
-                free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
-                msg = f"🗺{tag} {dn} (`{project}`) wants to enter plan mode:\n{opts_text}{free_text_hint}"
-                kb_id = telegram.tg_send(msg, reply_markup=plan_kb, silent=state._is_silent(_CAT_QUESTION))
+                msg = f"🗺{tag} {dn} (`{project}`) entered plan mode."
+                telegram.tg_send(msg, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
-                config._save_keyboard_msg(wid, kb_id)
-            state.save_active_prompt(wid, pane, total=total,
-                                     free_text_at=free_text_at,
-                                     shortcuts={"y": 1, "yes": 1, "approve": 1,
-                                                "n": deny_at, "no": deny_at,
-                                                "deny": deny_at})
 
         elif event == "question":
             questions = signal.get("questions", [])

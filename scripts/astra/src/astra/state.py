@@ -54,7 +54,8 @@ def save_active_prompt(wid: str, pane: str, total: int,
                        shortcuts: dict[str, int] | None = None,
                        free_text_at: int | None = None,
                        remaining_qs: list[dict] | None = None,
-                       project: str | None = None):
+                       project: str | None = None,
+                       labels: dict[str, str] | None = None):
     """Save active prompt state so listen can route replies with arrow keys."""
     os.makedirs(config.SIGNAL_DIR, exist_ok=True)
     path = os.path.join(config.SIGNAL_DIR, f"_active_prompt_{wid}.json")
@@ -67,6 +68,8 @@ def save_active_prompt(wid: str, pane: str, total: int,
         state["remaining_qs"] = remaining_qs
     if project:
         state["project"] = project
+    if labels:
+        state["labels"] = labels
     with open(path, "w") as f:
         json.dump(state, f)
 
@@ -81,6 +84,12 @@ def load_active_prompt(wid: str) -> dict | None:
         return state
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def has_active_prompt(wid: str) -> bool:
+    """Check if an active prompt file exists for wid (non-destructive)."""
+    path = os.path.join(config.SIGNAL_DIR, f"_active_prompt_{wid}.json")
+    return os.path.exists(path)
 
 
 def _pane_has_prompt(pane: str) -> bool:

@@ -5,6 +5,26 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.0
+
+- **Startup dialog detection** — periodically scan all CLI sessions for numbered-option dialogs that appear before hooks are active (e.g. Gemini "trust folder" prompt); forward to Telegram with inline buttons and route replies via the existing active prompt mechanism
+- CLI-agnostic: detects dialogs in any session that is not idle AND not marked busy (defense-in-depth for hook failures)
+- Custom confirmation labels: `perm_` callback uses option text from the dialog (e.g. "Trust this folder") instead of generic "Allowed"/"Denied"
+- `has_active_prompt()` non-destructive check in state.py; `_detect_numbered_dialog()` in content.py; `dialog_notified` set in `_ListenerState`
+- **EnterPlanMode is now informational** — send "entered plan mode" notification instead of stale Approve/Deny buttons (Claude Code auto-approves EnterPlanMode; the real plan approval comes via ExitPlanMode as a permission event)
+
+## 0.15.6
+
+- **Fix plan approval dialog detected as idle** — `_pane_idle_state` no longer treats `❯ 1. Yes, clear context...` (numbered option lines in plan approval / AskUserQuestion dialogs) as an idle prompt; prevents stale prompt cleanup from deleting active prompts mid-dialog
+- **Add free text support to permission handler** — ExitPlanMode (plan approval) is handled as a permission signal; detect "Type here/something/your" options and set `free_text_at` so users can type feedback instead of only using buttons; add numeric shortcuts for all options and a hint in the Telegram message
+
+## 0.15.5
+
+- **Fix photo/document routing with bare wids** — `w3` in photo/document captions now resolves to `w3a` via `resolve_session_id` instead of failing direct session lookup
+- **Fix `/new` returning bare wid** — `/new` now resolves `w5` → `w5a` after session scan so `last_win_idx` matches the actual session key
+- **Fix `/restart` CLI detection** — save CLI profile before killing the session instead of looking it up after (when it's already gone); Gemini sessions now correctly restart with `gemini -r latest`
+- **Fix `/new` session detection for Gemini** — retry scan up to 6s after `tmux new-window` to wait for Node.js-based CLIs to start (Gemini takes a few seconds before `pane_current_command` becomes `node`)
+
 ## 0.15.4
 
 - **Fix Gemini idle detection** — `_pane_idle_state` now uses the correct CLI profile per pane instead of always defaulting to Claude; Gemini prompt (`>`), busy indicator (`esc to cancel`), and UI chrome (decorative bars, status bar) are properly recognized

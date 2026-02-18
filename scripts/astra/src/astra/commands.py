@@ -504,10 +504,19 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 capture_output=True, text=True, timeout=10,
             )
             new_idx = result.stdout.strip()
-            sessions = tmux.scan_claude_sessions()
-            new_wid = f"w{new_idx}"
+            # Wait for CLI to start — Gemini (Node.js) takes a few seconds
+            new_wid = None
+            for _ in range(6):
+                sessions = tmux.scan_claude_sessions()
+                new_wid = tmux.resolve_session_id(f"w{new_idx}", sessions)
+                if new_wid:
+                    break
+                time.sleep(1)
+            if not new_wid:
+                new_wid = f"w{new_idx}a"
             proj = work_dir.rstrip("/").rsplit("/", 1)[-1]
-            telegram.tg_send(f"🚀 Started {profile.display_name} in `{new_wid}` (`{proj}`):\n`{work_dir}`")
+            label = state._wid_label(new_wid)
+            telegram.tg_send(f"🚀 Started {profile.display_name} in {label} (`{proj}`):\n`{work_dir}`")
             return None, sessions, new_wid
         except Exception as e:
             telegram.tg_send(f"⚠️ Failed to start session: `{e}`")
@@ -591,6 +600,13 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
+            # Remember CLI type before killing (SessionInfo carries it)
+            from astra import profiles
+            orig_info = sessions[idx]
+            if isinstance(orig_info, tmux.SessionInfo):
+                restart_profile = profiles.get_profile(orig_info.cli) or profiles.CLAUDE
+            else:
+                restart_profile = profiles.CLAUDE
             # Save working directory before killing
             cwd = tmux._get_pane_cwd(pane)
             p = shlex.quote(pane)
@@ -623,14 +639,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             else:
                 source_cmd = ""
             cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
-            # Detect CLI type for the restart command
-            from astra import profiles
-            val = sessions.get(idx) if idx in sessions else None  # already removed above
-            restart_cmd = profiles.CLAUDE.restart_cmd
-            if isinstance(val, tmux.SessionInfo):
-                p_obj = profiles.get_profile(val.cli)
-                if p_obj:
-                    restart_cmd = p_obj.restart_cmd
+            restart_cmd = restart_profile.restart_cmd
             subprocess.run(
                 ["bash", "-c",
                  f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + restart_cmd)} && "
@@ -807,7 +816,11 @@ def _handle_callback(callback: dict, sessions: dict,
         if prompt:
             total = prompt.get("total", 3)
             routing._select_option(prompt.get("pane", ""), n)
-            if n == 1:
+            # Custom labels from prompt (e.g. startup dialog options)
+            prompt_labels = prompt.get("labels", {})
+            if str(n) in prompt_labels:
+                label = f"✅ {prompt_labels[str(n)]}"
+            elif n == 1:
                 label = "\u2705 Allowed"
             elif n == 2:
                 label = "\u2705 Always allowed"

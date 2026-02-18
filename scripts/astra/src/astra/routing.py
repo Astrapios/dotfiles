@@ -143,6 +143,11 @@ def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
             continue
         m = re.match(rf'^(\s*{re.escape(profile.prompt_char)}\s*)(.*)', line)
         if m:
+            # Dialog option lines (e.g. "❯ 1. Yes, clear context...") are
+            # selection indicators, not idle prompts.  Don't treat as idle.
+            after = m.group(2).strip()
+            if re.match(r'^\d+\.\s+', after):
+                return False, ""
             if saw_busy_indicator:
                 return False, ""
             # Colored spinner below prompt = active thinking/working

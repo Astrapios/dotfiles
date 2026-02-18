@@ -14,6 +14,7 @@ import requests
 from astra import config, telegram, tmux, state, content, commands, signals, routing
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
+_CAT_PERMISSION = 1
 _CAT_ERROR = 4
 _CAT_INTERRUPT = 5
 _CAT_MONITOR = 6
@@ -137,6 +138,7 @@ class _ListenerState:
     compact_notified: set = field(default_factory=set)
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
+    dialog_notified: set = field(default_factory=set)
     god_wids: list = field(default_factory=list)
 
 
@@ -275,6 +277,56 @@ def _listen_tick(s):
                     s.compact_notified.discard(wid)
         # Clear for gone sessions
         s.compact_notified -= s.compact_notified - set(s.sessions)
+
+        # --- Startup dialog detection (no hooks fire for pre-startup dialogs) ---
+        for wid, (pane, project) in s.sessions.items():
+            idle, _ = routing._pane_idle_state(pane)
+            if idle or state._is_busy(wid):
+                # Session went idle or got busy via hooks — clear notified state
+                s.dialog_notified.discard(wid)
+                continue
+            if wid in s.dialog_notified:
+                continue
+            if state.has_active_prompt(wid):
+                continue
+            # Not idle, not busy, no active prompt → check for dialog
+            try:
+                raw = tmux._capture_pane(pane, 15)
+            except Exception:
+                continue
+            result = content._detect_numbered_dialog(raw)
+            if not result:
+                continue
+            question, options = result
+            win_idx = re.match(r'^w?(\d+)', wid).group(1)
+            if win_idx not in locally_viewed:
+                label = state._wid_label(wid)
+                opts_text = "\n".join(f"  {i}. {opt}" for i, opt in enumerate(options, 1))
+                n = len(options)
+                msg_header = f"❓ {label} (`{project}`) dialog:\n"
+                if question:
+                    msg_header += f"{question}\n"
+                msg = f"{msg_header}{opts_text}"
+                # Build keyboard with one button per option
+                buttons = [(opt[:20], f"perm_{wid}_{i}") for i, opt in enumerate(options, 1)]
+                rows = [buttons[i:i+3] for i in range(0, len(buttons), 3)]
+                kb = telegram._build_inline_keyboard(rows)
+                kb_id = telegram.tg_send(msg, reply_markup=kb,
+                                         silent=state._is_silent(_CAT_PERMISSION))
+                config._save_keyboard_msg(wid, kb_id)
+                config._save_last_msg(wid, msg)
+                # Save active prompt so replies route correctly
+                shortcuts = {str(i): i for i in range(1, n + 1)}
+                labels = {str(i): opt for i, opt in enumerate(options, 1)}
+                state.save_active_prompt(wid, pane, total=n,
+                                         shortcuts=shortcuts,
+                                         labels=labels,
+                                         project=project)
+            else:
+                config._log("local", f"suppressed dialog for {wid} ({project})")
+            s.dialog_notified.add(wid)
+        # Clear for gone sessions
+        s.dialog_notified -= s.dialog_notified - set(s.sessions)
 
     focus_state = state._load_focus_state()
     deepfocus_state = state._load_deepfocus_state()
@@ -506,12 +558,14 @@ def _listen_tick(s):
                 target_wid = None
                 remaining_text = caption
                 m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
-                if m and f"w{m.group(1)}" in s.sessions:
-                    target_wid = f"w{m.group(1)}"
-                    remaining_text = m.group(2).strip()
-                elif len(s.sessions) == 1:
+                if m:
+                    resolved = tmux.resolve_session_id(f"w{m.group(1)}", s.sessions)
+                    if resolved:
+                        target_wid = resolved
+                        remaining_text = m.group(2).strip()
+                if not target_wid and len(s.sessions) == 1:
                     target_wid = next(iter(s.sessions))
-                elif s.last_win_idx and s.last_win_idx in s.sessions:
+                elif not target_wid and s.last_win_idx and s.last_win_idx in s.sessions:
                     target_wid = s.last_win_idx
 
                 if target_wid:
@@ -597,12 +651,14 @@ def _listen_tick(s):
                 target_wid = None
                 remaining_text = caption
                 m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
-                if m and f"w{m.group(1)}" in s.sessions:
-                    target_wid = f"w{m.group(1)}"
-                    remaining_text = m.group(2).strip()
-                elif len(s.sessions) == 1:
+                if m:
+                    resolved = tmux.resolve_session_id(f"w{m.group(1)}", s.sessions)
+                    if resolved:
+                        target_wid = resolved
+                        remaining_text = m.group(2).strip()
+                if not target_wid and len(s.sessions) == 1:
                     target_wid = next(iter(s.sessions))
-                elif s.last_win_idx and s.last_win_idx in s.sessions:
+                elif not target_wid and s.last_win_idx and s.last_win_idx in s.sessions:
                     target_wid = s.last_win_idx
 
                 if target_wid:
