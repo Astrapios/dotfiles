@@ -87,12 +87,8 @@ def _signal_files(sig_dir):
             if f.endswith(".json") and not f.startswith("_")]
 
 
-def test_pre_tool_bash_god_mode_no_approve(god_mode_dir, monkeypatch, capsys):
-    """PreToolUse/Bash does NOT auto-approve even in god mode.
-
-    Bash permissions use the Notification flow so receipts only fire
-    for commands that actually needed permission.
-    """
+def test_pre_tool_bash_god_mode_approves(god_mode_dir, monkeypatch, capsys):
+    """PreToolUse/Bash in god mode outputs approve and writes signal with tool type."""
     astra._set_god_mode("5", True)
     monkeypatch.setattr(astra.tmux, "get_window_id", lambda: "w5")
     monkeypatch.setattr(astra.config, "TG_HOOKS_ENABLED", True)
@@ -102,8 +98,15 @@ def test_pre_tool_bash_god_mode_no_approve(god_mode_dir, monkeypatch, capsys):
         "Bash", {"command": "rm -rf /tmp/test"}))
 
     captured = capsys.readouterr()
-    assert captured.out.strip() == ""
-    assert _signal_files(astra.config.SIGNAL_DIR) == []
+    result = json.loads(captured.out.strip())
+    assert result == {"decision": "approve"}
+    sigs = _signal_files(astra.config.SIGNAL_DIR)
+    assert len(sigs) == 1
+    with open(os.path.join(astra.config.SIGNAL_DIR, sigs[0])) as f:
+        sig = json.load(f)
+    assert sig["event"] == "god_approve"
+    assert sig["tool"] == "shell"
+    assert sig["cmd"] == "rm -rf /tmp/test"
 
 
 def test_pre_tool_bash_no_god_mode_no_output(god_mode_dir, monkeypatch, capsys):
@@ -152,6 +155,7 @@ def test_pre_tool_edit_god_mode_approves(god_mode_dir, monkeypatch, capsys):
     with open(os.path.join(astra.config.SIGNAL_DIR, sigs[0])) as f:
         sig = json.load(f)
     assert sig["event"] == "god_approve"
+    assert sig["tool"] == "edit"
     assert "main.py" in sig["cmd"]
 
 
@@ -185,7 +189,7 @@ def test_pre_tool_plan_not_auto_approved(god_mode_dir, monkeypatch, capsys):
     assert "approve" not in captured.out
 
 
-def test_pre_tool_edit_god_mode_bare_wid(god_mode_dir, monkeypatch, capsys):
+def test_pre_tool_god_mode_bare_wid(god_mode_dir, monkeypatch, capsys):
     """God mode approve works with bare wid (w5 matching w5a in god mode)."""
     astra._set_god_mode("5", True)  # stores as w5a
     monkeypatch.setattr(astra.tmux, "get_window_id", lambda: "w5")
@@ -193,8 +197,7 @@ def test_pre_tool_edit_god_mode_bare_wid(god_mode_dir, monkeypatch, capsys):
     capsys.readouterr()
 
     _run_hook(monkeypatch, _god_mode_hook_data(
-        "Edit", {"file_path": "/home/user/main.py",
-                 "old_string": "a", "new_string": "b"}))
+        "Bash", {"command": "apt install something"}))
 
     captured = capsys.readouterr()
     result = json.loads(captured.out.strip())

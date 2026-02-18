@@ -330,11 +330,14 @@ def process_signals(focused_wids: set[str] | None = None,
         elif event == "god_approve":
             # PreToolUse hook already approved — send receipt to Telegram.
             desc = signal.get("cmd", "") or "tool"
-            config._log("god", f"Hook auto-approved {wid} ({project}): {desc}")
+            tool_type = signal.get("tool", "")
+            label = {"shell": "Ran", "read": "Read", "edit": "Edited",
+                     "write": "Wrote"}.get(tool_type, "Approved")
+            config._log("god", f"{label} {wid} ({project}): {desc}")
             if not is_local:
                 telegram._fire_and_forget(
                     telegram.tg_send,
-                    f"\u26a1{tag} Auto-approved (`{project}`): `{desc}`",
+                    f"\u26a1{tag} {label} (`{project}`): `{desc}`",
                     silent=state._is_silent(_CAT_CONFIRM))
 
         elif event == "plan":

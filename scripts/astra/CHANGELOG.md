@@ -7,8 +7,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 
 ## 0.16.5
 
-- **Instant god mode for file tools via PreToolUse hook** — Read, Edit, and Write PreToolUse hooks output `{"decision": "approve"}` in god mode, bypassing Claude Code's ~2s internal delay between showing the permission dialog and firing the Notification hook; each auto-approve writes a `god_approve` signal so the listener sends `⚡ Auto-approved` receipts on Telegram with the file path
-- **Bash keeps Notification flow** — Bash permissions intentionally use the old Notification → listener → tmux-keys path so receipts only fire for commands that actually needed permission (not every `ls`/`cat`/`grep`)
+- **God mode via PreToolUse hooks** — all PreToolUse hooks (Bash, Read, Edit, Write) output `{"decision": "approve"}` in god mode, bypassing Claude Code's permission dialog; each writes a `god_approve` signal with the tool type so the listener sends descriptive receipts: `⚡ Ran`, `⚡ Read`, `⚡ Edited`, `⚡ Wrote`
 - **Read/Edit/Write hooks** — added PreToolUse hooks and profile tool mappings for Read, Edit, and Write in `claude_settings.json`
 - **Revert listener sleep optimization** — removed 100ms signal-polling loops and TG poll skip from 0.16.4 (no longer needed)
 

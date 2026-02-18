@@ -74,26 +74,26 @@ def cmd_hook():
     internal_event = profile.event_map.get(event, "")
     internal_tool = profile.tool_map.get(tool, "")
 
-    # PreToolUse/shell: save bash cmd for Notification handler (no auto-approve —
-    # Bash permissions use the old Notification flow so receipts only fire for
-    # commands that actually needed permission, not every ls/cat/grep).
-    if internal_event == "pre_tool" and internal_tool == "shell":
-        os.makedirs(config.SIGNAL_DIR, exist_ok=True)
-        wid = tmux.get_window_id() or "unknown"
-        cmd = data.get("tool_input", {}).get("command", "")
-        cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
-        with open(cmd_file, "w") as f:
-            json.dump({"cmd": cmd}, f)
-        return
-
-    # PreToolUse for file tools: god mode auto-approve (bypasses dialog delay).
+    # PreToolUse: save bash cmd + god mode auto-approve for all tools.
     # Handled early to keep stdout clean (approve decision must be only output).
-    if internal_event == "pre_tool" and internal_tool in ("edit", "write", "read"):
+    if internal_event == "pre_tool" and internal_tool not in ("plan", "question"):
         wid = tmux.get_window_id() or "unknown"
+        if internal_tool == "shell":
+            os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+            cmd = data.get("tool_input", {}).get("command", "")
+            cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+            with open(cmd_file, "w") as f:
+                json.dump({"cmd": cmd}, f)
         if state._is_god_mode_for(wid):
-            desc = data.get("tool_input", {}).get("file_path", "")[:200]
+            tool_input = data.get("tool_input", {})
+            if internal_tool == "shell":
+                desc = tool_input.get("command", "")[:200]
+            elif internal_tool in ("edit", "write", "read"):
+                desc = tool_input.get("file_path", "")[:200]
+            else:
+                desc = internal_tool
             print(json.dumps({"decision": "approve"}))
-            state.write_signal("god_approve", data, cmd=desc, cli=cli_name)
+            state.write_signal("god_approve", data, cmd=desc, tool=internal_tool, cli=cli_name)
         return
 
     config._log("hook", f"cli={cli_name} event={event}→{internal_event} tool={tool}→{internal_tool} keys={list(data.keys())}")
