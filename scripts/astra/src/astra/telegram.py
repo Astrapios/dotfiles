@@ -3,11 +3,17 @@ import mimetypes
 import os
 import re
 import struct
+import threading
 import time
 
 import requests
 
 from astra import config
+
+
+def _fire_and_forget(fn, *args, **kwargs):
+    """Run fn(*args, **kwargs) in a daemon thread (non-blocking)."""
+    threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
 
 
 def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,

@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.4
+
+- **Speed up god mode auto-accept** — non-critical Telegram calls run in background daemon threads via `_fire_and_forget()`; listener loop skips the ~500ms TG poll after processing signals; idle sleep (2s) replaced with 100ms signal-checking loop so new permission signals are picked up within ~100ms instead of waiting up to 2s
+- **Fix missed god mode auto-accepts for bare wids** — `_is_god_mode_for("w4")` now matches `"w4a"` in the god mode list, so hook signals arriving before session resolution are correctly auto-accepted
+- **Rescan sessions on unresolved wid** — when a signal's wid can't be resolved to a known session, `process_signals` rescans tmux to pick up newly appeared panes
+- **Migrate test runner to pytest** — switch from `unittest discover` to `python -m pytest`; add `pytest >= 7` dependency; fix pre-existing test isolation issue in `TestBareLastSessionPicker`
+
 ## 0.16.3
 
 - **Skip dialog detection for god mode sessions** — god mode auto-accepts permissions via hooks, so the startup dialog scanner no longer scans those sessions; prevents false-positive dialog notifications during rapid god-mode command sequences

@@ -113,6 +113,19 @@ def process_signals(focused_wids: set[str] | None = None,
                 if resolved:
                     wid = resolved
 
+        # Still unresolved — rescan sessions (new pane may have appeared)
+        if sessions and wid and wid not in sessions:
+            try:
+                fresh = tmux.scan_cli_sessions()
+                for sid, info in fresh.items():
+                    if isinstance(info, tmux.SessionInfo) and \
+                       (info.pane_id == pane or info.pane_target == pane):
+                        wid = sid
+                        sessions[sid] = info  # update caller's dict
+                        break
+            except Exception:
+                pass
+
         profile = profiles.get_profile(cli) or profiles.CLAUDE
         dn = _display_name_for(cli)
         tag = f" {state._wid_label(wid)}" if wid else ""
@@ -130,7 +143,7 @@ def process_signals(focused_wids: set[str] | None = None,
         if wid and not is_local:
             old_kb = config._clear_keyboard_msg(wid)
             if old_kb:
-                telegram._remove_inline_keyboard(old_kb)
+                telegram._fire_and_forget(telegram._remove_inline_keyboard, old_kb)
 
         if event == "stop":
             state._clear_busy(wid)
@@ -144,6 +157,8 @@ def process_signals(focused_wids: set[str] | None = None,
                 ("\U0001f50d Focus", f"cmd_focus_{wid}"),
             ]])
 
+            # Determine what to send (sync: pane capture + content cleaning)
+            _stop_send_args = None  # (func, *args, **kwargs) or None to skip
             if focused_wids and wid in focused_wids:
                 pass
             elif is_local:
@@ -166,38 +181,32 @@ def process_signals(focused_wids: set[str] | None = None,
                         idle, _ = routing._pane_idle_state(pane)
                         if not idle:
                             cleaned = ""
+                _stop_silent = state._is_silent(_CAT_STOP)
                 if cleaned and smartfocus_prev:
                     cur_lines = cleaned.splitlines()
                     new = content._compute_new_lines(smartfocus_prev, cur_lines)
-                    _stop_silent = state._is_silent(_CAT_STOP)
                     if new:
-                        # New lines since last 👁 update — send tail
                         tail_text = "\n".join(new).strip()
                         if tail_text:
                             header = f"✅{tag} (`{project}`) finished:\n\n"
-                            telegram._send_long_message(header, tail_text, wid, reply_markup=stop_kb, silent=_stop_silent)
+                            _stop_send_args = ("long", header, tail_text, wid, stop_kb, _stop_silent)
                         else:
-                            telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
+                            _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
                     elif smartfocus_has_sent:
-                        # No new lines — check if 👁 delivered the real content
-                        # or just noise (e.g. instruction echoes, tool progress)
                         sm = difflib.SequenceMatcher(None, smartfocus_prev, cur_lines)
                         if sm.ratio() < 0.3:
-                            # Content is very different from what smartfocus sent — send full response
                             header = f"✅{tag} (`{project}`) finished:\n\n"
-                            telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=_stop_silent)
+                            _stop_send_args = ("long", header, cleaned, wid, stop_kb, _stop_silent)
                         else:
-                            telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=_stop_silent)
+                            _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
                     else:
-                        # No new lines AND never sent any 👁 — send full response
                         header = f"✅{tag} (`{project}`) finished:\n\n"
-                        telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=_stop_silent)
+                        _stop_send_args = ("long", header, cleaned, wid, stop_kb, _stop_silent)
                 elif cleaned:
-                    # No prev_lines (very fast response) — send full content
                     header = f"✅{tag} (`{project}`) finished:\n\n"
-                    telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
+                    _stop_send_args = ("long", header, cleaned, wid, stop_kb, _stop_silent)
                 else:
-                    telegram.tg_send(f"✅{tag} (`{project}`) finished.", reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
+                    _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
             else:
                 raw = ""
                 if pane:
@@ -211,30 +220,39 @@ def process_signals(focused_wids: set[str] | None = None,
                     pw = 0
                 cleaned = content.clean_pane_content(raw, "stop", pw, profile=profile) if raw else "(could not capture pane)"
                 header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
-                telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
+                _stop_send_args = ("long", header, cleaned, wid, stop_kb, state._is_silent(_CAT_STOP))
 
-            # Check for queued messages (always, regardless of focus)
-            if not is_local:
-                queued = state._load_queued_msgs(wid)
+            # Fire-and-forget: send stop message + queued messages in background
+            # to avoid blocking signal processing on TG round-trips.
+            queued = state._load_queued_msgs(wid) if not is_local else []
+            if _stop_send_args or queued:
+                _queued_preview = ""
+                _saved_kb = None
                 if queued:
                     preview_lines = []
                     for i, m in enumerate(queued, 1):
                         preview_lines.append(f"{i}. `{m['text'][:100]}`")
-                    preview = "\n".join(preview_lines)
-                    saved_kb = telegram._build_inline_keyboard([[
+                    _queued_preview = f"💾 {len(queued)} saved message(s) for {state._wid_label(wid)}:\n" + "\n".join(preview_lines)
+                    _saved_kb = telegram._build_inline_keyboard([[
                         ("\u2709\ufe0f Send", f"saved_send_{wid}"),
                         ("\U0001f5d1 Discard", f"saved_discard_{wid}"),
                     ]])
-                    telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(wid)}:\n{preview}",
-                        reply_markup=saved_kb,
-                        silent=state._is_silent(_CAT_CONFIRM),
-                    )
+                # Capture all values for the closure
+                _sa, _qp, _sk, _cs = _stop_send_args, _queued_preview, _saved_kb, state._is_silent(_CAT_CONFIRM)
+                def _send_stop(_sa=_sa, _qp=_qp, _sk=_sk, _cs=_cs):
+                    if _sa:
+                        if _sa[0] == "long":
+                            telegram._send_long_message(_sa[1], _sa[2], _sa[3], reply_markup=_sa[4], silent=_sa[5])
+                        else:
+                            telegram.tg_send(_sa[1], reply_markup=_sa[2], silent=_sa[3])
+                    if _qp:
+                        telegram.tg_send(_qp, reply_markup=_sk, silent=_cs)
+                telegram._fire_and_forget(_send_stop)
 
             # God mode: ensure accept-edits is on when session becomes idle
             if pane and wid and state._is_god_mode_for(wid):
                 from astra import commands  # deferred to avoid circular
-                commands._enable_accept_edits(pane)
+                telegram._fire_and_forget(commands._enable_accept_edits, pane)
 
         elif event == "permission":
             bash_cmd = signal.get("cmd", "")
@@ -246,8 +264,10 @@ def process_signals(focused_wids: set[str] | None = None,
                 desc = bash_cmd[:200] if bash_cmd else (signal.get("message", "") or "permission")
                 config._log("god", f"Auto-allowed {wid} ({project}): {desc}")
                 if not is_local:
-                    telegram.tg_send(f"\u26a1{tag} Auto-allowed (`{project}`): `{desc}`",
-                                     silent=state._is_silent(_CAT_CONFIRM))
+                    telegram._fire_and_forget(
+                        telegram.tg_send,
+                        f"\u26a1{tag} Auto-allowed (`{project}`): `{desc}`",
+                        silent=state._is_silent(_CAT_CONFIRM))
             else:
                 perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
                 if options and not any(o.startswith("1.") for o in options):
@@ -313,8 +333,9 @@ def process_signals(focused_wids: set[str] | None = None,
             # If a blocking dialog somehow appears, startup dialog detection handles it.
             if not is_local:
                 msg = f"🗺{tag} {dn} (`{project}`) entered plan mode."
-                telegram.tg_send(msg, silent=state._is_silent(_CAT_QUESTION))
                 config._save_last_msg(wid, msg)
+                telegram._fire_and_forget(telegram.tg_send, msg,
+                                          silent=state._is_silent(_CAT_QUESTION))
 
         elif event == "question":
             questions = signal.get("questions", [])

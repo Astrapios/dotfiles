@@ -427,12 +427,22 @@ def _cleanup_stale_busy(active_sessions: dict):
 
 
 def _is_god_mode_for(wid: str) -> bool:
-    """Check if god mode is enabled for a specific wid (e.g. 'w4a')."""
+    """Check if god mode is enabled for a specific wid (e.g. 'w4a').
+
+    Also matches bare wids: ``_is_god_mode_for("w4")`` returns True when
+    ``"w4a"`` is in the god mode list (hook signals may arrive with bare wids
+    before session resolution).
+    """
     wids = _god_mode_wids()
     if "all" in wids:
         return True
-    # All stored values are fully suffixed now — exact match only
-    return wid in wids
+    if wid in wids:
+        return True
+    # Bare "w4" matches "w4a", "w4b", etc. (hook signals before resolution)
+    if re.match(r'^w\d+$', wid):
+        prefix = wid  # e.g. "w4"
+        return any(re.match(re.escape(prefix) + r'[a-z]$', w) for w in wids)
+    return False
 
 
 def _god_mode_wids() -> list[str]:

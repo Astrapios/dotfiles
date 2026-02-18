@@ -504,14 +504,26 @@ def _listen_tick(s):
     elif s.deepfocus_target_wid:
         s.deepfocus_target_wid = None
 
+    # Skip TG poll when signals were just processed — the ~500ms round-trip
+    # to Telegram delays the next signal pickup.  TG messages will be polled
+    # on the next idle tick instead.
+    if signal_wid or signals.has_pending_signals():
+        return None
+
     data, s.offset = telegram._poll_updates(s.offset, timeout=0)
     if data is None:
-        if not signals.has_pending_signals():
-            time.sleep(2)
+        # TG error — back off, but wake early if a signal arrives
+        for _ in range(20):
+            time.sleep(0.1)
+            if signals.has_pending_signals():
+                break
         return None
     if not data.get("result"):
-        if not signals.has_pending_signals():
-            time.sleep(0.15)
+        # No TG messages — wait up to 2s, checking for signals every 100ms
+        for _ in range(20):
+            time.sleep(0.1)
+            if signals.has_pending_signals():
+                break
         return None
 
     for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):

@@ -2718,6 +2718,7 @@ class TestBareLastSessionPicker(unittest.TestCase):
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_bare_last_single_auto_sends(self, mock_send):
+        astra._last_messages.clear()
         astra._last_messages["w4a"] = "the message"
         action, _, _ = astra._handle_command("/last", self.sessions, None)
         msg = mock_send.call_args[0][0]
