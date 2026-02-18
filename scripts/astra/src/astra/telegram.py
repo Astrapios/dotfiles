@@ -43,7 +43,20 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
             timeout=30,
         )
     r.raise_for_status()
-    return r.json()["result"]["message_id"]
+    msg_id = r.json()["result"]["message_id"]
+    # Debug log
+    kb_summary = "no"
+    if reply_markup:
+        inline = reply_markup.get("inline_keyboard")
+        if inline:
+            kb_summary = ",".join(
+                btn.get("callback_data", "?")
+                for row in inline for btn in row
+            )
+        elif reply_markup.get("keyboard"):
+            kb_summary = "reply_kb"
+    config._debug_tg("SEND", f"silent={'yes' if silent else 'no'} kb={kb_summary}", text)
+    return msg_id
 
 
 def _send_long_message(header: str, body: str, wid: str = "",
@@ -171,7 +184,9 @@ def tg_send_document(path: str, caption: str = "", chat_id: str = "") -> int:
                 timeout=60,
             )
     r.raise_for_status()
-    return r.json()["result"]["message_id"]
+    msg_id = r.json()["result"]["message_id"]
+    config._debug_tg("DOC", path, caption)
+    return msg_id
 
 
 def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
@@ -202,7 +217,9 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
                 timeout=60,
             )
     r.raise_for_status()
-    return r.json()["result"]["message_id"]
+    msg_id = r.json()["result"]["message_id"]
+    config._debug_tg("PHOTO", path, caption)
+    return msg_id
 
 
 def _build_reply_keyboard() -> dict:

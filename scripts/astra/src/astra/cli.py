@@ -179,6 +179,43 @@ def cmd_local():
         sys.exit(1)
 
 
+def cmd_debug():
+    """Manage debug logging from CLI."""
+    arg = sys.argv[2] if len(sys.argv) > 2 else ""
+    if arg == "on":
+        config._set_debug(True)
+        print("Debug logging: on.")
+    elif arg == "off":
+        config._set_debug(False)
+        print("Debug logging: off (log deleted).")
+    elif arg == "clear":
+        try:
+            open(config.DEBUG_LOG, "w").close()
+        except OSError:
+            pass
+        print("Debug log cleared.")
+    elif not arg or arg.isdigit():
+        n = int(arg) if arg else 20
+        enabled = config._is_debug_enabled()
+        print(f"Debug logging: {'on' if enabled else 'off'}")
+        if enabled or os.path.isfile(config.DEBUG_LOG):
+            try:
+                with open(config.DEBUG_LOG) as f:
+                    lines = f.readlines()
+                tail = lines[-n:] if lines else []
+                if tail:
+                    print(f"Last {len(tail)} log lines:")
+                    for line in tail:
+                        print(f"  {line.rstrip()}")
+                else:
+                    print("(log empty)")
+            except FileNotFoundError:
+                print("(no log file)")
+    else:
+        print("Usage: astra debug [on|off|clear|N]", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_autofocus():
     """Manage autofocus from CLI."""
     arg = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -619,6 +656,7 @@ Config (no Telegram credentials needed):
   local [on|off]               Toggle local suppress
   autofocus [on|off]           Toggle autofocus
   notification [1..7|all|off]  Configure notification levels
+  debug [on|off|clear|N]       Debug log for outbound Telegram messages
 
 Session management (no Telegram credentials needed):
   status [wN] [lines]          List sessions or show pane output
@@ -696,7 +734,8 @@ def main():
 
     # Config & session commands — no Telegram credentials needed
     _local_commands = {
-        "god": cmd_god, "local": cmd_local, "autofocus": cmd_autofocus,
+        "god": cmd_god, "local": cmd_local, "debug": cmd_debug,
+        "autofocus": cmd_autofocus,
         "notification": cmd_notification, "status": cmd_status,
         "focus": cmd_focus, "deepfocus": cmd_deepfocus, "unfocus": cmd_unfocus,
         "clear": cmd_clear, "interrupt": cmd_interrupt, "name": cmd_name,

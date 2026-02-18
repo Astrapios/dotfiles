@@ -40,6 +40,51 @@ def _log(tag: str, msg: str):
     print(f"[{ts}] [{tag}] {msg}")
 
 
+DEBUG_LOG = "/tmp/astra_debug.log"
+_DEBUG_MAX = 512 * 1024  # 500 KB auto-truncate
+
+
+def _is_debug_enabled() -> bool:
+    """Check if debug logging is enabled."""
+    return os.path.exists(os.path.join(SIGNAL_DIR, "_debug_on.json"))
+
+
+def _set_debug(enabled: bool):
+    """Enable or disable debug logging."""
+    os.makedirs(SIGNAL_DIR, exist_ok=True)
+    path = os.path.join(SIGNAL_DIR, "_debug_on.json")
+    if enabled:
+        with open(path, "w") as f:
+            f.write("{}")
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        try:
+            os.remove(DEBUG_LOG)
+        except OSError:
+            pass
+
+
+def _debug_tg(kind: str, detail: str, text: str):
+    """Append a debug line if debug logging is enabled. Auto-truncates at _DEBUG_MAX."""
+    if not _is_debug_enabled():
+        return
+    ts = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    line = f"[{ts}] {kind} {detail} | {text[:500]}\n"
+    try:
+        with open(DEBUG_LOG, "a") as f:
+            f.write(line)
+        if os.path.getsize(DEBUG_LOG) > _DEBUG_MAX:
+            with open(DEBUG_LOG, "r") as f:
+                data = f.read()
+            with open(DEBUG_LOG, "w") as f:
+                f.write(data[len(data) // 2:])
+    except OSError:
+        pass
+
+
 _last_messages: dict[str, str] = {}  # wid -> last sent message
 _keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
 

@@ -68,6 +68,10 @@ astra uses semver pre-1.0. **On every commit touching `scripts/astra/`**, check 
 
 Always update both `pyproject.toml` version and `CHANGELOG.md` together with the change.
 
+### Debugging
+
+`astra debug on` enables a transient log of all outbound Telegram API calls at `/tmp/astra_debug.log`. Use `astra debug` or `astra debug 50` to view recent lines. State tracked via `_debug_on.json` in SIGNAL_DIR (same pattern as `_god_quiet.json`). Auto-truncates at 500KB.
+
 ### Credentials
 
 Telegram secrets stored in `~/.config/astra.env` (not tracked). Hooks are enabled by default; set `NO_ASTRA=1` in a project's settings to disable for that session.

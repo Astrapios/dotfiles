@@ -5,6 +5,15 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.18.0
+
+- **Debug log for outbound Telegram messages** — opt-in transient debug mode that logs every `tg_send`, `tg_send_photo`, and `tg_send_document` call to `/tmp/astra_debug.log`
+  - `astra debug on` / `astra debug off` — enable/disable (off deletes log)
+  - `astra debug [N]` — show status and last N log lines (default 20)
+  - `astra debug clear` — clear log file without disabling
+  - Log format: `[timestamp] SEND/PHOTO/DOC detail | text`
+  - Auto-truncates at 500KB
+
 ## 0.17.0
 
 - **Full CLI subcommands** — all Telegram commands now have local CLI equivalents that work without Telegram credentials:

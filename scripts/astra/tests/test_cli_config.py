@@ -605,6 +605,11 @@ class TestMainDispatcher:
             astra.main()
         # All should succeed (no SystemExit for missing creds)
 
+    def test_debug_dispatched(self, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug"])
+        astra.main()
+        assert "Debug logging" in capsys.readouterr().out
+
     def test_status_dispatched(self, capsys, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["astra", "status"])
         monkeypatch.setattr(config, "BOT", "")
@@ -612,3 +617,108 @@ class TestMainDispatcher:
         with patch.object(astra.tmux, "scan_claude_sessions", return_value={}):
             astra.main()
         assert "No CLI sessions" in capsys.readouterr().out
+
+
+# --- debug ---
+
+class TestCmdDebug:
+    def test_status_off(self, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug"])
+        astra.cmd_debug()
+        out = capsys.readouterr().out
+        assert "Debug logging: off" in out
+
+    def test_enable(self, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "on"])
+        astra.cmd_debug()
+        assert "on" in capsys.readouterr().out
+        assert config._is_debug_enabled()
+
+    def test_disable(self, capsys, monkeypatch):
+        config._set_debug(True)
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "off"])
+        astra.cmd_debug()
+        assert "off" in capsys.readouterr().out
+        assert not config._is_debug_enabled()
+
+    def test_disable_deletes_log(self, tmp_path, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        with open(log, "w") as f:
+            f.write("test line\n")
+        config._set_debug(True)
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "off"])
+        astra.cmd_debug()
+        assert not os.path.exists(log)
+
+    def test_show_lines(self, tmp_path, capsys, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        config._set_debug(True)
+        with open(log, "w") as f:
+            for i in range(5):
+                f.write(f"[2026-01-01T00:00:0{i}] SEND silent=no kb=no | msg {i}\n")
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "3"])
+        astra.cmd_debug()
+        out = capsys.readouterr().out
+        assert "msg 2" in out
+        assert "msg 3" in out
+        assert "msg 4" in out
+        assert "msg 0" not in out
+
+    def test_clear(self, tmp_path, capsys, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        with open(log, "w") as f:
+            f.write("old data\n")
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "clear"])
+        astra.cmd_debug()
+        assert "cleared" in capsys.readouterr().out.lower()
+        assert os.path.getsize(log) == 0
+
+    def test_invalid_arg(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "bogus"])
+        with pytest.raises(SystemExit):
+            astra.cmd_debug()
+
+
+class TestDebugTg:
+    def test_writes_when_enabled(self, tmp_path, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        config._set_debug(True)
+        config._debug_tg("SEND", "silent=no kb=no", "hello world")
+        assert os.path.isfile(log)
+        content = open(log).read()
+        assert "SEND" in content
+        assert "hello world" in content
+
+    def test_skips_when_disabled(self, tmp_path, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        config._debug_tg("SEND", "silent=no kb=no", "hello world")
+        assert not os.path.exists(log)
+
+    def test_truncates_at_max(self, tmp_path, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        monkeypatch.setattr(config, "_DEBUG_MAX", 200)
+        config._set_debug(True)
+        for i in range(50):
+            config._debug_tg("SEND", "kb=no", f"message number {i} with padding " + "x" * 50)
+        assert os.path.getsize(log) <= 200
+
+    def test_tg_send_logs_when_debug(self, tmp_path, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        config._set_debug(True)
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"result": {"message_id": 42}}
+        fake_resp.raise_for_status = MagicMock()
+        with patch("requests.post", return_value=fake_resp):
+            from astra import telegram
+            telegram.tg_send("test message")
+        content = open(log).read()
+        assert "SEND" in content
+        assert "test message" in content

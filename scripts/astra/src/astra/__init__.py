@@ -29,6 +29,7 @@ from . import cli
 # config
 from .config import (
     _load_env_file, BOT, CHAT_ID, TG_HOOKS_ENABLED, TG_MAX, SIGNAL_DIR,
+    DEBUG_LOG, _is_debug_enabled, _set_debug, _debug_tg,
     _log, _last_messages, _save_last_msg,
 )
 
@@ -104,7 +105,7 @@ from .listener import _merge_album_photos, cmd_listen
 # cli
 from .cli import (
     cmd_notify, cmd_ask, cmd_send_photo, cmd_send_doc, cmd_hook, cmd_help,
-    cmd_god, cmd_local, cmd_autofocus, cmd_notification,
+    cmd_god, cmd_local, cmd_debug, cmd_autofocus, cmd_notification,
     cmd_status, cmd_focus, cmd_deepfocus, cmd_unfocus, cmd_clear,
     cmd_interrupt, cmd_name, cmd_saved, cmd_log, cmd_new, cmd_restart, cmd_kill,
     main,

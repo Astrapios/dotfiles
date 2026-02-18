@@ -110,6 +110,7 @@ astra notify <message>    Send a one-shot notification
 astra ask <question>      Send a question, wait for reply, print to stdout
 astra send-photo <path> [caption]  Send a photo to Telegram
 astra send-doc <path> [caption]    Send a file as a document to Telegram
+astra debug [on|off|clear|N]  Debug log for outbound Telegram messages
 astra help                Show help
 ```
 
