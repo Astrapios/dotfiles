@@ -107,6 +107,9 @@ def process_signals(focused_wids: set[str] | None = None,
         if pane:
             project = tmux.get_pane_project(pane) or project
 
+        local_tag = " [local]" if is_local else ""
+        config._log("signal", f"{event} for {wid} ({project}){local_tag}")
+
         # Remove stale inline keyboard from previous message for this session
         if wid and not is_local:
             old_kb = config._clear_keyboard_msg(wid)
@@ -328,7 +331,5 @@ def process_signals(focused_wids: set[str] | None = None,
             pass
         if wid:
             last_wid = wid
-        local_tag = " [local]" if is_local else ""
-        config._log("signal", f"{event} for {wid} ({project}){local_tag}")
 
     return last_wid
