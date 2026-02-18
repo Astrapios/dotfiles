@@ -501,6 +501,16 @@ class TestStartupDialogDetection(SimTestBase):
     the listener scans for numbered-option dialogs and forwards them.
     """
 
+    def _trigger_dialog(self, s):
+        """Run enough ticks to pass the 10s debounce for dialog detection."""
+        # First tick: dialog first seen (starts debounce timer)
+        self.h.clock.advance(6)
+        s.last_interrupt_check = 0
+        self.h.tick(s)
+        # Second tick: past 10s debounce (need >10s gap) → notification fires
+        self.h.clock.advance(11)
+        self.h.tick(s)
+
     def test_gemini_trust_dialog_forwarded(self):
         """Gemini trust dialog → Telegram notification with buttons."""
         self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
@@ -509,12 +519,7 @@ class TestStartupDialogDetection(SimTestBase):
                                     "   2. Don't trust\n"
                                 ))
         s = self.h.make_listener_state()
-        # No _busy_ file, not idle → dialog candidate
-
-        # Advance past the 5s scan interval
-        self.h.clock.advance(6)
-        s.last_interrupt_check = 0
-        self.h.tick(s)
+        self._trigger_dialog(s)
 
         # Should have sent a dialog notification
         self.h.assert_sent("dialog")
@@ -528,10 +533,7 @@ class TestStartupDialogDetection(SimTestBase):
                                     "   2. Don't trust\n"
                                 ))
         s = self.h.make_listener_state()
-        self.h.clock.advance(6)
-        s.last_interrupt_check = 0
-
-        self.h.tick(s)
+        self._trigger_dialog(s)
         first_count = len(self.h.tg.find_sent("dialog"))
 
         self.h.clock.advance(6)
@@ -549,9 +551,7 @@ class TestStartupDialogDetection(SimTestBase):
                                     "   2. Don't trust\n"
                                 ))
         s = self.h.make_listener_state()
-        self.h.clock.advance(6)
-        s.last_interrupt_check = 0
-        self.h.tick(s)
+        self._trigger_dialog(s)
 
         # Now session goes idle (dialog answered)
         self.h.tmux.set_pane_content("5", " >   \n")
@@ -613,12 +613,32 @@ class TestStartupDialogDetection(SimTestBase):
                                     "    4. Type something.\n"
                                 ))
         s = self.h.make_listener_state()
+        self._trigger_dialog(s)
+
+        # Should detect the dialog even for Claude
+        self.h.assert_sent("dialog")
+
+    def test_transient_dialog_not_sent(self):
+        """Dialog that disappears within debounce window → no notification."""
+        self.h.tmux.add_session("5", "%30", "newproject", cli="gemini",
+                                content=(
+                                    " > 1. Trust this folder\n"
+                                    "   2. Don't trust\n"
+                                ))
+        s = self.h.make_listener_state()
+        # First tick: dialog first seen
         self.h.clock.advance(6)
         s.last_interrupt_check = 0
         self.h.tick(s)
 
-        # Should detect the dialog even for Claude
-        self.h.assert_sent("dialog")
+        # Dialog handled by hooks before debounce expires → goes idle
+        self.h.tmux.set_pane_content("5", " >   \n")
+        self.h.tmux.panes["5"].cursor_x = 1
+        self.h.clock.advance(6)
+        self.h.tick(s)
+
+        # No dialog notification should have been sent
+        self.h.assert_not_sent("dialog")
 
 
 if __name__ == "__main__":

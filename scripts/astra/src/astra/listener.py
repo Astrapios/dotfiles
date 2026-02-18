@@ -139,6 +139,7 @@ class _ListenerState:
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
     dialog_notified: set = field(default_factory=set)
+    dialog_first_seen: dict = field(default_factory=dict)  # wid → timestamp
     god_wids: list = field(default_factory=list)
 
 
@@ -279,15 +280,19 @@ def _listen_tick(s):
         s.compact_notified -= s.compact_notified - set(s.sessions)
 
         # --- Startup dialog detection (no hooks fire for pre-startup dialogs) ---
+        # Debounce: only fire after dialog persists for 10s+ to avoid racing
+        # with hook-based permission handling (which processes signals in the
+        # same tick, after this scan).
+        _DIALOG_DEBOUNCE = 10
+        now = time.time()
         for wid, (pane, project) in s.sessions.items():
             idle, _ = routing._pane_idle_state(pane)
-            if idle or state._is_busy(wid):
-                # Session went idle or got busy via hooks — clear notified state
+            if idle or state._is_busy(wid) or state.has_active_prompt(wid):
+                # Session went idle, got busy via hooks, or prompt saved — reset
                 s.dialog_notified.discard(wid)
+                s.dialog_first_seen.pop(wid, None)
                 continue
             if wid in s.dialog_notified:
-                continue
-            if state.has_active_prompt(wid):
                 continue
             # Not idle, not busy, no active prompt → check for dialog
             try:
@@ -296,6 +301,13 @@ def _listen_tick(s):
                 continue
             result = content._detect_numbered_dialog(raw)
             if not result:
+                s.dialog_first_seen.pop(wid, None)
+                continue
+            # Debounce: track first sighting, only notify after threshold
+            if wid not in s.dialog_first_seen:
+                s.dialog_first_seen[wid] = now
+                continue
+            if now - s.dialog_first_seen[wid] < _DIALOG_DEBOUNCE:
                 continue
             question, options = result
             win_idx = re.match(r'^w?(\d+)', wid).group(1)
@@ -325,8 +337,11 @@ def _listen_tick(s):
             else:
                 config._log("local", f"suppressed dialog for {wid} ({project})")
             s.dialog_notified.add(wid)
+            s.dialog_first_seen.pop(wid, None)
         # Clear for gone sessions
         s.dialog_notified -= s.dialog_notified - set(s.sessions)
+        for gone in set(s.dialog_first_seen) - set(s.sessions):
+            s.dialog_first_seen.pop(gone, None)
 
     focus_state = state._load_focus_state()
     deepfocus_state = state._load_deepfocus_state()

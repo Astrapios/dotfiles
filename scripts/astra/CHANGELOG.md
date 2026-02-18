@@ -10,7 +10,8 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - **Startup dialog detection** — periodically scan all CLI sessions for numbered-option dialogs that appear before hooks are active (e.g. Gemini "trust folder" prompt); forward to Telegram with inline buttons and route replies via the existing active prompt mechanism
 - CLI-agnostic: detects dialogs in any session that is not idle AND not marked busy (defense-in-depth for hook failures)
 - Custom confirmation labels: `perm_` callback uses option text from the dialog (e.g. "Trust this folder") instead of generic "Allowed"/"Denied"
-- `has_active_prompt()` non-destructive check in state.py; `_detect_numbered_dialog()` in content.py; `dialog_notified` set in `_ListenerState`
+- 10-second debounce prevents false positives: normal permission dialogs handled by hooks within 2–3s are ignored; only dialogs persisting 10s+ trigger a notification
+- `has_active_prompt()` non-destructive check in state.py; `_detect_numbered_dialog()` in content.py; `dialog_notified` / `dialog_first_seen` in `_ListenerState`
 - **EnterPlanMode is now informational** — send "entered plan mode" notification instead of stale Approve/Deny buttons (Claude Code auto-approves EnterPlanMode; the real plan approval comes via ExitPlanMode as a permission event)
 - **Fix `/restart` for pane-less CLIs** — when Ctrl+C kills a CLI that was the pane's initial command (e.g. Gemini started via `/new`), the pane closes; `/restart` now detects the dead pane and creates a new window instead of failing with "pane may have closed"
 
