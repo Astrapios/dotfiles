@@ -475,13 +475,13 @@ class TestStopSignalCliField(SimTestBase):
 
     def test_stop_signal_with_cli_gemini(self):
         """Stop signal with cli='gemini' generates proper display name."""
-        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        self.h.tmux.add_session("4", "%20", "myproject", cli="gemini", idle=True)
         s = self.h.make_listener_state()
 
         self.h.tmux.set_pane_content("4",
-            "● Here is my response\n"
+            "✦ Here is my response from Gemini\n"
             "Some content here\n"
-            "❯ "
+            " > "
         )
 
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject", cli="gemini")
@@ -492,6 +492,23 @@ class TestStopSignalCliField(SimTestBase):
         self.assertTrue(len(finished_msgs) > 0)
         # The message should use "Gemini" display name
         self.h.assert_sent("Gemini")
+
+    def test_gemini_stop_captures_response_content(self):
+        """Gemini stop captures content between ✦ bullet and > prompt."""
+        self.h.tmux.add_session("5", "%30", "myproject", cli="gemini", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tmux.set_pane_content("5",
+            "✦ The analysis is complete.\n"
+            "Here are the key findings.\n"
+            " > "
+        )
+
+        self.h.inject_signal("stop", "w5", pane="%30", project="myproject", cli="gemini")
+        self.h.tick(s)
+
+        # Should capture actual response content, not empty
+        self.h.assert_sent("analysis is complete")
 
 
 class TestStartupDialogDetection(SimTestBase):

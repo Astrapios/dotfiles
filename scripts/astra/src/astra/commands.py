@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import time
 
-from astra import config, telegram, tmux, state, content, routing
+from astra import config, telegram, tmux, state, content, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_ERROR = 4
@@ -194,21 +194,23 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                              reply_markup=tmux._sessions_keyboard(sessions))
             return None, sessions, last_win_idx
         explicit_lines = status_m.group(2) is not None
-        for win_idx, (pane, project) in targets:
+        for win_idx, info in targets:
+            pane, project = info
+            _prof = profiles.get_profile(info.cli) if hasattr(info, 'cli') else None
             pw = tmux._get_pane_width(pane)
             if explicit_lines:
                 raw = tmux._capture_pane(pane, num_lines * 3 + 20)
-                filtered = content.clean_pane_status(raw, pw)
+                filtered = content.clean_pane_status(raw, pw, profile=_prof)
                 lines = filtered.splitlines()
                 status_content = "\n".join(lines[-num_lines:]) if lines else ""
             else:
                 for n in (30, 80, 200):
                     raw = tmux._capture_pane(pane, n)
-                    if content._has_response_start(raw):
+                    if content._has_response_start(raw, profile=_prof):
                         break
-                raw_view = content.clean_pane_status(tmux._capture_pane(pane, 30), pw)
-                if content._has_response_start(raw):
-                    bullet_view = content.clean_pane_content(raw, "stop", pw)
+                raw_view = content.clean_pane_status(tmux._capture_pane(pane, 30), pw, profile=_prof)
+                if content._has_response_start(raw, profile=_prof):
+                    bullet_view = content.clean_pane_content(raw, "stop", pw, profile=_prof)
                     status_content = bullet_view if len(bullet_view) >= len(raw_view) else raw_view
                 else:
                     status_content = raw_view

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 import requests
 
-from astra import config, telegram, tmux, state, content, commands, signals, routing
+from astra import config, telegram, tmux, state, content, commands, signals, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_PERMISSION = 1
@@ -381,11 +381,13 @@ def _listen_tick(s):
                 s.focus_target_wid = None
                 focus_state = None
         if focus_state:
+            _finfo = s.sessions.get(fw)
+            _fprofile = profiles.get_profile(_finfo.cli) if _finfo and hasattr(_finfo, 'cli') else None
             for n in (50, 150):
                 raw = tmux._capture_pane(fp, n)
-                if content._has_response_start(raw):
+                if content._has_response_start(raw, profile=_fprofile):
                     break
-            cleaned = content.clean_pane_content(raw, "stop", s.focus_pane_width)
+            cleaned = content.clean_pane_content(raw, "stop", s.focus_pane_width, profile=_fprofile)
             if cleaned:
                 h = hash(cleaned)
                 if h != s.focus_last_hash and s.focus_last_hash != 0:
@@ -418,10 +420,13 @@ def _listen_tick(s):
                     s.smartfocus_prev_lines = []
                     smartfocus_state = None
             if smartfocus_state:
+                _sfinfo = s.sessions.get(sfw)
+                _sfprofile = profiles.get_profile(_sfinfo.cli) if _sfinfo and hasattr(_sfinfo, 'cli') else None
+                _sfpc = _sfprofile.prompt_char if _sfprofile else "❯"
                 raw = tmux._capture_pane(sfp, 50)
-                cur_lines = content._filter_noise(raw)
+                cur_lines = content._filter_noise(raw, profile=_sfprofile)
                 for i in range(len(cur_lines) - 1, -1, -1):
-                    if cur_lines[i].strip().startswith("❯"):
+                    if cur_lines[i].strip().startswith(_sfpc):
                         cur_lines = cur_lines[:i]
                         break
                 if s.smartfocus_pane_width:

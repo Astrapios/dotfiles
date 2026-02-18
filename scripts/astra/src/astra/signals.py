@@ -5,7 +5,7 @@ import os
 import re
 import time
 
-from astra import config, telegram, tmux, content, state, routing
+from astra import config, telegram, tmux, content, state, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_PERMISSION = 1
@@ -96,6 +96,7 @@ def process_signals(focused_wids: set[str] | None = None,
                 if resolved:
                     wid = resolved
 
+        profile = profiles.get_profile(cli) or profiles.CLAUDE
         dn = _display_name_for(cli)
         tag = f" {state._wid_label(wid)}" if wid else ""
         # locally_viewed contains bare window indices; extract from wid
@@ -133,13 +134,14 @@ def process_signals(focused_wids: set[str] | None = None,
                 pw = tmux._get_pane_width(pane)
                 for num_lines in (30, 80, 200):
                     raw = tmux._capture_pane(pane, num_lines)
-                    if content._has_response_start(raw):
+                    if content._has_response_start(raw, profile=profile):
                         break
-                cleaned = content.clean_pane_content(raw, "stop", pw) if raw else ""
-                # Guard: if no ❯ boundary in capture and pane is busy,
+                cleaned = content.clean_pane_content(raw, "stop", pw, profile=profile) if raw else ""
+                # Guard: if no prompt boundary in capture and pane is busy,
                 # the capture contains next-task content — discard it
                 if cleaned and raw:
-                    has_boundary = any(l.strip().startswith("❯") for l in raw.splitlines())
+                    pc = profile.prompt_char
+                    has_boundary = any(l.strip().startswith(pc) for l in raw.splitlines())
                     if not has_boundary:
                         idle, _ = routing._pane_idle_state(pane)
                         if not idle:
@@ -183,11 +185,11 @@ def process_signals(focused_wids: set[str] | None = None,
                     pw = tmux._get_pane_width(pane)
                     for num_lines in (30, 80, 200):
                         raw = tmux._capture_pane(pane, num_lines)
-                        if content._has_response_start(raw):
+                        if content._has_response_start(raw, profile=profile):
                             break
                 else:
                     pw = 0
-                cleaned = content.clean_pane_content(raw, "stop", pw) if raw else "(could not capture pane)"
+                cleaned = content.clean_pane_content(raw, "stop", pw, profile=profile) if raw else "(could not capture pane)"
                 header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
                 telegram._send_long_message(header, cleaned, wid, reply_markup=stop_kb, silent=state._is_silent(_CAT_STOP))
 

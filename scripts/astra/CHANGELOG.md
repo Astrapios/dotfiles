@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.1
+
+- **Fix Gemini stop output capture** — stop handler, `/last` command, focus mode, and smartfocus all defaulted to Claude's profile (`●`/`❯`) when extracting response content; Gemini responses (`✦`/`>`) returned empty. Now pass the correct CLI profile throughout signal processing, content extraction, and monitoring paths.
+
 ## 0.16.0
 
 - **Startup dialog detection** — periodically scan all CLI sessions for numbered-option dialogs that appear before hooks are active (e.g. Gemini "trust folder" prompt); forward to Telegram with inline buttons and route replies via the existing active prompt mechanism
