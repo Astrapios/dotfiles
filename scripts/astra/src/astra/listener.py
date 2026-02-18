@@ -287,8 +287,9 @@ def _listen_tick(s):
         now = time.time()
         for wid, (pane, project) in s.sessions.items():
             idle, _ = routing._pane_idle_state(pane)
-            if idle or state._is_busy(wid) or state.has_active_prompt(wid):
-                # Session went idle, got busy via hooks, or prompt saved — reset
+            if idle or state._is_busy(wid) or state.has_active_prompt(wid) \
+               or state._is_god_mode_for(wid):
+                # Session idle, busy, has prompt, or god mode handles it — reset
                 s.dialog_notified.discard(wid)
                 s.dialog_first_seen.pop(wid, None)
                 continue

@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.3
+
+- **Skip dialog detection for god mode sessions** — god mode auto-accepts permissions via hooks, so the startup dialog scanner no longer scans those sessions; prevents false-positive dialog notifications during rapid god-mode command sequences
+
 ## 0.16.2
 
 - **Fix god mode and signal routing in multi-pane windows** — hook signals use TMUX_PANE format (`%2`) but session scan used `session:window.pane` format (`main:1.0`); pane target matching never matched, so bare `wN` wids in multi-pane windows (e.g. Claude + Gemini in w1) couldn't resolve to the correct `wNa`/`wNb` suffix. Added `pane_id` field to `SessionInfo`, captured during scan, matched during signal processing.
