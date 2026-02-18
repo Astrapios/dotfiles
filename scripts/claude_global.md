@@ -10,6 +10,10 @@
 - When dealing with terminal UI interactions (tmux send-keys), capture the actual pane content at each step to understand the UI state before writing key sequences.
 - Think through the full execution path before making changes — trace through the code, consider timing, and verify assumptions.
 
+## Testing
+
+- Default to **pytest** for writing unit tests (not unittest). Use plain `assert` statements, pytest fixtures, and `mocker` (pytest-mock) instead of `unittest.TestCase`, `self.assert*`, and `@patch` decorators.
+
 ## Telegram Integration
 
 When the user asks you to show, send, or share an image, figure, chart, screenshot, or any visual file to Telegram, use:
