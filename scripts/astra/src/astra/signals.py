@@ -1,4 +1,7 @@
-"""Signal processing and question formatting."""
+"""Signal processing and question formatting.
+
+Signal files live in config.SIGNAL_DIR as ``*.json`` (state files use ``_`` prefix).
+"""
 import difflib
 import json
 import os
@@ -12,6 +15,15 @@ _CAT_PERMISSION = 1
 _CAT_STOP = 2
 _CAT_QUESTION = 3
 _CAT_CONFIRM = 7
+
+
+def has_pending_signals() -> bool:
+    """Fast check: are there unprocessed signal files?"""
+    try:
+        return any(f.endswith(".json") and not f.startswith("_")
+                   for f in os.listdir(config.SIGNAL_DIR))
+    except OSError:
+        return False
 
 
 def _display_name_for(cli: str = "") -> str:
@@ -60,6 +72,10 @@ def process_signals(focused_wids: set[str] | None = None,
     try:
         files = sorted(os.listdir(config.SIGNAL_DIR))
     except OSError:
+        return None
+
+    # Fast exit if no signal files (only state files starting with _)
+    if not any(f.endswith(".json") and not f.startswith("_") for f in files):
         return None
 
     last_wid = None

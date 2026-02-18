@@ -506,10 +506,12 @@ def _listen_tick(s):
 
     data, s.offset = telegram._poll_updates(s.offset, timeout=0)
     if data is None:
-        time.sleep(2)
+        if not signals.has_pending_signals():
+            time.sleep(2)
         return None
     if not data.get("result"):
-        time.sleep(0.15)
+        if not signals.has_pending_signals():
+            time.sleep(0.15)
         return None
 
     for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):
