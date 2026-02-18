@@ -5,6 +5,14 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.17.0
+
+- **Full CLI subcommands** — all Telegram commands now have local CLI equivalents that work without Telegram credentials:
+  - **Config:** `astra god`, `astra local`, `astra autofocus`, `astra notification` — manage global settings; no args shows current state
+  - **Session:** `astra status [wN] [lines]`, `astra focus [wN]`, `astra deepfocus [wN]`, `astra unfocus`, `astra interrupt [wN]`, `astra clear [wN]`, `astra name [wN] [label]`, `astra saved [wN]` — inspect and manage sessions
+  - **Management:** `astra new [claude|gemini] [dir]`, `astra restart <wN>`, `astra kill <wN>` — session lifecycle
+  - **Debug:** `astra log [N]` — show listener journal lines
+
 ## 0.16.6
 
 - **God mode quiet/loud toggle** — `/god quiet` (alias `gq`) suppresses god mode receipt messages on Telegram; `/god loud` (alias `gl`) re-enables them; bare `/god` status shows "(quiet)" when suppressed

@@ -102,4 +102,10 @@ from .commands import (
 from .listener import _merge_album_photos, cmd_listen
 
 # cli
-from .cli import cmd_notify, cmd_ask, cmd_send_photo, cmd_send_doc, cmd_hook, cmd_help, main
+from .cli import (
+    cmd_notify, cmd_ask, cmd_send_photo, cmd_send_doc, cmd_hook, cmd_help,
+    cmd_god, cmd_local, cmd_autofocus, cmd_notification,
+    cmd_status, cmd_focus, cmd_deepfocus, cmd_unfocus, cmd_clear,
+    cmd_interrupt, cmd_name, cmd_saved, cmd_log, cmd_new, cmd_restart, cmd_kill,
+    main,
+)
