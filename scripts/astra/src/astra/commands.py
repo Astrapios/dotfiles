@@ -483,7 +483,6 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     # /new [claude|gemini] [dir]
     new_m = re.match(r"^/new(?:\s+(.+))?$", text)
     if new_m:
-        from astra import profiles
         args = new_m.group(1).strip().split(None, 1) if new_m.group(1) else []
         cli_name = "claude"
         dir_arg = None
@@ -603,7 +602,6 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if idx:
             pane, project = sessions[idx]
             # Remember CLI type before killing (SessionInfo carries it)
-            from astra import profiles
             orig_info = sessions[idx]
             if isinstance(orig_info, tmux.SessionInfo):
                 restart_profile = profiles.get_profile(orig_info.cli) or profiles.CLAUDE
