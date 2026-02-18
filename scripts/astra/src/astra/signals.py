@@ -327,6 +327,16 @@ def process_signals(focused_wids: set[str] | None = None,
                                          shortcuts=shortcuts,
                                          free_text_at=free_text_at)
 
+        elif event == "god_approve":
+            # PreToolUse hook already approved — send receipt to Telegram.
+            desc = signal.get("cmd", "") or "tool"
+            config._log("god", f"Hook auto-approved {wid} ({project}): {desc}")
+            if not is_local:
+                telegram._fire_and_forget(
+                    telegram.tg_send,
+                    f"\u26a1{tag} Auto-approved (`{project}`): `{desc}`",
+                    silent=state._is_silent(_CAT_CONFIRM))
+
         elif event == "plan":
             # EnterPlanMode is auto-approved by Claude Code — no blocking dialog.
             # Send an informational notification (no buttons, no active prompt).

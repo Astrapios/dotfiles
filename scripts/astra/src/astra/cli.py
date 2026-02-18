@@ -74,6 +74,28 @@ def cmd_hook():
     internal_event = profile.event_map.get(event, "")
     internal_tool = profile.tool_map.get(tool, "")
 
+    # PreToolUse/shell: save bash cmd for Notification handler (no auto-approve —
+    # Bash permissions use the old Notification flow so receipts only fire for
+    # commands that actually needed permission, not every ls/cat/grep).
+    if internal_event == "pre_tool" and internal_tool == "shell":
+        os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+        wid = tmux.get_window_id() or "unknown"
+        cmd = data.get("tool_input", {}).get("command", "")
+        cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+        with open(cmd_file, "w") as f:
+            json.dump({"cmd": cmd}, f)
+        return
+
+    # PreToolUse for file tools: god mode auto-approve (bypasses dialog delay).
+    # Handled early to keep stdout clean (approve decision must be only output).
+    if internal_event == "pre_tool" and internal_tool in ("edit", "write", "read"):
+        wid = tmux.get_window_id() or "unknown"
+        if state._is_god_mode_for(wid):
+            desc = data.get("tool_input", {}).get("file_path", "")[:200]
+            print(json.dumps({"decision": "approve"}))
+            state.write_signal("god_approve", data, cmd=desc, cli=cli_name)
+        return
+
     config._log("hook", f"cli={cli_name} event={event}→{internal_event} tool={tool}→{internal_tool} keys={list(data.keys())}")
 
     if internal_event == "stop":
@@ -101,13 +123,6 @@ def cmd_hook():
             state.write_signal("plan", data, cli=cli_name)
         elif internal_tool == "question":
             state.write_signal("question", data, questions=data.get("tool_input", {}).get("questions", []), cli=cli_name)
-        elif internal_tool == "shell":
-            os.makedirs(config.SIGNAL_DIR, exist_ok=True)
-            wid = tmux.get_window_id() or "unknown"
-            cmd = data.get("tool_input", {}).get("command", "")
-            cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
-            with open(cmd_file, "w") as f:
-                json.dump({"cmd": cmd}, f)
 
 
 def cmd_help():

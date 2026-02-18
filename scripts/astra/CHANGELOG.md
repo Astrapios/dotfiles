@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.16.5
+
+- **Instant god mode for file tools via PreToolUse hook** — Read, Edit, and Write PreToolUse hooks output `{"decision": "approve"}` in god mode, bypassing Claude Code's ~2s internal delay between showing the permission dialog and firing the Notification hook; each auto-approve writes a `god_approve` signal so the listener sends `⚡ Auto-approved` receipts on Telegram with the file path
+- **Bash keeps Notification flow** — Bash permissions intentionally use the old Notification → listener → tmux-keys path so receipts only fire for commands that actually needed permission (not every `ls`/`cat`/`grep`)
+- **Read/Edit/Write hooks** — added PreToolUse hooks and profile tool mappings for Read, Edit, and Write in `claude_settings.json`
+- **Revert listener sleep optimization** — removed 100ms signal-polling loops and TG poll skip from 0.16.4 (no longer needed)
+
 ## 0.16.4
 
 - **Speed up god mode auto-accept** — non-critical Telegram calls run in background daemon threads via `_fire_and_forget()`; listener loop skips the ~500ms TG poll after processing signals; idle sleep (2s) replaced with 100ms signal-checking loop so new permission signals are picked up within ~100ms instead of waiting up to 2s
