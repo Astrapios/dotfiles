@@ -630,28 +630,55 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                     os.remove(os.path.join(config.SIGNAL_DIR, suffix))
                 except OSError:
                     pass
-            # Re-source shell config so PATH is fresh, then relaunch
-            shell = tmux._get_pane_command(pane) or ""
-            if "zsh" in shell:
-                source_cmd = "source ~/.zshrc && "
-            elif "bash" in shell:
-                source_cmd = "source ~/.bashrc && "
-            else:
-                source_cmd = ""
-            cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
+            # Check if pane still exists (it closes if CLI was the initial command)
+            pane_alive = bool(tmux._get_pane_command(pane))
             restart_cmd = restart_profile.restart_cmd
-            subprocess.run(
-                ["bash", "-c",
-                 f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + restart_cmd)} && "
-                 f"sleep 0.1 && tmux send-keys -t {p} Enter"],
-                timeout=10,
-            )
-            time.sleep(3)
-            sessions = tmux.scan_claude_sessions()
-            if idx in sessions:
-                _, new_project = sessions[idx]
-                telegram.tg_send(f"🔄 Restarted {state._wid_label(idx)} (`{new_project}`).")
-                return None, sessions, idx
+            if pane_alive:
+                # Re-source shell config so PATH is fresh, then relaunch
+                shell = tmux._get_pane_command(pane) or ""
+                if "zsh" in shell:
+                    source_cmd = "source ~/.zshrc && "
+                elif "bash" in shell:
+                    source_cmd = "source ~/.bashrc && "
+                else:
+                    source_cmd = ""
+                cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
+                subprocess.run(
+                    ["bash", "-c",
+                     f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + restart_cmd)} && "
+                     f"sleep 0.1 && tmux send-keys -t {p} Enter"],
+                    timeout=10,
+                )
+            else:
+                # Pane closed — create a new window (same as /new)
+                work_dir = cwd or os.path.expanduser("~")
+                subprocess.run(
+                    ["tmux", "new-window", "-d", "-P", "-F", "#{window_index}",
+                     f"bash -c 'cd {shlex.quote(work_dir)} && {restart_cmd}'"],
+                    capture_output=True, text=True, timeout=10,
+                )
+            # Wait for CLI to start (Gemini/Node takes a few seconds)
+            new_wid = None
+            for _ in range(6):
+                time.sleep(1)
+                sessions = tmux.scan_claude_sessions()
+                if pane_alive:
+                    new_wid = tmux.resolve_session_id(idx, sessions)
+                else:
+                    # New window — find the new session by matching cwd
+                    for sid, info in sessions.items():
+                        if sid not in {idx} and isinstance(info, tmux.SessionInfo):
+                            if info.cli == restart_profile.name:
+                                new_wid = sid
+                                break
+                    if not new_wid:
+                        new_wid = tmux.resolve_session_id(idx, sessions)
+                if new_wid:
+                    break
+            if new_wid and new_wid in sessions:
+                _, new_project = sessions[new_wid]
+                telegram.tg_send(f"🔄 Restarted {state._wid_label(new_wid)} (`{new_project}`).")
+                return None, sessions, new_wid
             else:
                 telegram.tg_send(f"⚠️ {state._wid_label(idx)} did not restart — pane may have closed.")
                 return None, sessions, last_win_idx

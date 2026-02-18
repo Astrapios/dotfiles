@@ -7084,10 +7084,10 @@ class TestRestartCommand(unittest.TestCase):
     @patch.object(astra.tmux, "_get_pane_command", return_value="zsh")
     def test_restart_relaunch_fails(self, mock_cmd, mock_cwd, mock_scan, mock_run, mock_send):
         """Restart warns if session doesn't come back after relaunch."""
+        no_w4 = {"w5a": ("0:5.0", "other")}
         mock_scan.side_effect = [
-            {"w5a": ("0:5.0", "other")},  # after kill: w4 gone
-            {"w5a": ("0:5.0", "other")},  # after relaunch: w4 still gone
-        ]
+            no_w4,  # after kill: w4 gone
+        ] + [no_w4] * 6  # retry loop: w4 never comes back
         with patch("time.sleep"):
             action, sessions, last = astra._handle_command(
                 "/restart w4", self.sessions, "5")

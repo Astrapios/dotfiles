@@ -12,6 +12,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - Custom confirmation labels: `perm_` callback uses option text from the dialog (e.g. "Trust this folder") instead of generic "Allowed"/"Denied"
 - `has_active_prompt()` non-destructive check in state.py; `_detect_numbered_dialog()` in content.py; `dialog_notified` set in `_ListenerState`
 - **EnterPlanMode is now informational** — send "entered plan mode" notification instead of stale Approve/Deny buttons (Claude Code auto-approves EnterPlanMode; the real plan approval comes via ExitPlanMode as a permission event)
+- **Fix `/restart` for pane-less CLIs** — when Ctrl+C kills a CLI that was the pane's initial command (e.g. Gemini started via `/new`), the pane closes; `/restart` now detects the dead pane and creates a new window instead of failing with "pane may have closed"
 
 ## 0.15.6
 
