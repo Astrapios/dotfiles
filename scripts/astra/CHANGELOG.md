@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.19.1
+
+- **Bare `/keys` quick-pick combo buttons** — `/keys` or `/keys wN` without key args shows an inline keyboard with common key combos (Shift+Tab, Ctrl+C, Escape, Ctrl+O, Enter, Up)
+  - Single session or last-used auto-selects; multiple sessions shows session picker first
+  - `k` alias for bare `/keys`, `k5` for `/keys w5`
+
 ## 0.19.0
 
 - **`/keys` command** — send modifier keys and key combinations to sessions from Telegram or CLI

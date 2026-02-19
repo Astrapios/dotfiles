@@ -14,7 +14,7 @@ _CAT_CONFIRM = 7
 _ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af": "/autofocus",
                             "lv": "/local", "ga": "/god all", "goff": "/god off",
                             "gq": "/god quiet", "gl": "/god loud",
-                            "c": "/clear", "noti": "/notification"}
+                            "c": "/clear", "noti": "/notification", "k": "/keys"}
 
 # Human-readable key names → tmux send-keys names (looked up case-insensitively)
 _KEYS_MAP: dict[str, str] = {
@@ -32,6 +32,27 @@ _KEYS_MAP: dict[str, str] = {
 # Add F1..F12
 for _i in range(1, 13):
     _KEYS_MAP[f"f{_i}"] = f"F{_i}"
+
+# Quick-pick combos for bare /keys (label, short_id, tmux_key)
+_QUICK_KEYS: list[tuple[str, str, str]] = [
+    ("Shift+Tab", "btab", "BTab"),
+    ("Ctrl+C", "ctrlc", "C-c"),
+    ("Escape", "esc", "Escape"),
+    ("Ctrl+O", "ctrlo", "C-o"),
+    ("Enter", "enter", "Enter"),
+    ("\u2191 Up", "up", "Up"),
+]
+
+
+def _keys_combo_keyboard(wid: str) -> dict:
+    """Build 2x3 inline keyboard of quick-pick key combos for a session."""
+    rows = []
+    for i in range(0, len(_QUICK_KEYS), 3):
+        row = []
+        for label, short, _tmux_key in _QUICK_KEYS[i:i + 3]:
+            row.append((label, f"keys_{wid}_{short}"))
+        rows.append(row)
+    return telegram._build_inline_keyboard(rows)
 
 
 def _resolve_key(name: str) -> str:
@@ -98,6 +119,9 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^k(\d+[a-z]?)\s+(.+)$", stripped)
     if m:
         return f"/keys w{m.group(1)} {m.group(2)}"
+    m = re.match(r"^k(\d+[a-z]?)$", stripped)
+    if m:
+        return f"/keys w{m.group(1)}"
     # noti <args> → /notification <args>
     m = re.match(r"^noti\s+(.+)$", stripped)
     if m:
@@ -223,7 +247,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`i4` interrupt w4 | `sv` saved | `?` help",
             "`g4` god w4 | `ga` god all | `goff` god off",
             "`af` autofocus | `lv` local | `noti` notification",
-            "`k5 shift+tab` keys w5 shift+tab",
+            "`k` keys | `k5` keys w5 | `k5 shift+tab` keys w5 shift+tab",
             "`c` clear | `c4` clear w4 | `r4` restart w4",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
@@ -627,6 +651,41 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
+    # /keys (bare — combo picker, auto-select single/last-used session)
+    if re.match(r"^/keys?$", text.strip(), re.IGNORECASE):
+        sessions = tmux.scan_claude_sessions()
+        target = None
+        if len(sessions) == 1:
+            target = next(iter(sessions))
+        elif last_win_idx and last_win_idx in sessions:
+            target = last_win_idx
+        if target:
+            _, project = sessions[target]
+            kb = _keys_combo_keyboard(target)
+            telegram.tg_send(f"⌨️ Send key to {state._wid_label(target)} (`{project}`):", reply_markup=kb)
+            return None, sessions, target
+        elif len(sessions) == 0:
+            telegram.tg_send("⚠️ No CLI sessions found.")
+        else:
+            kb = tmux._command_sessions_keyboard("keys", sessions)
+            telegram.tg_send("⌨️ Send keys to which session?", reply_markup=kb)
+        return None, sessions, last_win_idx
+
+    # /keys wN|name (no key args — combo picker for that session)
+    keys_bare_m = re.match(r"^/keys?\s+w?(\w[\w-]*)$", text.strip(), re.IGNORECASE)
+    if keys_bare_m:
+        raw_target = keys_bare_m.group(1)
+        idx = state._resolve_name(raw_target)
+        if idx:
+            _, project = sessions[idx]
+            kb = _keys_combo_keyboard(idx)
+            telegram.tg_send(f"⌨️ Send key to {state._wid_label(idx)} (`{project}`):", reply_markup=kb)
+            return None, sessions, idx
+        else:
+            telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                             reply_markup=tmux._sessions_keyboard(sessions))
+            return None, sessions, last_win_idx
+
     # /keys wN|name key1 [key2 ...]
     keys_m = re.match(r"^/keys?\s+w?(\w[\w-]*)\s+(.+)$", text, re.IGNORECASE)
     if keys_m:
@@ -973,6 +1032,31 @@ def _handle_callback(callback: dict, sessions: dict,
             confirm = routing.route_to_pane(pane, resolved, n_str)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             last_win_idx = resolved
+        return sessions, last_win_idx, None
+
+    # Quick-pick keys callback: keys_{wid}_{short}
+    m = re.match(r"^keys_(w\d+[a-z]?)_(\w+)$", cb_data)
+    if m:
+        wid, short = m.group(1), m.group(2)
+        # Look up short id in _QUICK_KEYS
+        tmux_key = None
+        label = short
+        for qlabel, qshort, qkey in _QUICK_KEYS:
+            if qshort == short:
+                tmux_key = qkey
+                label = qlabel
+                break
+        if tmux_key:
+            resolved = tmux.resolve_session_id(wid, sessions)
+            if resolved:
+                pane, project = sessions[resolved]
+                p = shlex.quote(pane)
+                subprocess.run(["bash", "-c",
+                                f"tmux send-keys -t {p} {tmux_key}"], timeout=5)
+                telegram.tg_send(f"⌨️ Sent `{label}` to {state._wid_label(resolved)} (`{project}`).")
+                last_win_idx = resolved
+            else:
+                telegram.tg_send(f"⚠️ Session `{wid}` no longer active.")
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}

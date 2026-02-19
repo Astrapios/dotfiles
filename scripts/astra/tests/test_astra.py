@@ -7868,6 +7868,98 @@ class TestKeysCommand(unittest.TestCase):
         cmd = mock_run.call_args[0][0][2]
         assert "BTab" in cmd
 
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_bare_single_session(self, mock_send, mock_scan):
+        """Bare /keys with single session shows combo picker."""
+        sessions = {"w5": astra.SessionInfo("0:5.0", "myproj", "5", "0:5.0", "claude")}
+        mock_scan.return_value = sessions
+        astra.state._current_sessions = sessions
+        _, _, last = astra._handle_command("/keys", sessions, None)
+        assert last == "w5"
+        msg = mock_send.call_args[0][0]
+        assert "Send key to" in msg
+        kb = mock_send.call_args[1].get("reply_markup") or mock_send.call_args[0][1] if len(mock_send.call_args[0]) > 1 else mock_send.call_args[1].get("reply_markup")
+        assert kb is not None
+        # Should have 2 rows of 3 buttons
+        assert len(kb["inline_keyboard"]) == 2
+        assert len(kb["inline_keyboard"][0]) == 3
+        # First button should be Shift+Tab
+        assert kb["inline_keyboard"][0][0]["callback_data"] == "keys_w5_btab"
+
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_bare_multiple_sessions(self, mock_send, mock_scan):
+        """Bare /keys with multiple sessions shows session picker."""
+        sessions = {
+            "w4": astra.SessionInfo("0:4.0", "proj1", "4", "0:4.0", "claude"),
+            "w5": astra.SessionInfo("0:5.0", "proj2", "5", "0:5.0", "claude"),
+        }
+        mock_scan.return_value = sessions
+        astra.state._current_sessions = sessions
+        _, _, last = astra._handle_command("/keys", sessions, None)
+        assert last is None
+        msg = mock_send.call_args[0][0]
+        assert "which session" in msg
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_bare_wid_combo_picker(self, mock_send):
+        """'/keys wN' with no key args shows combo picker."""
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        _, _, last = astra._handle_command("/keys w4", sessions, None)
+        assert last == "w4"
+        msg = mock_send.call_args[0][0]
+        assert "Send key to" in msg
+        kb = mock_send.call_args[1].get("reply_markup")
+        assert kb is not None
+        assert len(kb["inline_keyboard"]) == 2
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    def test_keys_combo_callback(self, mock_rm, mock_ack, mock_send, mock_run):
+        """Combo callback sends correct tmux key."""
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        callback = {"id": "123", "data": "keys_w4_btab", "message_id": 42}
+        sess, last, action = astra._handle_callback(callback, sessions, None)
+        assert last == "w4"
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0][2]
+        assert "BTab" in cmd
+        msg = mock_send.call_args[0][0]
+        assert "Shift+Tab" in msg
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.telegram, "_answer_callback_query")
+    @patch.object(astra.telegram, "_remove_inline_keyboard")
+    def test_keys_combo_callback_escape(self, mock_rm, mock_ack, mock_send, mock_run):
+        """Combo callback for Escape sends correct key."""
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        callback = {"id": "456", "data": "keys_w4_esc", "message_id": 43}
+        astra._handle_callback(callback, sessions, None)
+        cmd = mock_run.call_args[0][0][2]
+        assert "Escape" in cmd
+
+    def test_keys_alias_bare(self):
+        """'k' alias resolves to '/keys'."""
+        result = astra._resolve_alias("k", False)
+        assert result == "/keys"
+
+    def test_keys_alias_bare_number(self):
+        """'k5' alias resolves to '/keys w5'."""
+        result = astra._resolve_alias("k5", False)
+        assert result == "/keys w5"
+
+    def test_keys_alias_bare_suppressed_during_prompt(self):
+        """'k' alias suppressed during active prompt."""
+        result = astra._resolve_alias("k", True)
+        assert result == "k"
+
 
 class TestKeysMap(unittest.TestCase):
     """Test _KEYS_MAP contents."""

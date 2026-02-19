@@ -94,7 +94,7 @@ from .signals import _format_question_msg, process_signals
 
 # commands
 from .commands import (
-    _ALIASES, _KEYS_MAP, _resolve_key,
+    _ALIASES, _KEYS_MAP, _QUICK_KEYS, _resolve_key, _keys_combo_keyboard,
     _any_active_prompt, _resolve_alias,
     _enable_accept_edits, _maybe_activate_smartfocus,
     _handle_command, _handle_callback,
