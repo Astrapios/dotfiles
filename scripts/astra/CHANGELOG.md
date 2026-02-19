@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.19.2
+
+- **Prune god mode for closed sessions** — god mode wids are now automatically cleaned up when sessions disappear, preventing stale god mode state
+
 ## 0.19.1
 
 - **Bare `/keys` quick-pick combo buttons** — `/keys` or `/keys wN` without key args shows an inline keyboard with common key combos (Shift+Tab, Ctrl+C, Escape, Ctrl+O, Enter, Up)

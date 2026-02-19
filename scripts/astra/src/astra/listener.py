@@ -220,6 +220,7 @@ def _listen_tick(s):
     if time.time() - s.last_prompt_cleanup > 5:
         state._cleanup_stale_prompts()
         state._cleanup_stale_busy(s.sessions)
+        state._cleanup_stale_god_mode(s.sessions)
         s.last_prompt_cleanup = time.time()
 
     locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()

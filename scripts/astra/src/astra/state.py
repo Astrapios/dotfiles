@@ -610,6 +610,23 @@ def _clear_god_mode():
             pass
 
 
+def _cleanup_stale_god_mode(sessions: dict):
+    """Remove god mode wids that no longer exist in active sessions."""
+    wids = _god_mode_wids()
+    if not wids or "all" in wids:
+        return
+    alive = [w for w in wids if w in sessions]
+    if len(alive) == len(wids):
+        return
+    removed = set(wids) - set(alive)
+    if alive:
+        with open(config.GOD_MODE_PATH, "w") as f:
+            json.dump({"wids": alive}, f)
+    else:
+        _clear_god_mode()
+    config._log("god", f"Pruned stale god mode wids: {removed}")
+
+
 def _is_god_quiet() -> bool:
     """Check if god mode receipts are suppressed."""
     return os.path.exists(os.path.join(config.SIGNAL_DIR, "_god_quiet.json"))

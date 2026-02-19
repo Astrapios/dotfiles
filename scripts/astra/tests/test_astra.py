@@ -2,6 +2,7 @@
 """Tests for astra — validates formatting, routing, and content cleaning."""
 import json
 import os
+import pytest
 import re
 import struct
 import sys
@@ -7971,6 +7972,45 @@ class TestKeysMap(unittest.TestCase):
         assert "f1" in astra._KEYS_MAP
         assert "f12" in astra._KEYS_MAP
         assert "pgup" in astra._KEYS_MAP
+
+
+@pytest.fixture
+def god_mode_cleanup():
+    """Ensure god mode file is cleaned up after each test."""
+    yield
+    try:
+        os.remove(astra.config.GOD_MODE_PATH)
+    except OSError:
+        pass
+
+
+class TestCleanupStaleGodMode:
+    """Test _cleanup_stale_god_mode prunes closed sessions."""
+
+    def test_prunes_closed_session(self, god_mode_cleanup):
+        astra._set_god_mode("w4a", True)
+        astra._set_god_mode("w5a", True)
+        sessions = {"w4a": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra._cleanup_stale_god_mode(sessions)
+        wids = astra._god_mode_wids()
+        assert "w4a" in wids
+        assert "w5a" not in wids
+
+    def test_clears_entirely_when_all_gone(self, god_mode_cleanup):
+        astra._set_god_mode("w4a", True)
+        astra._cleanup_stale_god_mode({})
+        assert astra._god_mode_wids() == []
+
+    def test_all_mode_not_pruned(self, god_mode_cleanup):
+        astra._set_god_mode("all", True)
+        astra._cleanup_stale_god_mode({})
+        assert "all" in astra._god_mode_wids()
+
+    def test_no_op_when_all_alive(self, god_mode_cleanup):
+        astra._set_god_mode("w4a", True)
+        sessions = {"w4a": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra._cleanup_stale_god_mode(sessions)
+        assert astra._god_mode_wids() == ["w4a"]
 
 
 if __name__ == "__main__":
