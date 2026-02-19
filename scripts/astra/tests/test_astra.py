@@ -2517,7 +2517,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("notification", names)
         self.assertIn("restart", names)
         self.assertIn("local", names)
-        self.assertEqual(len(commands), 21)
+        self.assertIn("keys", names)
+        self.assertEqual(len(commands), 22)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):
@@ -7732,6 +7733,152 @@ class TestCustomLabelsInPermCallback(unittest.TestCase):
         _handle_callback(cb, {}, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Allowed", msg)
+
+
+class TestResolveKey(unittest.TestCase):
+    """Test _resolve_key for human-readable → tmux key name mapping."""
+
+    def test_shift_tab(self):
+        assert astra._resolve_key("shift+tab") == "BTab"
+
+    def test_s_tab(self):
+        assert astra._resolve_key("s-tab") == "BTab"
+
+    def test_ctrl_c(self):
+        assert astra._resolve_key("ctrl+c") == "C-c"
+
+    def test_c_dash_c(self):
+        assert astra._resolve_key("c-c") == "C-c"
+
+    def test_ctrl_o(self):
+        assert astra._resolve_key("ctrl+o") == "C-o"
+
+    def test_case_insensitive(self):
+        assert astra._resolve_key("Ctrl+C") == "C-c"
+        assert astra._resolve_key("SHIFT+TAB") == "BTab"
+        assert astra._resolve_key("Esc") == "Escape"
+
+    def test_enter(self):
+        assert astra._resolve_key("enter") == "Enter"
+        assert astra._resolve_key("return") == "Enter"
+        assert astra._resolve_key("cr") == "Enter"
+
+    def test_arrows(self):
+        assert astra._resolve_key("up") == "Up"
+        assert astra._resolve_key("down") == "Down"
+        assert astra._resolve_key("left") == "Left"
+        assert astra._resolve_key("right") == "Right"
+
+    def test_special_keys(self):
+        assert astra._resolve_key("backspace") == "BSpace"
+        assert astra._resolve_key("bs") == "BSpace"
+        assert astra._resolve_key("delete") == "DC"
+        assert astra._resolve_key("home") == "Home"
+        assert astra._resolve_key("end") == "End"
+        assert astra._resolve_key("pgup") == "PPage"
+        assert astra._resolve_key("pagedown") == "NPage"
+
+    def test_f_keys(self):
+        assert astra._resolve_key("f1") == "F1"
+        assert astra._resolve_key("f12") == "F12"
+
+    def test_raw_passthrough(self):
+        """Unrecognized names pass through as-is for raw tmux key names."""
+        assert astra._resolve_key("BTab") == "BTab"
+        assert astra._resolve_key("C-c") == "C-c"
+        assert astra._resolve_key("NPage") == "NPage"
+
+
+class TestKeysCommand(unittest.TestCase):
+    """Test /keys Telegram command."""
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_shift_tab(self, mock_send, mock_run):
+        sessions = {"w5": astra.SessionInfo("0:5.0", "myproj", "5", "0:5.0", "claude")}
+        astra.state._current_sessions = sessions
+        _, _, last = astra._handle_command("/keys w5 shift+tab", sessions, None)
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0][2]
+        assert "BTab" in cmd
+        assert last == "w5"
+        msg = mock_send.call_args[0][0]
+        assert "shift+tab" in msg
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_ctrl_c(self, mock_send, mock_run):
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        astra._handle_command("/keys w4 ctrl+c", sessions, None)
+        cmd = mock_run.call_args[0][0][2]
+        assert "C-c" in cmd
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_multiple(self, mock_send, mock_run):
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        astra._handle_command("/keys w4 down down enter", sessions, None)
+        cmd = mock_run.call_args[0][0][2]
+        assert "Down Down Enter" in cmd
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_raw_passthrough(self, mock_send, mock_run):
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        astra._handle_command("/keys w4 BTab", sessions, None)
+        cmd = mock_run.call_args[0][0][2]
+        assert "BTab" in cmd
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_no_session(self, mock_send):
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        astra._handle_command("/keys w99 shift+tab", sessions, None)
+        msg = mock_send.call_args[0][0]
+        assert "No session" in msg
+
+    def test_keys_alias(self):
+        result = astra._resolve_alias("k5 shift+tab", False)
+        assert result == "/keys w5 shift+tab"
+
+    def test_keys_alias_multichar(self):
+        result = astra._resolve_alias("k4a ctrl+c", False)
+        assert result == "/keys w4a ctrl+c"
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_case_insensitive_command(self, mock_send, mock_run):
+        """Both /keys and /key work, case insensitive."""
+        sessions = {"w4": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
+        astra.state._current_sessions = sessions
+        astra._handle_command("/KEYS w4 shift+tab", sessions, None)
+        cmd = mock_run.call_args[0][0][2]
+        assert "BTab" in cmd
+
+    @patch("subprocess.run")
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keys_bare_number_target(self, mock_send, mock_run):
+        """Target without w prefix works."""
+        sessions = {"w5": astra.SessionInfo("0:5.0", "proj", "5", "0:5.0", "claude")}
+        astra.state._current_sessions = sessions
+        astra._handle_command("/keys 5 shift+tab", sessions, None)
+        cmd = mock_run.call_args[0][0][2]
+        assert "BTab" in cmd
+
+
+class TestKeysMap(unittest.TestCase):
+    """Test _KEYS_MAP contents."""
+
+    def test_map_has_expected_entries(self):
+        assert "shift+tab" in astra._KEYS_MAP
+        assert "esc" in astra._KEYS_MAP
+        assert "enter" in astra._KEYS_MAP
+        assert "f1" in astra._KEYS_MAP
+        assert "f12" in astra._KEYS_MAP
+        assert "pgup" in astra._KEYS_MAP
 
 
 if __name__ == "__main__":

@@ -16,6 +16,41 @@ _ALIASES: dict[str, str] = {"?": "/help", "uf": "/unfocus", "sv": "/saved", "af"
                             "gq": "/god quiet", "gl": "/god loud",
                             "c": "/clear", "noti": "/notification"}
 
+# Human-readable key names → tmux send-keys names (looked up case-insensitively)
+_KEYS_MAP: dict[str, str] = {
+    "shift+tab": "BTab", "s-tab": "BTab",
+    "esc": "Escape", "escape": "Escape",
+    "enter": "Enter", "return": "Enter", "cr": "Enter",
+    "tab": "Tab", "space": "Space",
+    "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+    "bs": "BSpace", "backspace": "BSpace",
+    "del": "DC", "delete": "DC",
+    "home": "Home", "end": "End",
+    "pgup": "PPage", "pageup": "PPage",
+    "pgdn": "NPage", "pagedown": "NPage",
+}
+# Add F1..F12
+for _i in range(1, 13):
+    _KEYS_MAP[f"f{_i}"] = f"F{_i}"
+
+
+def _resolve_key(name: str) -> str:
+    """Map a human-readable key name to a tmux send-keys name.
+
+    Handles ctrl+X / c-X patterns dynamically. Anything unrecognized
+    passes through as-is (raw tmux key names like BTab, C-c work directly).
+    """
+    lower = name.lower()
+    # Exact match in map
+    if lower in _KEYS_MAP:
+        return _KEYS_MAP[lower]
+    # ctrl+X or c-X → C-x
+    m = re.match(r"^(?:ctrl\+|c-)(.+)$", lower)
+    if m:
+        return f"C-{m.group(1)}"
+    # Pass through as-is (raw tmux key name)
+    return name
+
 
 def _any_active_prompt() -> bool:
     """Check if any active prompt state files exist."""
@@ -60,6 +95,9 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^r(\d+[a-z]?)$", stripped)
     if m:
         return f"/restart w{m.group(1)}"
+    m = re.match(r"^k(\d+[a-z]?)\s+(.+)$", stripped)
+    if m:
+        return f"/keys w{m.group(1)} {m.group(2)}"
     # noti <args> → /notification <args>
     m = re.match(r"^noti\s+(.+)$", stripped)
     if m:
@@ -173,6 +211,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Session management:*",
             "`/new [claude|gemini] [dir]` — start new session",
             "`/restart wN` — kill and relaunch with `claude -c`",
+            "`/keys [wN] [key...]` — send keys or pick from combos",
             "`/kill wN` — exit a session (Ctrl+C x3)",
             "`/clear [wN]` — reset transient state",
             "`/log [N]` — show last N journal lines (default 30)",
@@ -184,6 +223,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`i4` interrupt w4 | `sv` saved | `?` help",
             "`g4` god w4 | `ga` god all | `goff` god off",
             "`af` autofocus | `lv` local | `noti` notification",
+            "`k5 shift+tab` keys w5 shift+tab",
             "`c` clear | `c4` clear w4 | `r4` restart w4",
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
@@ -587,6 +627,27 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
+    # /keys wN|name key1 [key2 ...]
+    keys_m = re.match(r"^/keys?\s+w?(\w[\w-]*)\s+(.+)$", text, re.IGNORECASE)
+    if keys_m:
+        raw_target = keys_m.group(1)
+        key_str = keys_m.group(2).strip()
+        idx = state._resolve_name(raw_target)
+        if idx:
+            pane, project = sessions[idx]
+            p = shlex.quote(pane)
+            tokens = key_str.split()
+            tmux_keys = [_resolve_key(t) for t in tokens]
+            keys_arg = " ".join(tmux_keys)
+            subprocess.run(["bash", "-c",
+                            f"tmux send-keys -t {p} {keys_arg}"], timeout=5)
+            telegram.tg_send(f"⌨️ Sent `{key_str}` to {state._wid_label(idx)} (`{project}`).")
+            return None, sessions, idx
+        else:
+            telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                             reply_markup=tmux._sessions_keyboard(sessions))
+            return None, sessions, last_win_idx
+
     # /kill (bare — show session picker)
     if text.lower().strip() == "/kill":
         sessions = tmux.scan_claude_sessions()
@@ -915,7 +976,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|restart|last|god)_(w?\d+[a-z]?)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|restart|last|god|keys)_(w?\d+[a-z]?)$", cb_data)
     if m:
         cmd, wid_part = m.group(1), m.group(2)
         wid_str = wid_part if wid_part.startswith("w") else f"w{wid_part}"

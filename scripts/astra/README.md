@@ -110,6 +110,7 @@ astra notify <message>    Send a one-shot notification
 astra ask <question>      Send a question, wait for reply, print to stdout
 astra send-photo <path> [caption]  Send a photo to Telegram
 astra send-doc <path> [caption]    Send a file as a document to Telegram
+astra keys <wN> <key...>  Send keys to a session (e.g. shift+tab, ctrl+c)
 astra debug [on|off|clear|N]  Debug log for outbound Telegram messages
 astra help                Show help
 ```
@@ -130,6 +131,7 @@ Once the listener is running, send these from Telegram:
 | `/local [on\|off]` | Suppress Telegram when viewing locally in tmux |
 | `/name wN label` | Name a session for easier routing |
 | `/interrupt wN` | Interrupt current task (Esc) |
+| `/keys wN key...` | Send keys (e.g. `/keys w4 shift+tab`) |
 | `/new [dir]` | Start a new Claude session |
 | `/saved [wN]` | Review queued messages |
 | `/last [wN]` | Re-send last Telegram message |
@@ -147,6 +149,7 @@ Once the listener is running, send these from Telegram:
 | `f4` | `/focus w4` |
 | `df4` | `/deepfocus w4` |
 | `i4` | `/interrupt w4` |
+| `k5 shift+tab` | `/keys w5 shift+tab` |
 | `c` / `c4` | `/clear` / `/clear w4` |
 | `g4` | `/god w4` |
 | `ga` | `/god all` |

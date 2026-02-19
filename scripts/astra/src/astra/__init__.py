@@ -94,7 +94,8 @@ from .signals import _format_question_msg, process_signals
 
 # commands
 from .commands import (
-    _ALIASES, _any_active_prompt, _resolve_alias,
+    _ALIASES, _KEYS_MAP, _resolve_key,
+    _any_active_prompt, _resolve_alias,
     _enable_accept_edits, _maybe_activate_smartfocus,
     _handle_command, _handle_callback,
 )
@@ -107,6 +108,6 @@ from .cli import (
     cmd_notify, cmd_ask, cmd_send_photo, cmd_send_doc, cmd_hook, cmd_help,
     cmd_god, cmd_local, cmd_debug, cmd_autofocus, cmd_notification,
     cmd_status, cmd_focus, cmd_deepfocus, cmd_unfocus, cmd_clear,
-    cmd_interrupt, cmd_name, cmd_saved, cmd_log, cmd_new, cmd_restart, cmd_kill,
-    main,
+    cmd_interrupt, cmd_keys, cmd_name, cmd_saved, cmd_log, cmd_new,
+    cmd_restart, cmd_kill, main,
 )

@@ -417,6 +417,29 @@ def cmd_interrupt():
     print(f"Interrupted {tmux._display_wid(idx, sessions)} ({project}).")
 
 
+def cmd_keys():
+    """Send keys to a session via tmux send-keys."""
+    from astra.commands import _resolve_key
+    if len(sys.argv) < 4:
+        print("Usage: astra keys <wN> <key...>", file=sys.stderr)
+        sys.exit(1)
+    sessions = tmux.scan_claude_sessions()
+    state._current_sessions = sessions
+    raw_target = sys.argv[2]
+    idx = state._resolve_name(raw_target, sessions)
+    if not idx:
+        print(f"No session '{raw_target}'.", file=sys.stderr)
+        sys.exit(1)
+    pane, project = sessions[idx]
+    p = shlex.quote(pane)
+    key_tokens = sys.argv[3:]
+    tmux_keys = [_resolve_key(t) for t in key_tokens]
+    keys_arg = " ".join(tmux_keys)
+    subprocess.run(["bash", "-c",
+                    f"tmux send-keys -t {p} {keys_arg}"], timeout=5)
+    print(f"Sent {' '.join(key_tokens)} to {tmux._display_wid(idx, sessions)} ({project}).")
+
+
 def cmd_name():
     """Set or clear a session name."""
     if len(sys.argv) < 3:
@@ -689,6 +712,7 @@ Session management (no Telegram credentials needed):
   deepfocus [wN]               Set deepfocus target
   unfocus                      Stop all monitoring
   interrupt [wN]               Interrupt session (Escape)
+  keys <wN> <key...>           Send keys (e.g. shift+tab, ctrl+c)
   clear [wN]                   Reset transient state
   name [wN] [label]            Set/clear session name
   saved [wN]                   Show queued messages
@@ -709,6 +733,7 @@ Setup:
 Telegram commands (inside listener):
   /status [wN] [lines] List sessions or show output
   /interrupt [wN]      Interrupt current task (Esc)
+  /keys wN key...      Send keys (e.g. /keys w4 shift+tab)
   /god [wN|all|off]    Auto-accept permissions (god mode)
   /god quiet|loud      Suppress/enable god mode receipts
   /focus wN            Watch completed responses
@@ -735,6 +760,7 @@ Aliases:
   g4 / ga / goff       /god w4 / /god all / /god off
   gq / gl              /god quiet / /god loud
   af / lv / noti       /autofocus / /local / /notification
+  k5 shift+tab         /keys w5 shift+tab
   c / c4 / r4          /clear / /clear w4 / /restart w4
 
 Routing: prefix with wN (e.g. 'w4 fix the bug').
@@ -763,8 +789,8 @@ def main():
         "autofocus": cmd_autofocus,
         "notification": cmd_notification, "status": cmd_status,
         "focus": cmd_focus, "deepfocus": cmd_deepfocus, "unfocus": cmd_unfocus,
-        "clear": cmd_clear, "interrupt": cmd_interrupt, "name": cmd_name,
-        "saved": cmd_saved, "log": cmd_log, "new": cmd_new,
+        "clear": cmd_clear, "interrupt": cmd_interrupt, "keys": cmd_keys,
+        "name": cmd_name, "saved": cmd_saved, "log": cmd_log, "new": cmd_new,
         "restart": cmd_restart, "kill": cmd_kill,
     }
     if command in _local_commands:

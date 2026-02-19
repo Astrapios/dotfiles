@@ -5,6 +5,17 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.19.0
+
+- **`/keys` command** — send modifier keys and key combinations to sessions from Telegram or CLI
+  - `/keys w4 shift+tab` — send Shift+Tab (cycle permission mode)
+  - `/keys w4 ctrl+c` — send Ctrl+C
+  - `/keys w4 down down enter` — send multiple keys in sequence
+  - Supports human-readable names: `shift+tab`, `ctrl+X`, `esc`, `enter`, `space`, arrow keys, `f1`–`f12`, etc.
+  - Raw tmux key names (e.g. `BTab`, `C-c`) also work as pass-through
+  - CLI: `astra keys <wN> <key...>`
+  - Alias: `k5 shift+tab` → `/keys w5 shift+tab`
+
 ## 0.18.1
 
 - **Auto-setup for new sessions** — `astra new` now auto-accepts trust dialogs and switches out of plan mode so sessions are immediately usable from Telegram

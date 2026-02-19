@@ -282,6 +282,7 @@ def _set_bot_commands():
         {"command": "notification", "description": "Control which alerts buzz your phone"},
         {"command": "name", "description": "Name a session (e.g. /name w4 auth)"},
         # Session management
+        {"command": "keys", "description": "Send keys to a session (e.g. /keys w4 shift+tab)"},
         {"command": "new", "description": "Start new Claude session"},
         {"command": "restart", "description": "Kill and relaunch with claude -c"},
         {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
