@@ -87,6 +87,7 @@ def _debug_tg(kind: str, detail: str, text: str):
 
 _last_messages: dict[str, str] = {}  # wid -> last sent message
 _keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
+_render_bodies: dict[int, str] = {}  # msg_id -> body text for "render as image"
 
 
 def _save_last_msg(wid: str, msg: str):

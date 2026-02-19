@@ -7996,14 +7996,22 @@ class TestCleanupStaleGodMode:
         assert "w4a" in wids
         assert "w5a" not in wids
 
-    def test_clears_entirely_when_all_gone(self, god_mode_cleanup):
+    def test_clears_when_session_gone(self, god_mode_cleanup):
+        astra._set_god_mode("w4a", True)
+        # Session w4a no longer exists but other sessions do
+        sessions = {"w5a": astra.SessionInfo("0:5.0", "proj", "5", "0:5.0", "claude")}
+        astra._cleanup_stale_god_mode(sessions)
+        assert astra._god_mode_wids() == []
+
+    def test_empty_sessions_preserves_god_mode(self, god_mode_cleanup):
         astra._set_god_mode("w4a", True)
         astra._cleanup_stale_god_mode({})
-        assert astra._god_mode_wids() == []
+        assert astra._god_mode_wids() == ["w4a"]
 
     def test_all_mode_not_pruned(self, god_mode_cleanup):
         astra._set_god_mode("all", True)
-        astra._cleanup_stale_god_mode({})
+        sessions = {"w1a": astra.SessionInfo("0:1.0", "proj", "1", "0:1.0", "claude")}
+        astra._cleanup_stale_god_mode(sessions)
         assert "all" in astra._god_mode_wids()
 
     def test_no_op_when_all_alive(self, god_mode_cleanup):
@@ -8011,6 +8019,134 @@ class TestCleanupStaleGodMode:
         sessions = {"w4a": astra.SessionInfo("0:4.0", "proj", "4", "0:4.0", "claude")}
         astra._cleanup_stale_god_mode(sessions)
         assert astra._god_mode_wids() == ["w4a"]
+
+
+class TestHasTable:
+    """Tests for _has_table() detection."""
+
+    def test_box_drawing_chars(self):
+        text = "┌──────┬──────┐\n│ Name │ Age  │\n└──────┴──────┘"
+        assert astra._has_table(text) is True
+
+    def test_pipe_delimited_table(self):
+        text = "| Name | Age |\n|------|-----|\n| Alice | 30 |"
+        assert astra._has_table(text) is True
+
+    def test_plain_text_no_table(self):
+        assert astra._has_table("Hello world, no tables here.") is False
+
+    def test_single_pipe_not_table(self):
+        assert astra._has_table("use foo | bar for piping") is False
+
+    def test_mixed_box_drawing(self):
+        text = "─━║╔╗"
+        assert astra._has_table(text) is True
+
+    def test_empty_string(self):
+        assert astra._has_table("") is False
+
+
+class TestResolveCaptionTarget:
+    """Tests for _resolve_caption_target (photo/doc caption routing)."""
+
+    def test_wid_prefix(self):
+        sessions = {"w4a": ("0:4.0", "proj")}
+        with patch.object(astra.tmux, "resolve_session_id", return_value="w4a"):
+            wid, text = astra._resolve_caption_target("w4 describe this", sessions, None)
+        assert wid == "w4a"
+        assert text == "describe this"
+
+    def test_name_prefix(self):
+        sessions = {"w4a": ("0:4.0", "proj")}
+        with patch.object(astra.state, "_resolve_name", return_value="w4a"):
+            wid, text = astra._resolve_caption_target("myname describe this", sessions, None)
+        assert wid == "w4a"
+        assert text == "describe this"
+
+    def test_name_only_no_remaining(self):
+        sessions = {"w4a": ("0:4.0", "proj")}
+        with patch.object(astra.state, "_resolve_name", return_value="w4a"):
+            wid, text = astra._resolve_caption_target("myname", sessions, None)
+        assert wid == "w4a"
+        assert text == ""
+
+    def test_single_session_fallback(self):
+        sessions = {"w1a": ("0:1.0", "proj")}
+        with patch.object(astra.state, "_resolve_name", return_value=None):
+            wid, text = astra._resolve_caption_target("describe this", sessions, None)
+        assert wid == "w1a"
+        assert text == "describe this"
+
+    def test_last_win_fallback(self):
+        sessions = {"w1a": ("0:1.0", "p1"), "w2a": ("0:2.0", "p2")}
+        with patch.object(astra.state, "_resolve_name", return_value=None):
+            wid, text = astra._resolve_caption_target("describe this", sessions, "w2a")
+        assert wid == "w2a"
+
+    def test_no_match(self):
+        sessions = {"w1a": ("0:1.0", "p1"), "w2a": ("0:2.0", "p2")}
+        with patch.object(astra.state, "_resolve_name", return_value=None):
+            wid, text = astra._resolve_caption_target("describe this", sessions, None)
+        assert wid is None
+
+
+class TestRenderCallback:
+    """Tests for the render-as-image callback flow."""
+
+    def test_render_button_added_for_table(self):
+        """_send_long_message adds render button when body has a table."""
+        body = "┌──┬──┐\n│ab│cd│\n└──┴──┘"
+        with patch.object(astra.telegram, "tg_send", return_value=42):
+            msg_id = astra._send_long_message("Header:\n", body, wid="w1")
+        assert msg_id == 42
+        # Body should be cached for rendering
+        assert 42 in astra.config._render_bodies
+        assert "ab" in astra.config._render_bodies[42]
+        # Clean up
+        del astra.config._render_bodies[42]
+
+    def test_no_render_button_without_table(self):
+        """_send_long_message does NOT add render button for plain text."""
+        body = "Hello world, just text"
+        with patch.object(astra.telegram, "tg_send", return_value=99):
+            astra._send_long_message("Header:\n", body, wid="w1")
+        assert 99 not in astra.config._render_bodies
+
+    def test_render_callback_triggers_render(self):
+        """Clicking render button calls _render_and_send_image."""
+        astra.config._render_bodies[100] = "┌──┐\n│hi│\n└──┘"
+        callback = {"id": "cb1", "data": "render", "message_id": 100}
+        sessions = {"w1": ("0:1.0", "proj")}
+        with patch.object(astra.telegram, "_answer_callback_query"), \
+             patch.object(astra.telegram, "_remove_inline_keyboard"), \
+             patch.object(astra.commands, "_render_and_send_image") as mock_render:
+            astra._handle_callback(callback, sessions, "w1")
+        mock_render.assert_called_once_with("┌──┐\n│hi│\n└──┘")
+        # Clean up
+        astra.config._render_bodies.pop(100, None)
+
+    def test_render_callback_expired(self):
+        """Render callback with missing body sends warning."""
+        callback = {"id": "cb2", "data": "render", "message_id": 999}
+        sessions = {"w1": ("0:1.0", "proj")}
+        with patch.object(astra.telegram, "_answer_callback_query"), \
+             patch.object(astra.telegram, "_remove_inline_keyboard"), \
+             patch.object(astra.telegram, "tg_send", return_value=1) as mock_send:
+            astra._handle_callback(callback, sessions, "w1")
+        assert any("expired" in str(c) for c in mock_send.call_args_list)
+
+    def test_render_button_merged_with_existing_markup(self):
+        """Render button merges as extra row when reply_markup exists."""
+        from astra.telegram import _maybe_add_render_button
+        existing = {"inline_keyboard": [[{"text": "A", "callback_data": "a"}]]}
+        result = _maybe_add_render_button(existing, True)
+        assert len(result["inline_keyboard"]) == 2
+        assert result["inline_keyboard"][1][0]["callback_data"] == "render"
+
+    def test_render_button_not_added_no_table(self):
+        """_maybe_add_render_button returns None when no table."""
+        from astra.telegram import _maybe_add_render_button
+        assert _maybe_add_render_button(None, False) is None
 
 
 if __name__ == "__main__":

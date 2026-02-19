@@ -612,6 +612,8 @@ def _clear_god_mode():
 
 def _cleanup_stale_god_mode(sessions: dict):
     """Remove god mode wids that no longer exist in active sessions."""
+    if not sessions:
+        return  # Don't prune when scan returned empty (reload/transient)
     wids = _god_mode_wids()
     if not wids or "all" in wids:
         return

@@ -8,7 +8,7 @@ import time
 
 import requests
 
-from astra import config
+from astra import config, content as _content_mod
 
 
 def _fire_and_forget(fn, *args, **kwargs):
@@ -68,16 +68,26 @@ def _send_long_message(header: str, body: str, wid: str = "",
     If the total exceeds TG_MAX, body is split across multiple messages at line
     boundaries. reply_markup is attached to the last chunk only so buttons appear
     at the bottom. Returns the last message_id.
+
+    If the body contains a table (box-drawing or pipe-delimited), a render-as-image
+    button is appended to the last message's inline keyboard.
     """
     # Escape triple backticks in body to prevent breaking the code block wrapper
+    raw_body = body  # preserve original for rendering
     body = body.replace("```", "'''")
     footer_str = f"\n{footer}" if footer else ""
     overhead = len(header) + len("```\n") + len("\n```") + len(footer_str) + 50
     chunk_size = config.TG_MAX - overhead
 
+    # Detect table for render button
+    has_table = _content_mod._has_table(raw_body)
+
     if len(body) <= chunk_size:
         msg = f"{header}```\n{body}\n```{footer_str}"
-        msg_id = tg_send(msg, reply_markup=reply_markup, silent=silent)
+        final_kb = _maybe_add_render_button(reply_markup, has_table)
+        msg_id = tg_send(msg, reply_markup=final_kb, silent=silent)
+        if has_table:
+            config._render_bodies[msg_id] = raw_body
         config._save_last_msg(wid, msg)
         return msg_id
 
@@ -105,11 +115,27 @@ def _send_long_message(header: str, body: str, wid: str = "",
         is_last = i == total - 1
         suffix = footer_str if is_last else ""
         msg = f"{label}```\n{chunk}\n```{suffix}"
-        kb = reply_markup if is_last else None
+        if is_last:
+            kb = _maybe_add_render_button(reply_markup, has_table)
+        else:
+            kb = None
         last_msg_id = tg_send(msg, reply_markup=kb, silent=silent)
+    if has_table and last_msg_id:
+        config._render_bodies[last_msg_id] = raw_body
     if chunks:
         config._save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")
     return last_msg_id
+
+
+def _maybe_add_render_button(reply_markup: dict | None, has_table: bool) -> dict | None:
+    """Add a render-as-image button row if body has a table."""
+    if not has_table:
+        return reply_markup
+    # callback_data is "render"; handler uses callback message_id to find body
+    render_row = [{"text": "\U0001f5bc As image", "callback_data": "render"}]
+    if reply_markup and "inline_keyboard" in reply_markup:
+        return {"inline_keyboard": reply_markup["inline_keyboard"] + [render_row]}
+    return {"inline_keyboard": [render_row]}
 
 
 def _get_image_dimensions(path: str) -> tuple[int, int]:

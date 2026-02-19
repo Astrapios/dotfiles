@@ -28,6 +28,38 @@ _reload_after: float | None = None
 _RESCAN_INTERVAL = 60
 
 
+def _resolve_caption_target(caption: str, sessions: dict,
+                            last_win_idx: str | None) -> tuple[str | None, str]:
+    """Resolve a photo/doc caption to a target session and remaining text.
+
+    Checks wN prefix first, then session name prefix, then falls back to
+    single-session or last-used session. Returns (target_wid, remaining_text).
+    """
+    target_wid = None
+    remaining_text = caption
+    # Try wN prefix
+    m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
+    if m:
+        resolved = tmux.resolve_session_id(f"w{m.group(1)}", sessions)
+        if resolved:
+            target_wid = resolved
+            remaining_text = m.group(2).strip()
+    # Try session name prefix
+    if not target_wid and caption:
+        words = caption.split(None, 1)
+        if words:
+            name_idx = state._resolve_name(words[0])
+            if name_idx is not None:
+                target_wid = name_idx
+                remaining_text = words[1].strip() if len(words) > 1 else ""
+    # Fall back to single or last-used session
+    if not target_wid and len(sessions) == 1:
+        target_wid = next(iter(sessions))
+    elif not target_wid and last_win_idx and last_win_idx in sessions:
+        target_wid = last_win_idx
+    return target_wid, remaining_text
+
+
 def _merge_album_photos(messages: list[dict]) -> list[dict]:
     """Merge photo messages sharing a media_group_id into a single entry.
 
@@ -577,18 +609,8 @@ def _listen_tick(s):
                         msg, reply_markup=kb,
                         silent=state._is_silent(_CAT_CONFIRM))
                     continue
-                target_wid = None
-                remaining_text = caption
-                m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
-                if m:
-                    resolved = tmux.resolve_session_id(f"w{m.group(1)}", s.sessions)
-                    if resolved:
-                        target_wid = resolved
-                        remaining_text = m.group(2).strip()
-                if not target_wid and len(s.sessions) == 1:
-                    target_wid = next(iter(s.sessions))
-                elif not target_wid and s.last_win_idx and s.last_win_idx in s.sessions:
-                    target_wid = s.last_win_idx
+                target_wid, remaining_text = _resolve_caption_target(
+                    caption, s.sessions, s.last_win_idx)
 
                 if target_wid:
                     pane, project = s.sessions[target_wid]
@@ -670,18 +692,8 @@ def _listen_tick(s):
                         msg, reply_markup=kb,
                         silent=state._is_silent(_CAT_CONFIRM))
                     continue
-                target_wid = None
-                remaining_text = caption
-                m = re.match(r"^w(\d+[a-z]?)\s*(.*)", caption, re.DOTALL) if caption else None
-                if m:
-                    resolved = tmux.resolve_session_id(f"w{m.group(1)}", s.sessions)
-                    if resolved:
-                        target_wid = resolved
-                        remaining_text = m.group(2).strip()
-                if not target_wid and len(s.sessions) == 1:
-                    target_wid = next(iter(s.sessions))
-                elif not target_wid and s.last_win_idx and s.last_win_idx in s.sessions:
-                    target_wid = s.last_win_idx
+                target_wid, remaining_text = _resolve_caption_target(
+                    caption, s.sessions, s.last_win_idx)
 
                 if target_wid:
                     pane, project = s.sessions[target_wid]

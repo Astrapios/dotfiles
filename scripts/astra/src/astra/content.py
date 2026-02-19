@@ -7,6 +7,24 @@ import re
 from astra import tmux
 
 
+_TABLE_CHARS = set("│┌┐└┘├┤┬┴┼─━║╔╗╚╝╠╣╦╩╬")
+
+
+def _has_table(text: str) -> bool:
+    """Check if text contains an ASCII/Unicode table.
+
+    Detects box-drawing characters or pipe-delimited rows (| col | col |).
+    """
+    if any(ch in _TABLE_CHARS for ch in text):
+        return True
+    # Pipe-delimited rows: at least 2 pipes on a line with content between them
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 3:
+            return True
+    return False
+
+
 def _extract_pane_permission(pane: str, profile=None) -> tuple[str, str, list[str], str]:
     """Extract content and options from a permission dialog in a tmux pane.
     Returns (header, content between last dot and options, list of options, context).

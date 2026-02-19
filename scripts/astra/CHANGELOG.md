@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.20.0
+
+- **Render table as image** — messages containing ASCII/Unicode tables get a `🖼 As image` inline button; tapping it renders the code block as a crisp PNG via Pillow and sends it as a photo, fixing unreadable wrapped tables on mobile
+  - Detects box-drawing characters (`│┌┐└┘├┤┬┴┼─━║╔╗╚╝╠╣╦╩╬`) and pipe-delimited rows (`| col | col |`)
+  - Rendering tool at `~/pixi_tools/imgcat/` (DejaVuSansMono 18px on dark background)
+- **Fix photo/doc name routing** — photo and document captions now resolve session names (e.g. `myname describe this`) in addition to `wN` prefixes
+
 ## 0.19.2
 
 - **Prune god mode for closed sessions** — god mode wids are now automatically cleaned up when sessions disappear, preventing stale god mode state

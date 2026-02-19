@@ -79,7 +79,7 @@ from .state import (
 # content
 from .content import (
     _extract_pane_permission, _filter_noise, _filter_tool_calls,
-    _has_response_start, _detect_interrupted, _detect_compacting,
+    _has_response_start, _has_table, _detect_interrupted, _detect_compacting,
     clean_pane_content, clean_pane_status, _compute_new_lines,
 )
 
@@ -97,11 +97,11 @@ from .commands import (
     _ALIASES, _KEYS_MAP, _QUICK_KEYS, _resolve_key, _keys_combo_keyboard,
     _any_active_prompt, _resolve_alias,
     _enable_accept_edits, _maybe_activate_smartfocus,
-    _handle_command, _handle_callback,
+    _handle_command, _handle_callback, _render_and_send_image,
 )
 
 # listener
-from .listener import _merge_album_photos, cmd_listen
+from .listener import _resolve_caption_target, _merge_album_photos, cmd_listen
 
 # cli
 from .cli import (

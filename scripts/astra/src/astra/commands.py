@@ -1106,5 +1106,46 @@ def _handle_callback(callback: dict, sessions: dict,
                              silent=state._is_silent(_CAT_CONFIRM))
         return sessions, last_win_idx, None
 
+    # Render-as-image callback
+    if cb_data == "render":
+        body = config._render_bodies.get(msg_id)
+        if body:
+            _render_and_send_image(body)
+        else:
+            telegram.tg_send("⚠️ Render data expired — resend the message and try again.")
+        return sessions, last_win_idx, None
+
     config._log("callback", f"unknown callback_data: {cb_data}")
     return sessions, last_win_idx, None
+
+
+def _render_and_send_image(body: str):
+    """Render text body as a PNG image and send via Telegram."""
+    import tempfile
+    tmp_in = tempfile.mktemp(suffix=".txt")
+    tmp_out = tempfile.mktemp(suffix=".png")
+    try:
+        with open(tmp_in, "w") as f:
+            f.write(body)
+        _pixi = os.path.expanduser("~/.pixi/bin/pixi")
+        result = subprocess.run(
+            [_pixi, "run", "--manifest-path",
+             os.path.expanduser("~/pixi_tools/imgcat/pixi.toml"),
+             "python", os.path.expanduser("~/pixi_tools/imgcat/render.py"),
+             tmp_in, tmp_out],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            config._log("render", f"render.py failed: {result.stderr[:200]}")
+            telegram.tg_send(f"⚠️ Render failed: `{result.stderr[:200]}`")
+            return
+        telegram.tg_send_photo(tmp_out, caption="")
+    except Exception as e:
+        config._log("render", f"render error: {e}")
+        telegram.tg_send(f"⚠️ Render failed: `{e}`")
+    finally:
+        for p in (tmp_in, tmp_out):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
