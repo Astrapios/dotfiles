@@ -67,6 +67,25 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     return text
 
 
+def _auto_setup_session(pane_target: str):
+    """Accept trust dialog and switch out of plan mode for new sessions."""
+    try:
+        p = shlex.quote(pane_target)
+        raw = tmux._capture_pane(pane_target, 30)
+        # Accept workspace trust dialog if present
+        if "trust" in raw.lower() and ("Yes" in raw or "1." in raw):
+            subprocess.run(["bash", "-c",
+                            f"tmux send-keys -t {p} Enter"], timeout=5)
+            time.sleep(3)
+            raw = tmux._capture_pane(pane_target, 30)
+        # Switch out of plan mode (Shift+Tab cycles: plan → auto → ...)
+        if "plan mode on" in raw.lower():
+            subprocess.run(["bash", "-c",
+                            f"tmux send-keys -t {p} BTab"], timeout=5)
+    except Exception:
+        pass
+
+
 def _interrupt_session(idx: str, sessions: dict):
     """Interrupt a CLI session: Escape, clear prompt, clear busy/prompt state."""
     pane, project = sessions[idx]
@@ -521,14 +540,21 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             new_idx = result.stdout.strip()
             # Wait for CLI to start — Gemini (Node.js) takes a few seconds
             new_wid = None
+            pane_target = None
             for _ in range(6):
                 sessions = tmux.scan_claude_sessions()
                 new_wid = tmux.resolve_session_id(f"w{new_idx}", sessions)
                 if new_wid:
+                    info = sessions[new_wid]
+                    pane_target = info.pane_target if hasattr(info, "pane_target") else info[0]
                     break
                 time.sleep(1)
             if not new_wid:
                 new_wid = f"w{new_idx}a"
+            # Auto-setup: accept trust dialog, switch out of plan mode
+            if pane_target:
+                time.sleep(2)
+                _auto_setup_session(pane_target)
             proj = work_dir.rstrip("/").rsplit("/", 1)[-1]
             label = state._wid_label(new_wid)
             telegram.tg_send(f"🚀 Started {profile.display_name} in {label} (`{proj}`):\n`{work_dir}`")

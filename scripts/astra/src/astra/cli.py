@@ -514,19 +514,44 @@ def cmd_new():
         )
         new_idx = result.stdout.strip()
         new_wid = None
+        pane_target = None
         for _ in range(6):
             sessions = tmux.scan_claude_sessions()
             new_wid = tmux.resolve_session_id(f"w{new_idx}", sessions)
             if new_wid:
+                pane_target = sessions[new_wid].pane_target
                 break
             time.sleep(1)
         if not new_wid:
             new_wid = f"w{new_idx}a"
+        # Auto-setup: accept trust dialog, switch out of plan mode
+        if pane_target:
+            time.sleep(2)
+            _auto_setup_session(pane_target)
         proj = work_dir.rstrip("/").rsplit("/", 1)[-1]
         print(f"Started {profile.display_name} in {new_wid} ({proj}): {work_dir}")
     except Exception as e:
         print(f"Failed to start session: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _auto_setup_session(pane_target: str):
+    """Accept trust dialog and switch out of plan mode for new sessions."""
+    try:
+        p = shlex.quote(pane_target)
+        raw = tmux._capture_pane(pane_target, 30)
+        # Accept workspace trust dialog if present
+        if "trust" in raw.lower() and ("Yes" in raw or "1." in raw):
+            subprocess.run(["bash", "-c",
+                            f"tmux send-keys -t {p} Enter"], timeout=5)
+            time.sleep(3)
+            raw = tmux._capture_pane(pane_target, 30)
+        # Switch out of plan mode (Shift+Tab cycles: plan → auto → ...)
+        if "plan mode on" in raw.lower():
+            subprocess.run(["bash", "-c",
+                            f"tmux send-keys -t {p} BTab"], timeout=5)
+    except Exception:
+        pass
 
 
 def cmd_restart():

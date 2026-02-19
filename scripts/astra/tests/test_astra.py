@@ -1659,8 +1659,8 @@ class TestHandleCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("Started Claude", msg)
         self.assertIn("`w6`", msg)
-        # Should create window with claude command
-        cmd_arg = mock_run.call_args[0][0]
+        # Should create window with claude command (first subprocess call)
+        cmd_arg = mock_run.call_args_list[0][0][0]
         self.assertIn("new-window", cmd_arg)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)

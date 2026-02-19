@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.18.1
+
+- **Auto-setup for new sessions** — `astra new` now auto-accepts trust dialogs and switches out of plan mode so sessions are immediately usable from Telegram
+
 ## 0.18.0
 
 - **Debug log for outbound Telegram messages** — opt-in transient debug mode that logs every `tg_send`, `tg_send_photo`, and `tg_send_document` call to `/tmp/astra_debug.log`
