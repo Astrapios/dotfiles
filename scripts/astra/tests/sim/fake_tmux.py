@@ -38,6 +38,7 @@ class FakeTmux:
     def __init__(self):
         self.panes: dict[str, PaneState] = {}  # window_index -> PaneState
         self._locally_viewed: set[str] = set()
+        self._client_activity: float = 0.0
 
     # --- I/O fakes ---
 
@@ -96,6 +97,9 @@ class FakeTmux:
             if ps.pane_target == pane:
                 return ps.command
         return "zsh"
+
+    def _get_client_last_activity(self):
+        return self._client_activity
 
     def _get_locally_viewed_windows(self):
         return set(self._locally_viewed)
@@ -187,3 +191,7 @@ class FakeTmux:
     def set_locally_viewed(self, *win_indices):
         """Set which windows are being locally viewed."""
         self._locally_viewed = set(win_indices)
+
+    def set_client_activity(self, ts):
+        """Set the client_activity timestamp for attached clients."""
+        self._client_activity = ts

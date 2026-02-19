@@ -691,5 +691,249 @@ class TestStartupDialogDetection(SimTestBase):
         self.h.assert_not_sent("dialog")
 
 
+class TestGodModeMidPermission(SimTestBase):
+    """Scenario: Enabling god mode auto-accepts already-pending prompts."""
+
+    def test_god_wn_accepts_pending_prompt(self):
+        """Enabling /god wN while a permission dialog is pending auto-accepts it."""
+        from unittest.mock import patch as _patch
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: rm -rf /tmp/test\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again for this tool\n"
+            "  3. No\n"
+            "  Enter to select · ↑/↓ to navigate\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=perm_content)
+        s = self.h.make_listener_state()
+
+        # Inject permission signal → creates pending prompt
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="rm -rf /tmp/test")
+        self.h.tick(s)
+
+        # Verify prompt was saved
+        self.assertTrue(state.has_active_prompt("w4a"))
+
+        # Now enable god mode via /god w4a command
+        self.h.tg.inject_text_message("/god w4a")
+        self.h.clock.advance(1)
+        with _patch.object(state, "_is_god_mode_for", side_effect=lambda w: w == "w4a"), \
+             _patch.object(state, "_set_god_mode"):
+            self.h.tick(s)
+
+        # The pending prompt should have been consumed and accepted
+        self.assertFalse(state.has_active_prompt("w4a"))
+        self.h.assert_sent("Auto-accepted pending prompt")
+
+    def test_god_all_accepts_multiple_pending_prompts(self):
+        """Enabling /god all auto-accepts pending prompts across all sessions."""
+        from unittest.mock import patch as _patch
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n  2. No\n"
+            "  Enter to select\n"
+        )
+        self.h.tmux.add_session("4", "%20", "projA", content=perm_content)
+        self.h.tmux.add_session("5", "%21", "projB", content=perm_content)
+        s = self.h.make_listener_state()
+
+        # Create pending prompts for both sessions
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="projA", cmd="ls")
+        self.h.inject_signal("permission", "w5", pane="%21",
+                             project="projB", cmd="ls")
+        self.h.tick(s)
+
+        self.assertTrue(state.has_active_prompt("w4a"))
+        self.assertTrue(state.has_active_prompt("w5a"))
+
+        # Enable /god all
+        self.h.tg.inject_text_message("/god all")
+        self.h.clock.advance(1)
+        with _patch.object(state, "_is_god_mode_for", return_value=True), \
+             _patch.object(state, "_set_god_mode"), \
+             _patch.object(state, "_god_mode_wids", return_value=["all"]):
+            self.h.tick(s)
+
+        # Both pending prompts should have been consumed
+        self.assertFalse(state.has_active_prompt("w4a"))
+        self.assertFalse(state.has_active_prompt("w5a"))
+        accepted_msgs = self.h.tg.find_sent("Auto-accepted pending prompt")
+        self.assertEqual(len(accepted_msgs), 2)
+
+    def test_god_wn_no_pending_prompt_is_noop(self):
+        """Enabling /god wN with no pending prompt just enables god mode."""
+        from unittest.mock import patch as _patch
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("/god w4a")
+        self.h.clock.advance(1)
+        with _patch.object(state, "_is_god_mode_for", return_value=True), \
+             _patch.object(state, "_set_god_mode"):
+            self.h.tick(s)
+
+        # No auto-accept message should be sent
+        self.h.assert_not_sent("Auto-accepted pending prompt")
+        # God mode on message should still be sent
+        self.h.assert_sent("God mode.*on")
+
+
+class TestAutoLocalDetection(SimTestBase):
+    """Scenario: Auto-local detection via remote override."""
+
+    def test_tg_send_overrides_local_suppress(self):
+        """Sending a TG message to a locally-viewed session overrides local suppress."""
+        from unittest.mock import patch as _patch
+        from astra import config
+
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        self.h.tmux.set_locally_viewed("4")
+        s = self.h.make_listener_state()
+
+        # Enable local suppress
+        with _patch.object(state, "_is_local_suppress_enabled", return_value=True):
+            # Send message to session — this should add remote override
+            self.h.tg.inject_text_message("w4a do something")
+            self.h.tick(s)
+
+        # Remote session override should be set
+        self.assertIn("4", config._remote_sessions)
+
+    def test_remote_override_expires_on_keyboard_activity(self):
+        """Remote override is cleared when tmux client_activity exceeds send time."""
+        from astra import config
+
+        # Manually set a remote override in the past
+        config._remote_sessions["4"] = 1000.0
+
+        # Client activity after the send
+        self.h.tmux.set_client_activity(1001.0)
+
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        self.h.tmux.set_locally_viewed("4")
+
+        from unittest.mock import patch as _patch
+        with _patch.object(state, "_is_local_suppress_enabled", return_value=True):
+            s = self.h.make_listener_state()
+
+            # Tick to trigger reconciliation
+            self.h.clock.advance(6)
+            s.last_interrupt_check = 0
+            self.h.tick(s)
+
+        # Remote override should have been cleared
+        self.assertNotIn("4", config._remote_sessions)
+
+    def test_remote_override_prevents_local_suppress(self):
+        """With remote override active, interrupt notifications are NOT suppressed."""
+        from astra import config
+        from unittest.mock import patch as _patch
+
+        self.h.tmux.add_session("4", "%20", "myproject")
+        self.h.tmux.set_locally_viewed("4")
+
+        # Remote override is active (sent to via TG recently)
+        config._remote_sessions["4"] = self.h.clock.time()
+        # Client activity is BEFORE the send (user hasn't typed)
+        self.h.tmux.set_client_activity(self.h.clock.time() - 10)
+
+        self.h.tmux.set_pane_content("4",
+            "Interrupted · 3 tool uses · 1.2K tokens remaining\n"
+            "❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+
+        with _patch.object(state, "_is_local_suppress_enabled", return_value=True):
+            s = self.h.make_listener_state()
+            self.h.clock.advance(6)
+            s.last_interrupt_check = 0
+            self.h.tick(s)
+
+        # Interrupt notification should NOT be suppressed
+        self.h.assert_sent("interrupted")
+
+    def test_local_suppress_restored_after_keyboard(self):
+        """After keyboard activity, local suppress is re-engaged."""
+        from astra import config
+        from unittest.mock import patch as _patch
+
+        self.h.tmux.add_session("4", "%20", "myproject")
+        self.h.tmux.set_locally_viewed("4")
+
+        # Remote override set, then keyboard activity clears it
+        config._remote_sessions["4"] = 1000.0
+        self.h.tmux.set_client_activity(1001.0)
+
+        self.h.tmux.set_pane_content("4",
+            "Interrupted · 3 tool uses · 1.2K tokens remaining\n"
+            "❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+
+        with _patch.object(state, "_is_local_suppress_enabled", return_value=True):
+            s = self.h.make_listener_state()
+            self.h.clock.advance(6)
+            s.last_interrupt_check = 0
+            self.h.tick(s)
+
+        # Keyboard activity expired the override → local suppress is back
+        # So interrupt notification should be suppressed
+        self.h.assert_not_sent("interrupted")
+
+
+class TestReplyRouting(SimTestBase):
+    """Reply-to-message routing resolves wid correctly."""
+
+    def test_reply_routes_bare_wid_to_suffixed_session(self):
+        """Reply to a message with 'w4' should route to session 'w4a'."""
+        self.h.tmux.add_session("4", "%40", "/tmp/proj")
+        self.h.tmux.set_pane_content("4",
+            "Some output\n"
+            "❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+
+        s = self.h.make_listener_state()
+        # Reply to a message that contains "w4" (displayed as w4, session key is w4a)
+        self.h.tg.inject_reply_message("fix the bug", "🔔 w4 (proj): stopped")
+        self.h.tick(s)
+
+        self.h.assert_sent("Sent to.*w4")
+
+    def test_reply_sets_last_win_idx_for_subsequent_messages(self):
+        """Reply routing sets last_win_idx so next message without prefix routes there too."""
+        self.h.tmux.add_session("4", "%40", "/tmp/proj1")
+        self.h.tmux.add_session("5", "%50", "/tmp/proj2")
+        self.h.tmux.set_pane_content("4",
+            "Some output\n"
+            "❯ "
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+        self.h.tmux.set_pane_content("5",
+            "Other output\n"
+            "❯ "
+        )
+        self.h.tmux.panes["5"].cursor_x = 2
+
+        s = self.h.make_listener_state()
+        # Reply to w4 message — routes first msg to w4
+        self.h.tg.inject_reply_message("first msg", "● w4 completed")
+        self.h.tick(s)
+        self.h.assert_sent("Sent to.*w4")
+        # Second message without prefix should also go to w4 (saved as busy)
+        self.h.tg.clear_sent()
+        self.h.tg.inject_text_message("second msg")
+        self.h.clock.advance(0.5)
+        self.h.tick(s)
+
+        self.h.assert_sent("w4")
+
+
 if __name__ == "__main__":
     unittest.main()

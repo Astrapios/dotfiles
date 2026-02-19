@@ -137,6 +137,21 @@ def _get_cursor_x(pane: str) -> int | None:
         return None
 
 
+def _get_client_last_activity() -> float:
+    """Return the most recent client_activity timestamp across attached tmux clients."""
+    try:
+        result = subprocess.run(
+            ["tmux", "list-clients", "-F", "#{client_activity}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        timestamps = result.stdout.strip().splitlines()
+        if timestamps:
+            return max(float(t) for t in timestamps if t.strip())
+    except Exception:
+        pass
+    return 0.0
+
+
 def _get_locally_viewed_windows() -> set[str]:
     """Return window indices currently being viewed by attached tmux clients."""
     try:

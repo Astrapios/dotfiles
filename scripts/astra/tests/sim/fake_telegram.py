@@ -100,6 +100,20 @@ class FakeTelegram:
             },
         })
 
+    def inject_reply_message(self, text, reply_to_text, chat_id="123"):
+        """Queue a text message that is a reply to another message."""
+        uid = self._next_update_id
+        self._next_update_id += 1
+        self._pending_updates.append({
+            "update_id": uid,
+            "message": {
+                "message_id": uid,
+                "chat": {"id": chat_id},
+                "text": text,
+                "reply_to_message": {"text": reply_to_text},
+            },
+        })
+
     def inject_callback(self, data, message_id=None, callback_id=None):
         """Queue a callback query (inline keyboard button press)."""
         uid = self._next_update_id

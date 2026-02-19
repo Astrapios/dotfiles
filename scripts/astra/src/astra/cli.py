@@ -113,14 +113,13 @@ def cmd_hook():
                 return
             wid = tmux.get_window_id() or "unknown"
             bash_cmd = ""
-            if "bash" in msg.lower() or internal_tool == "shell":
-                cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
-                try:
-                    with open(cmd_file) as f:
-                        bash_cmd = json.load(f).get("cmd", "")
-                    os.remove(cmd_file)
-                except (OSError, json.JSONDecodeError):
-                    pass
+            cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+            try:
+                with open(cmd_file) as f:
+                    bash_cmd = json.load(f).get("cmd", "")
+                os.remove(cmd_file)
+            except (OSError, json.JSONDecodeError):
+                pass
             state.write_signal("permission", data, cmd=bash_cmd, message=msg, cli=cli_name)
     elif internal_event == "pre_tool":
         if internal_tool == "plan":

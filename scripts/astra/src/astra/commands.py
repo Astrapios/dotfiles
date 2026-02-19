@@ -179,10 +179,31 @@ def _enable_accept_edits(pane: str):
         time.sleep(0.3)
 
 
+def _god_accept_pending_prompts(wids: list[str]):
+    """Auto-accept pending permission prompts for the given wids."""
+    for wid in wids:
+        prompt = state.load_active_prompt(wid)
+        if not prompt:
+            continue
+        pane = prompt.get("pane", "")
+        if pane:
+            routing._select_option(pane, 1)
+        # Clear tracked keyboard
+        old_kb = config._clear_keyboard_msg(wid)
+        if old_kb:
+            telegram._remove_inline_keyboard(old_kb)
+        label = state._wid_label(wid)
+        telegram.tg_send(f"⚡ {label} Auto-accepted pending prompt.")
+
+
 def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: str):
     """Activate smart focus after a message is sent (not queued/prompt reply)."""
     if not (confirm.startswith("📨 Sent to") or confirm.startswith("📷 Photo sent to") or confirm.startswith("📎 Document sent to")):
         return
+    # Mark window as remotely active (for auto-local detection)
+    bare_m = re.match(r'^w?(\d+)', win_idx)
+    if bare_m:
+        config._remote_sessions[bare_m.group(1)] = time.time()
     if not state._is_autofocus_enabled():
         return
     # Skip if manual focus or deepfocus already covers this wid
@@ -261,6 +282,15 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         sessions = tmux.scan_claude_sessions()
         statuses = routing._get_session_statuses(sessions)
         viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else None
+        # Apply auto-local overrides so icons reflect effective state
+        if viewed and config._remote_sessions:
+            client_activity = tmux._get_client_last_activity()
+            expired = [k for k, ts in config._remote_sessions.items()
+                       if client_activity > ts]
+            for k in expired:
+                del config._remote_sessions[k]
+            if config._remote_sessions:
+                viewed = viewed - set(config._remote_sessions.keys())
         telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
                                                        locally_viewed=viewed),
                          reply_markup=tmux._sessions_keyboard(sessions))
@@ -535,6 +565,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if arg.lower() == "all":
             state._set_god_mode("all", True)
             telegram.tg_send("\u26a1 God mode *on* for all sessions.")
+            _god_accept_pending_prompts(list(sessions.keys()))
             # Cycle accept-edits for all idle sessions
             for idx, (p, proj) in sessions.items():
                 idle, _ = routing._pane_idle_state(p)
@@ -550,6 +581,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if idx:
                 state._set_god_mode(idx, True)
                 telegram.tg_send(f"\u26a1 God mode *on* for {state._wid_label(idx)}.")
+                _god_accept_pending_prompts([idx])
                 pane_t, _ = sessions[idx]
                 idle, _ = routing._pane_idle_state(pane_t)
                 if idle:
@@ -651,15 +683,11 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
-    # /keys (bare — combo picker, auto-select single/last-used session)
+    # /keys (bare — combo picker, always ask which session for multiple)
     if re.match(r"^/keys?$", text.strip(), re.IGNORECASE):
         sessions = tmux.scan_claude_sessions()
-        target = None
         if len(sessions) == 1:
             target = next(iter(sessions))
-        elif last_win_idx and last_win_idx in sessions:
-            target = last_win_idx
-        if target:
             _, project = sessions[target]
             kb = _keys_combo_keyboard(target)
             telegram.tg_send(f"⌨️ Send key to {state._wid_label(target)} (`{project}`):", reply_markup=kb)

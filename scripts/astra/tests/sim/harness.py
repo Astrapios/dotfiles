@@ -61,7 +61,8 @@ class SimulationHarness:
             "scan_claude_sessions", "scan_cli_sessions",
             "_capture_pane", "_capture_pane_ansi",
             "_get_pane_width", "_get_cursor_x", "_get_pane_command",
-            "_get_locally_viewed_windows", "_join_wrapped_lines",
+            "_get_client_last_activity", "_get_locally_viewed_windows",
+            "_join_wrapped_lines",
             "format_sessions_message", "_sessions_keyboard",
         ]
         import astra.tmux as tmux_mod
@@ -104,6 +105,9 @@ class SimulationHarness:
             patch.object(state_mod, "_is_autofocus_enabled", return_value=True)
         )
 
+        # Clear auto-local remote sessions state
+        config._remote_sessions.clear()
+
         # Start all patches
         for p in self._patches:
             p.start()
@@ -113,6 +117,7 @@ class SimulationHarness:
         for p in reversed(self._patches):
             p.stop()
         self._patches.clear()
+        config._remote_sessions.clear()
         # Clean up temp dir
         import shutil
         if self._tmpdir and os.path.isdir(self._tmpdir):

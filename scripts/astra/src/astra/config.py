@@ -85,6 +85,8 @@ def _debug_tg(kind: str, detail: str, text: str):
         pass
 
 
+_remote_sessions: dict[str, float] = {}  # bare win_idx -> tg_send_timestamp
+
 _last_messages: dict[str, str] = {}  # wid -> last sent message
 _keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
 _render_bodies: dict[int, str] = {}  # msg_id -> body text for "render as image"

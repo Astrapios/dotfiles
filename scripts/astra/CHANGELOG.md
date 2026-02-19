@@ -5,6 +5,25 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.21.3
+
+- **Fix `/status` local icons with auto-local** — `/status` now applies remote override subtraction so the `👁` icon correctly reflects whether local suppression is active (not shown for windows with a pending TG override)
+- **`/keys` always shows session picker** — bare `/keys` with multiple sessions now always prompts "which session?" instead of auto-selecting the last-used session
+
+## 0.21.2
+
+- **Fix reply-to routing** — replying to an astra message now correctly routes to the session even when the displayed wid (`w4`) differs from the session key (`w4a`); uses `resolve_session_id` instead of a direct dict lookup
+- **Update persistent keyboard** — replaced `/last`, `/saved`, `/focus`, `/help` with `/keys`, `/god`, `/saved`, `/last` to match most-used commands
+
+## 0.21.1
+
+- **Fix permission prompt formatting** — permission notifications now always read the saved bash command file, fixing cases where `bash_cmd` was empty (e.g. git commit) causing the full command to be shown twice in the Telegram message
+
+## 0.21.0
+
+- **God mode mid-permission** — enabling `/god wN` or `/god all` while a permission dialog is already pending now immediately auto-accepts the pending prompt instead of waiting for the next one
+- **Auto-local detection** — when a Telegram message is sent to a locally-viewed session, local suppression is temporarily disabled for that window so you see its notifications; returning to tmux (keyboard activity) re-engages local suppress automatically
+
 ## 0.20.0
 
 - **Render table as image** — messages containing ASCII/Unicode tables get a `🖼 As image` inline button; tapping it renders the code block as a crisp PNG via Pillow and sends it as a photo, fixing unreadable wrapped tables on mobile

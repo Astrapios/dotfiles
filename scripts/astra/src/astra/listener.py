@@ -257,6 +257,16 @@ def _listen_tick(s):
 
     locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
 
+    # --- Auto-local: subtract remote-overridden windows from locally_viewed ---
+    if locally_viewed and config._remote_sessions:
+        client_activity = tmux._get_client_last_activity()
+        expired = [idx for idx, ts in config._remote_sessions.items()
+                   if client_activity > ts]
+        for idx in expired:
+            del config._remote_sessions[idx]
+        if config._remote_sessions:
+            locally_viewed = locally_viewed - set(config._remote_sessions.keys())
+
     # --- Interrupt detection (no hook fires on Esc interrupt) ---
     if time.time() - s.last_interrupt_check > 5:
         s.last_interrupt_check = time.time()
@@ -579,8 +589,10 @@ def _listen_tick(s):
 
         # Reply-to routing: use wid from the replied-to message
         reply_wid = chat_msg.get("reply_wid")
-        if reply_wid and reply_wid in s.sessions:
-            s.last_win_idx = reply_wid
+        if reply_wid:
+            resolved = tmux.resolve_session_id(reply_wid, s.sessions)
+            if resolved:
+                s.last_win_idx = resolved
 
         # Photo received — download and route to Claude
         photo_ids = chat_msg.get("photos") or ([photo_id] if photo_id else [])

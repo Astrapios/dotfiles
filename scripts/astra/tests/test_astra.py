@@ -764,14 +764,14 @@ class TestCmdHook(unittest.TestCase):
 
     @patch.object(astra.tmux, "get_window_id", return_value="w4a")
     @patch("sys.stdin")
-    def test_permission_reads_bash_cmd_only_for_bash(self, mock_stdin, mock_wid):
-        """Permission notification only reads _bash_cmd if message mentions bash."""
+    def test_permission_always_reads_bash_cmd(self, mock_stdin, mock_wid):
+        """Permission notification always consumes _bash_cmd file if it exists."""
         # Pre-create a bash cmd file
         cmd_file = os.path.join(self.signal_dir, "_bash_cmd_w4a.json")
         with open(cmd_file, "w") as f:
             json.dump({"cmd": "echo hello"}, f)
 
-        # Non-bash permission should NOT consume it
+        # Even non-bash permission should consume the cmd file
         data = {"hook_event_name": "Notification", "notification_type": "permission_prompt",
                 "message": "Claude needs permission to use Update", "cwd": "/tmp/test"}
         mock_stdin.read.return_value = json.dumps(data)
@@ -779,15 +779,15 @@ class TestCmdHook(unittest.TestCase):
 
         astra.cmd_hook()
 
-        # Bash cmd file should still exist
-        self.assertTrue(os.path.exists(cmd_file))
+        # Bash cmd file should be consumed
+        assert not os.path.exists(cmd_file)
 
-        # Verify signal was written without cmd
+        # Verify signal was written with the cmd
         signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
-        self.assertEqual(len(signals), 1)
+        assert len(signals) == 1
         with open(os.path.join(self.signal_dir, signals[0])) as f:
             signal = json.load(f)
-        self.assertEqual(signal["cmd"], "")
+        assert signal["cmd"] == "echo hello"
 
 
 class TestCmdHookPlanMode(unittest.TestCase):
@@ -5503,6 +5503,48 @@ class TestStatusCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_get_locally_viewed_windows", return_value={"4"})
+    @patch.object(astra.tmux, "_get_client_last_activity", return_value=500.0)
+    @patch.object(astra.state, "_is_local_suppress_enabled", return_value=True)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_status_hides_local_icon_for_remote_override(self, mock_send, mock_local,
+                                                          mock_activity, mock_viewed,
+                                                          mock_scan):
+        """Remote-overridden sessions should not show the local 👁 icon in /status."""
+        sessions = {"w4a": astra.SessionInfo("0:4.0", "proj", "claude", "4", "a")}
+        mock_scan.return_value = sessions
+        astra.state._current_sessions = sessions
+        # Window 4 is locally viewed but has a remote override (TG send at t=1000)
+        astra.config._remote_sessions["4"] = 1000.0
+        try:
+            astra._handle_command("/status", sessions, None)
+            msg = mock_send.call_args[0][0]
+            assert "👁" not in msg
+        finally:
+            astra.config._remote_sessions.clear()
+
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_get_locally_viewed_windows", return_value={"4"})
+    @patch.object(astra.tmux, "_get_client_last_activity", return_value=2000.0)
+    @patch.object(astra.state, "_is_local_suppress_enabled", return_value=True)
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_status_shows_local_icon_after_override_expires(self, mock_send, mock_local,
+                                                             mock_activity, mock_viewed,
+                                                             mock_scan):
+        """After keyboard activity expires the override, 👁 icon should reappear."""
+        sessions = {"w4a": astra.SessionInfo("0:4.0", "proj", "claude", "4", "a")}
+        mock_scan.return_value = sessions
+        astra.state._current_sessions = sessions
+        # Override at t=1000, but client activity at t=2000 expires it
+        astra.config._remote_sessions["4"] = 1000.0
+        try:
+            astra._handle_command("/status", sessions, None)
+            msg = mock_send.call_args[0][0]
+            assert "👁" in msg
+        finally:
+            astra.config._remote_sessions.clear()
+
 
 class TestSendLongMessageWithFooter(unittest.TestCase):
     """Test _send_long_message footer parameter."""
@@ -7975,13 +8017,12 @@ class TestKeysMap(unittest.TestCase):
 
 
 @pytest.fixture
-def god_mode_cleanup():
-    """Ensure god mode file is cleaned up after each test."""
+def god_mode_cleanup(tmp_path):
+    """Redirect GOD_MODE_PATH to a temp dir so tests don't clobber the real file."""
+    orig = astra.config.GOD_MODE_PATH
+    astra.config.GOD_MODE_PATH = str(tmp_path / "_god_mode.json")
     yield
-    try:
-        os.remove(astra.config.GOD_MODE_PATH)
-    except OSError:
-        pass
+    astra.config.GOD_MODE_PATH = orig
 
 
 class TestCleanupStaleGodMode:
