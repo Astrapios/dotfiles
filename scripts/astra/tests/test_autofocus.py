@@ -127,6 +127,10 @@ class TestBulletedResponseCapture(SimTestBase):
             "- Third, the API endpoints\n"
         )
         self.h.clock.advance(1)
+        self.h.tick(s)  # Accumulates to pending
+
+        # Advance past 5s timeout to flush pending
+        self.h.clock.advance(5)
         self.h.tick(s)
 
         eye_msgs = self.h.tg.find_sent("👁")
@@ -145,7 +149,9 @@ class TestBulletedResponseCapture(SimTestBase):
             "- Third, the API endpoints\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)
+        self.h.tick(s)  # Accumulates
+        self.h.clock.advance(5)
+        self.h.tick(s)  # Timeout flush
         round1 = len(self.h.tg.find_sent("👁"))
 
         # Round 2: add more
@@ -160,7 +166,9 @@ class TestBulletedResponseCapture(SimTestBase):
             "Here are my recommendations:\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)
+        self.h.tick(s)  # Accumulates
+        self.h.clock.advance(5)
+        self.h.tick(s)  # Timeout flush
         round2 = len(self.h.tg.find_sent("👁"))
 
         self.assertGreater(round2, round1, "Second update should generate another 👁")
@@ -287,6 +295,10 @@ class TestToolCallInterleaved(SimTestBase):
             "- File B has issues\n"
         )
         self.h.clock.advance(1)
+        self.h.tick(s)  # Accumulates to pending
+
+        # Advance past 5s timeout to flush pending
+        self.h.clock.advance(5)
         self.h.tick(s)
 
         eye_msgs = self.h.tg.find_sent("👁")
@@ -472,6 +484,9 @@ class TestFullLifecycle(SimTestBase):
             "2. No rate limiting on login attempts\n"
         )
         self.h.clock.advance(1)
+        self.h.tick(s)  # Accumulates; bullet boundary may flush tool call
+        # Advance past timeout to flush remaining pending
+        self.h.clock.advance(5)
         self.h.tick(s)
         eye1 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye1, 0, "First update after tool call")
@@ -500,11 +515,13 @@ class TestFullLifecycle(SimTestBase):
             "- Added rate limiter (max 5 attempts/minute)\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)
+        self.h.tick(s)  # Accumulates
+        self.h.clock.advance(5)
+        self.h.tick(s)  # Timeout flush
         eye2 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye2, eye1, "Second update after edit")
 
-        # --- Step 5: Tool call (Bash) + final summary ---
+        # --- Step 5: Tool call (Bash) + final summary (session goes idle) ---
         self.h.tmux.set_pane_content("4",
             "● I'll analyze the auth module and fix any issues.\n"
             "\n"
@@ -538,7 +555,7 @@ class TestFullLifecycle(SimTestBase):
             "❯ "
         )
         self.h.clock.advance(1)
-        self.h.tick(s)
+        self.h.tick(s)  # Idle detected → immediate flush
 
         # --- Step 6: Stop signal arrives ---
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")

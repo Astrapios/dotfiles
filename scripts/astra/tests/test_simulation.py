@@ -294,8 +294,12 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             "Found the bug in line 42\n"
         )
 
-        # Tick again — should detect new content and send update
+        # Tick to accumulate new lines into pending buffer
         self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Advance past 5s timeout and tick again to flush pending
+        self.h.clock.advance(5)
         self.h.tick(s)
 
         # Should have sent an eye update for the new content
@@ -1383,6 +1387,324 @@ class TestMultiQuestion(SimTestBase):
         self.h.tg.inject_callback("q_w4a_1", message_id=1)
         self.h.tick(s)
         self.h.assert_sent("Q2?")
+
+
+class TestFocusDiffOnly(SimTestBase):
+    """Bug fix: Focus mode sends only new lines (diff), not full response."""
+
+    def test_focus_sends_diff_not_full(self):
+        """After baseline, only new lines are sent."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Activate focus
+        state._save_focus_state("w4a", "%20", "myproject")
+
+        # Tick 1: establish baseline
+        self.h.tmux.set_pane_content("4",
+            "● First paragraph\n"
+            "Line A\nLine B\n"
+            "❯ "
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        assert len(s.focus_prev_lines) > 0, "Baseline should be set"
+        self.h.assert_not_sent("🔍.*myproject")
+
+        # Tick 2: add new content → only new lines sent
+        self.h.tmux.set_pane_content("4",
+            "● First paragraph\n"
+            "Line A\nLine B\n"
+            "New line C\nNew line D\n"
+            "❯ "
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        focus_msgs = self.h.tg.find_sent("🔍")
+        assert len(focus_msgs) > 0, f"Expected focus msg. All: {self.h.dump_timeline()}"
+        # Should contain only new lines, not the full response
+        msg_text = focus_msgs[0]["text"]
+        assert "New line C" in msg_text
+        assert "New line D" in msg_text
+
+    def test_focus_no_send_on_first_tick(self):
+        """First tick after activation sets baseline, doesn't send."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        state._save_focus_state("w4a", "%20", "myproject")
+        self.h.tmux.set_pane_content("4",
+            "● Some response\nContent here\n❯ "
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Should NOT send anything (first tick = baseline)
+        self.h.assert_not_sent("🔍.*myproject")
+        assert len(s.focus_prev_lines) > 0
+
+    def test_focus_no_send_when_unchanged(self):
+        """No send when content hasn't changed between ticks."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        state._save_focus_state("w4a", "%20", "myproject")
+        self.h.tmux.set_pane_content("4",
+            "● Response\nLine 1\n❯ "
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)  # Baseline
+
+        # Same content, tick again
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        self.h.assert_not_sent("🔍.*myproject")
+
+    def test_focus_resets_on_target_change(self):
+        """Switching focus target resets prev_lines."""
+        self.h.tmux.add_session("4", "%20", "projA", idle=True)
+        self.h.tmux.add_session("5", "%21", "projB", idle=True)
+        s = self.h.make_listener_state()
+
+        # Focus on w4a
+        state._save_focus_state("w4a", "%20", "projA")
+        self.h.tmux.set_pane_content("4", "● A\nContent\n❯ ")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        assert s.focus_target_wid == "w4a"
+        assert len(s.focus_prev_lines) > 0
+
+        # Switch to w5a
+        state._save_focus_state("w5a", "%21", "projB")
+        self.h.tmux.set_pane_content("5", "● B\nOther\n❯ ")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        assert s.focus_target_wid == "w5a"
+        # First tick on new target = baseline, no send
+        self.h.assert_not_sent("🔍.*projB")
+
+
+class TestAutofocusOnBusyAttach(SimTestBase):
+    """Feature: /autofocus on auto-attaches to a busy session."""
+
+    def test_autofocus_on_attaches_to_busy_session(self):
+        """Toggling autofocus on while a session is busy auto-attaches smartfocus."""
+        from unittest.mock import patch as _patch
+        import astra.state as state_mod
+
+        self.h.tmux.add_session("4", "%20", "myproject",
+                                content="● Working on something...\n  esc to interrupt\n")
+        s = self.h.make_listener_state()
+
+        # Mark w4a as busy
+        state._mark_busy("w4a")
+
+        self.h.tg.inject_text_message("/autofocus on")
+        self.h.tick(s)
+
+        # Should have attached smartfocus to the busy session
+        sf = state._load_smartfocus_state()
+        assert sf is not None, "Smartfocus should be activated"
+        assert sf["wid"] == "w4a"
+
+        # Confirmation should mention the session
+        self.h.assert_sent("watching.*w4")
+        state._clear_busy("w4a")
+
+    def test_autofocus_on_prefers_last_win_idx(self):
+        """When multiple sessions are busy, prefer last_win_idx."""
+        self.h.tmux.add_session("4", "%20", "projA",
+                                content="● Working...\n  esc to interrupt\n")
+        self.h.tmux.add_session("5", "%21", "projB",
+                                content="● Working...\n  esc to interrupt\n")
+        s = self.h.make_listener_state()
+        s.last_win_idx = "w5a"
+
+        state._mark_busy("w4a")
+        state._mark_busy("w5a")
+
+        self.h.tg.inject_text_message("/autofocus on")
+        self.h.tick(s)
+
+        sf = state._load_smartfocus_state()
+        assert sf is not None
+        assert sf["wid"] == "w5a", f"Should prefer last_win_idx w5a, got {sf['wid']}"
+        state._clear_busy("w4a")
+        state._clear_busy("w5a")
+
+    def test_autofocus_on_no_busy_session(self):
+        """When no sessions are busy, just confirm without attaching."""
+        from unittest.mock import patch as _patch
+        import astra.state as state_mod
+
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h._patches.append(
+            _patch.object(state_mod, "_is_autofocus_enabled", return_value=True)
+        )
+        self.h._patches[-1].start()
+
+        self.h.tg.inject_text_message("/autofocus on")
+        self.h.tick(s)
+
+        sf = state._load_smartfocus_state()
+        assert sf is None, "No smartfocus without busy session"
+        self.h.assert_sent("Autofocus.*on")
+        self.h.assert_not_sent("watching")
+
+    def test_autofocus_toggle_on_attaches(self):
+        """Bare /autofocus toggle from off→on attaches to busy session."""
+        from unittest.mock import patch as _patch
+        import astra.state as state_mod
+
+        self.h.tmux.add_session("4", "%20", "myproject",
+                                content="● Working...\n  esc to interrupt\n")
+        s = self.h.make_listener_state()
+
+        state._mark_busy("w4a")
+
+        # Autofocus is currently off
+        self.h._patches.append(
+            _patch.object(state_mod, "_is_autofocus_enabled", return_value=False)
+        )
+        self.h._patches[-1].start()
+
+        self.h.tg.inject_text_message("/autofocus")
+        self.h.tick(s)
+
+        sf = state._load_smartfocus_state()
+        assert sf is not None, "Toggle on should attach"
+        assert sf["wid"] == "w4a"
+        state._clear_busy("w4a")
+
+
+class TestSmartfocusBulletBatching(SimTestBase):
+    """Feature: Smartfocus accumulates lines and flushes on bullet boundaries."""
+
+    def _setup_smartfocus(self):
+        """Helper: send message, establish baseline."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("w4a do work")
+        self.h.tick(s)
+        state._clear_busy("w4a")
+
+        # Establish baseline
+        self.h.tmux.set_pane_content("4",
+            "● Starting response\n"
+            "First line of content\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        return s
+
+    def test_pending_accumulates_no_immediate_send(self):
+        """New lines accumulate in pending buffer, not sent immediately."""
+        s = self._setup_smartfocus()
+        self.h.tg.clear_sent()
+
+        self.h.tmux.set_pane_content("4",
+            "● Starting response\n"
+            "First line of content\n"
+            "Second line added\n"
+            "Third line added\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Should NOT have sent yet (pending, no flush condition)
+        eye_msgs = self.h.tg.find_sent("👁")
+        assert len(eye_msgs) == 0, f"Should not send immediately: {self.h.dump_timeline()}"
+        assert len(s.smartfocus_pending) > 0, "Pending should have accumulated lines"
+
+    def test_timeout_flushes_pending(self):
+        """5s with no new content triggers flush."""
+        s = self._setup_smartfocus()
+        self.h.tg.clear_sent()
+
+        self.h.tmux.set_pane_content("4",
+            "● Starting response\n"
+            "First line of content\n"
+            "New content here\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)  # Accumulates
+
+        # Advance past 5s timeout
+        self.h.clock.advance(5)
+        self.h.tick(s)  # Should flush
+
+        eye_msgs = self.h.tg.find_sent("👁")
+        assert len(eye_msgs) > 0, f"Timeout should flush. Sent: {self.h.dump_timeline()}"
+
+    def test_idle_flushes_immediately(self):
+        """Prompt char appearing (session idle) flushes all pending."""
+        s = self._setup_smartfocus()
+        self.h.tg.clear_sent()
+
+        # Content with prompt char at end (session went idle)
+        self.h.tmux.set_pane_content("4",
+            "● Starting response\n"
+            "First line of content\n"
+            "All done with this task\n"
+            "❯ "
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)  # Idle detected → immediate flush
+
+        eye_msgs = self.h.tg.find_sent("👁")
+        assert len(eye_msgs) > 0, f"Idle should flush immediately. Sent: {self.h.dump_timeline()}"
+
+    def test_bullet_boundary_flushes_before_bullet(self):
+        """A new text bullet flushes everything before it."""
+        s = self._setup_smartfocus()
+        self.h.tg.clear_sent()
+
+        # Add a tool call followed by a new text bullet
+        self.h.tmux.set_pane_content("4",
+            "● Starting response\n"
+            "First line of content\n"
+            "\n"
+            "● Read(file.py)\n"
+            "  file contents here\n"
+            "\n"
+            "● Here is what I found:\n"
+            "\n"
+            "- Bug on line 42\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # The bullet boundary should flush the tool call before "● Here is what I found:"
+        # The tool call content should be sent (collapsed), the text bullet stays in pending
+        assert len(s.smartfocus_pending) > 0, "Text bullet and content should be in pending"
+
+    def test_pending_cleared_on_smartfocus_deactivate(self):
+        """When smartfocus is cleared, pending buffer is also cleared."""
+        s = self._setup_smartfocus()
+
+        # Accumulate some pending
+        self.h.tmux.set_pane_content("4",
+            "● Starting response\n"
+            "First line of content\n"
+            "More content\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        assert len(s.smartfocus_pending) > 0
+
+        # Clear smartfocus
+        state._clear_smartfocus_state()
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        assert s.smartfocus_target_wid is None
+        assert len(s.smartfocus_pending) == 0
+        assert s.smartfocus_last_new_ts == 0
 
 
 if __name__ == "__main__":

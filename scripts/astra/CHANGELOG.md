@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.24.0
+
+- **Fix focus mode sending full response on every change** — `/focus` now uses diff-based tracking (like smartfocus) to send only new lines instead of re-sending the entire response every time content changes; first tick establishes a baseline without sending
+- **Autofocus on auto-attaches to busy session** — toggling `/autofocus on` (or bare `/autofocus` toggle from off→on) now automatically attaches smartfocus to a currently busy session if one exists; prefers `last_win_idx` when multiple sessions are busy
+- **Smartfocus bullet-aware batching** — smartfocus accumulates new lines in a pending buffer instead of sending immediately; flushes on bullet boundary (text `●` signals previous bullet is complete), response completion (prompt char detected), or 5-second timeout with no new content; reduces fragmented mid-paragraph updates
+
 ## 0.23.1
 
 - **Fix multi-question prompts lost on listener restart** — `cmd_listen` startup cleared `_active_prompt_*` files, so any pending AskUserQuestion (especially multi-question flows in plan mode) was lost when the listener auto-reloaded; prompts now persist across restarts and `_cleanup_stale_prompts` handles expired ones

@@ -156,7 +156,7 @@ class _ListenerState:
     last_prompt_cleanup: float = 0
     focus_target_wid: str | None = None
     focus_pane_width: int = 0
-    focus_last_hash: int = 0
+    focus_prev_lines: list = field(default_factory=list)
     deepfocus_target_wid: str | None = None
     deepfocus_pane_width: int = 0
     deepfocus_prev_lines: list = field(default_factory=list)
@@ -167,6 +167,8 @@ class _ListenerState:
     smartfocus_pane_width: int = 0
     smartfocus_prev_lines: list = field(default_factory=list)
     smartfocus_has_sent: bool = False
+    smartfocus_pending: list = field(default_factory=list)
+    smartfocus_last_new_ts: float = 0
     compact_notified: set = field(default_factory=set)
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
@@ -216,7 +218,7 @@ def _listen_tick(s):
                 s.paused = False
                 s.focus_target_wid = None
                 s.focus_pane_width = 0
-                s.focus_last_hash = 0
+                s.focus_prev_lines = []
                 s.deepfocus_target_wid = None
                 s.deepfocus_pane_width = 0
                 s.deepfocus_prev_lines = []
@@ -227,6 +229,8 @@ def _listen_tick(s):
                 s.smartfocus_pane_width = 0
                 s.smartfocus_prev_lines = []
                 s.smartfocus_has_sent = False
+                s.smartfocus_pending = []
+                s.smartfocus_last_new_ts = 0
                 statuses = routing._get_session_statuses(s.sessions)
                 s.interrupted_notified = {idx for idx, st in statuses.items() if st == "interrupted"}
                 resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
@@ -414,7 +418,7 @@ def _listen_tick(s):
         if fw != s.focus_target_wid:
             s.focus_target_wid = fw
             s.focus_pane_width = tmux._get_pane_width(focus_state["pane"])
-            s.focus_last_hash = 0
+            s.focus_prev_lines = []
         fp, fproj = focus_state["pane"], focus_state["project"]
         if fw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
@@ -432,14 +436,15 @@ def _listen_tick(s):
                 if content._has_response_start(raw, profile=_fprofile):
                     break
             cleaned_lines = content.clean_pane_content(raw, "stop", s.focus_pane_width, profile=_fprofile).splitlines()
-            cleaned_lines = content._collapse_tool_calls(cleaned_lines, profile=_fprofile)
-            cleaned = "\n".join(cleaned_lines).strip()
-            if cleaned:
-                h = hash(cleaned)
-                if h != s.focus_last_hash and s.focus_last_hash != 0:
-                    header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
-                    telegram._send_long_message(header, cleaned, fw, silent=state._is_silent(_CAT_MONITOR))
-                s.focus_last_hash = h
+            if s.focus_prev_lines:
+                new = content._compute_new_lines(s.focus_prev_lines, cleaned_lines)
+                if new:
+                    new = content._collapse_tool_calls(new, profile=_fprofile)
+                    new_text = "\n".join(new).strip()
+                    if new_text:
+                        header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
+                        telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+            s.focus_prev_lines = cleaned_lines
     elif s.focus_target_wid:
         s.focus_target_wid = None
 
@@ -456,6 +461,8 @@ def _listen_tick(s):
                 s.smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
                 s.smartfocus_prev_lines = []
                 s.smartfocus_has_sent = False
+                s.smartfocus_pending = []
+                s.smartfocus_last_new_ts = 0
             sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
             if sfw not in s.sessions:
                 s.sessions = tmux.scan_claude_sessions()
@@ -464,12 +471,19 @@ def _listen_tick(s):
                     state._clear_smartfocus_state()
                     s.smartfocus_target_wid = None
                     s.smartfocus_prev_lines = []
+                    s.smartfocus_pending = []
+                    s.smartfocus_last_new_ts = 0
                     smartfocus_state = None
             if smartfocus_state:
                 _sfinfo = s.sessions.get(sfw)
                 _sfprofile = profiles.get_profile(_sfinfo.cli) if _sfinfo and hasattr(_sfinfo, 'cli') else None
                 _sfpc = _sfprofile.prompt_char if _sfprofile else "❯"
+                _sfbullet = _sfprofile.response_bullet if _sfprofile else "●"
+                _sftool_re = _sfprofile.tool_header_re if _sfprofile else r"^●\s+\w+\("
                 raw = tmux._capture_pane(sfp, 50)
+                # Detect idle from raw content (before _filter_noise strips prompt lines)
+                _sf_idle = any(line.strip().startswith(_sfpc)
+                               for line in raw.splitlines()[-5:])
                 cur_lines = content._filter_noise(raw, profile=_sfprofile)
                 for i in range(len(cur_lines) - 1, -1, -1):
                     if cur_lines[i].strip().startswith(_sfpc):
@@ -477,20 +491,53 @@ def _listen_tick(s):
                         break
                 if s.smartfocus_pane_width:
                     cur_lines = tmux._join_wrapped_lines(cur_lines, s.smartfocus_pane_width)
+                # Accumulate new lines into pending buffer
                 if s.smartfocus_prev_lines:
                     new = content._compute_new_lines(s.smartfocus_prev_lines, cur_lines)
                     if new:
-                        new = content._collapse_tool_calls(new, profile=_sfprofile)
-                        new_text = "\n".join(new).strip()
-                        if new_text:
-                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                            telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
-                            s.smartfocus_has_sent = True
+                        s.smartfocus_pending.extend(new)
+                        s.smartfocus_last_new_ts = time.time()
                 s.smartfocus_prev_lines = cur_lines
+
+                # Flush conditions for pending buffer
+                _sf_flush = []
+                _sf_keep = []
+                if s.smartfocus_pending:
+                    if _sf_idle:
+                        # Response complete — flush everything
+                        _sf_flush = s.smartfocus_pending
+                    else:
+                        # Check for bullet boundary: a text bullet (not tool call)
+                        bullet_idx = None
+                        for bi, bline in enumerate(s.smartfocus_pending):
+                            bs = bline.strip()
+                            if bs.startswith(_sfbullet) and not re.match(_sftool_re, bs):
+                                bullet_idx = bi
+                                break
+                        if bullet_idx is not None and bullet_idx > 0:
+                            # Flush everything before the bullet, keep bullet onward
+                            _sf_flush = s.smartfocus_pending[:bullet_idx]
+                            _sf_keep = s.smartfocus_pending[bullet_idx:]
+                        elif s.smartfocus_last_new_ts and (time.time() - s.smartfocus_last_new_ts >= 5):
+                            # Time fallback — no new content for 5s
+                            _sf_flush = s.smartfocus_pending
+
+                if _sf_flush:
+                    _sf_flush = content._collapse_tool_calls(_sf_flush, profile=_sfprofile)
+                    flush_text = "\n".join(_sf_flush).strip()
+                    if flush_text:
+                        header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                        telegram._send_long_message(header, flush_text, sfw, silent=state._is_silent(_CAT_MONITOR))
+                        s.smartfocus_has_sent = True
+                    s.smartfocus_pending = _sf_keep
+                    if not _sf_keep:
+                        s.smartfocus_last_new_ts = 0
     elif s.smartfocus_target_wid:
         s.smartfocus_target_wid = None
         s.smartfocus_prev_lines = []
         s.smartfocus_has_sent = False
+        s.smartfocus_pending = []
+        s.smartfocus_last_new_ts = 0
 
     # --- Deep focus monitoring (streams all output) ---
     if deepfocus_state:

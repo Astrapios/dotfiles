@@ -421,9 +421,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     af_m = re.match(r"^/autofocus(?:\s+(on|off))?$", text.lower())
     if af_m:
         arg = af_m.group(1)
+        turning_on = False
         if arg == "on":
             state._set_autofocus(True)
-            telegram.tg_send("👁 Autofocus *on*.")
+            turning_on = True
         elif arg == "off":
             state._set_autofocus(False)
             state._clear_smartfocus_state()
@@ -435,6 +436,22 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if currently_on:
                 state._clear_smartfocus_state()
                 telegram.tg_send("👁 Autofocus *off*.")
+            else:
+                turning_on = True
+        if turning_on:
+            # Auto-attach to a busy session if one exists
+            busy_target = None
+            if last_win_idx and last_win_idx in sessions and state._is_busy(last_win_idx):
+                busy_target = last_win_idx
+            else:
+                for wid in sessions:
+                    if state._is_busy(wid):
+                        busy_target = wid
+                        break
+            if busy_target:
+                pane, project = sessions[busy_target]
+                state._save_smartfocus_state(busy_target, pane, project)
+                telegram.tg_send(f"👁 Autofocus *on* — watching {state._wid_label(busy_target)} (`{project}`).")
             else:
                 telegram.tg_send("👁 Autofocus *on*.")
         return None, sessions, last_win_idx
