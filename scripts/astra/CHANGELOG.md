@@ -5,6 +5,14 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.23.0
+
+- **Debug subcommands** — new diagnostic tools under `astra debug` for inspecting and testing the listener without touching Telegram
+  - `astra debug state [wN]` — dump internal state: sessions, prompts, busy flags, focus, god mode, queued messages, pending signals; detail view with `wN` argument
+  - `astra debug inject <event> <wid> [args]` — inject fake signals (`stop`, `perm`, `question`) for testing signal processing without real CLI hooks
+  - `astra debug tick` — dry-run one listener tick against real tmux state with intercepted Telegram I/O; prints formatted output with keyboard layout, duplicate callback detection, and Markdown V1 safety check
+- **Enhanced debug log** — `astra debug on` now also logs inline keyboard button details (`KB [Label:cb_data]`), inbound messages (`RECV text`), and button presses (`CALLBACK cb_data`)
+
 ## 0.22.1
 
 - **Fix stale bash command in non-bash permissions** — auto-approved shell commands left `_bash_cmd_{wid}.json` files that polluted the next Write/Edit permission with the old bash command body; non-shell PreToolUse now cleans up stale files

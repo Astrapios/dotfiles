@@ -111,4 +111,5 @@ from .cli import (
     cmd_status, cmd_focus, cmd_deepfocus, cmd_unfocus, cmd_clear,
     cmd_interrupt, cmd_keys, cmd_name, cmd_saved, cmd_log, cmd_new,
     cmd_restart, cmd_kill, main,
+    _debug_state, _debug_inject, _debug_tick, _check_bare_underscores,
 )

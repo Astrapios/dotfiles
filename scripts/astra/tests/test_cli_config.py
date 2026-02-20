@@ -722,3 +722,271 @@ class TestDebugTg:
         content = open(log).read()
         assert "SEND" in content
         assert "test message" in content
+
+    def test_tg_send_logs_kb_detail(self, tmp_path, monkeypatch):
+        log = str(tmp_path / "debug.log")
+        monkeypatch.setattr(config, "DEBUG_LOG", log)
+        config._set_debug(True)
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"result": {"message_id": 42}}
+        fake_resp.raise_for_status = MagicMock()
+        kb = {"inline_keyboard": [[{"text": "✅Allow", "callback_data": "perm_w4a_1"},
+                                    {"text": "❌Deny", "callback_data": "perm_w4a_3"}]]}
+        with patch("requests.post", return_value=fake_resp):
+            from astra import telegram
+            telegram.tg_send("test", reply_markup=kb)
+        content = open(log).read()
+        assert "KB" in content
+        assert "perm_w4a_1" in content
+        assert "perm_w4a_3" in content
+
+
+# --- debug state ---
+
+class TestDebugState:
+    def test_overview_no_sessions(self, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value={}):
+            astra._debug_state()
+        out = capsys.readouterr().out
+        assert "Sessions: 0" in out
+        assert "Focus:" in out
+        assert "Pending signals:" in out
+
+    def test_overview_with_sessions(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_get_session_statuses",
+                          return_value={"w3a": "idle", "w5a": "busy"}):
+            astra._debug_state()
+        out = capsys.readouterr().out
+        assert "Sessions: 2" in out
+        assert "my-proj" in out
+        assert "idle" in out
+        assert "busy" in out
+
+    def test_overview_shows_prompt(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        # Write a prompt file directly
+        prompt_path = os.path.join(config.SIGNAL_DIR, "_active_prompt_w3a.json")
+        with open(prompt_path, "w") as f:
+            json.dump({"pane": "%5", "total": 3, "shortcuts": {"y": 1, "n": 3}}, f)
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_get_session_statuses",
+                          return_value={"w3a": "idle", "w5a": "idle"}):
+            astra._debug_state()
+        out = capsys.readouterr().out
+        assert "prompt" in out
+        assert "total=3" in out
+
+    def test_detail_session(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state", "w3"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_pane_idle_state", return_value=(True, "")):
+            astra._debug_state()
+        out = capsys.readouterr().out
+        assert "w3a" in out
+        assert "my-proj" in out
+        assert "claude" in out
+        assert "idle" in out
+
+    def test_detail_unknown_session(self, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state", "w99"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions):
+            with pytest.raises(SystemExit):
+                astra._debug_state()
+
+    def test_detail_shows_busy_time(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        state._mark_busy("w3a")
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state", "w3"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_pane_idle_state", return_value=(False, "")):
+            astra._debug_state()
+        out = capsys.readouterr().out
+        assert "Busy flag: yes" in out
+        assert "Busy since:" in out
+
+    def test_nondestructive_prompt_read(self, monkeypatch):
+        """_debug_state must not delete the active prompt file."""
+        sessions = _fake_sessions()
+        prompt_path = os.path.join(config.SIGNAL_DIR, "_active_prompt_w3a.json")
+        with open(prompt_path, "w") as f:
+            json.dump({"pane": "%5", "total": 2}, f)
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "state"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_get_session_statuses",
+                          return_value={"w3a": "idle", "w5a": "idle"}):
+            astra._debug_state()
+        # File should still exist
+        assert os.path.exists(prompt_path)
+
+
+# --- debug inject ---
+
+class TestDebugInject:
+    def test_inject_stop(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject", "stop", "w3"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions):
+            astra._debug_inject()
+        out = capsys.readouterr().out
+        assert "Injected stop" in out
+        # Verify signal file was created
+        files = [f for f in os.listdir(config.SIGNAL_DIR)
+                 if f.endswith(".json") and not f.startswith("_")]
+        assert len(files) == 1
+        with open(os.path.join(config.SIGNAL_DIR, files[0])) as f:
+            sig = json.load(f)
+        assert sig["event"] == "stop"
+        assert sig["wid"] == "w3a"
+
+    def test_inject_perm(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject", "perm", "w3", "ls -la"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions):
+            astra._debug_inject()
+        out = capsys.readouterr().out
+        assert "Injected perm" in out
+        files = [f for f in os.listdir(config.SIGNAL_DIR)
+                 if f.endswith(".json") and not f.startswith("_")]
+        assert len(files) == 1
+        with open(os.path.join(config.SIGNAL_DIR, files[0])) as f:
+            sig = json.load(f)
+        assert sig["event"] == "permission"
+        assert sig["cmd"] == "ls -la"
+
+    def test_inject_perm_plan(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject", "perm", "w3", "--plan"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions):
+            astra._debug_inject()
+        files = [f for f in os.listdir(config.SIGNAL_DIR)
+                 if f.endswith(".json") and not f.startswith("_")]
+        with open(os.path.join(config.SIGNAL_DIR, files[0])) as f:
+            sig = json.load(f)
+        assert "plan" in sig["message"]
+
+    def test_inject_question(self, capsys, monkeypatch):
+        sessions = _fake_sessions()
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject", "question", "w3"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions):
+            astra._debug_inject()
+        out = capsys.readouterr().out
+        assert "Injected question" in out
+        files = [f for f in os.listdir(config.SIGNAL_DIR)
+                 if f.endswith(".json") and not f.startswith("_")]
+        with open(os.path.join(config.SIGNAL_DIR, files[0])) as f:
+            sig = json.load(f)
+        assert sig["event"] == "question"
+        assert len(sig["questions"]) == 1
+
+    def test_inject_unknown_event(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject", "bogus", "w3"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=_fake_sessions()):
+            with pytest.raises(SystemExit):
+                astra._debug_inject()
+
+    def test_inject_no_args(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject"])
+        with pytest.raises(SystemExit):
+            astra._debug_inject()
+
+    def test_inject_unresolved_wid(self, capsys, monkeypatch):
+        """Injecting with an unknown wid still works (uses bare wid)."""
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "inject", "stop", "w99"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value={}):
+            astra._debug_inject()
+        out = capsys.readouterr().out
+        assert "w99" in out
+
+
+# --- debug tick ---
+
+class TestDebugTick:
+    def test_tick_no_signals(self, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "tick"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value={}), \
+             patch.object(astra.routing, "_get_session_statuses", return_value={}), \
+             patch.object(astra.listener, "_check_file_changes", return_value=False), \
+             patch.object(astra.telegram, "_poll_updates", return_value=(None, 0)):
+            astra._debug_tick()
+        out = capsys.readouterr().out
+        assert "no messages sent" in out
+
+    def test_tick_processes_injected_signal(self, capsys, monkeypatch):
+        """Inject a stop signal, then tick should process it."""
+        sessions = _fake_sessions()
+        # Inject a stop signal directly
+        sig = {"event": "stop", "pane": "%5", "wid": "w3a",
+               "project": "my-proj", "cli": "claude"}
+        os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+        sig_path = os.path.join(config.SIGNAL_DIR, "1234.000000_1.json")
+        with open(sig_path, "w") as f:
+            json.dump(sig, f)
+
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "tick"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_get_session_statuses",
+                          return_value={"w3a": "idle", "w5a": "idle"}), \
+             patch.object(astra.tmux, "_get_pane_width", return_value=120), \
+             patch.object(astra.tmux, "_capture_pane", return_value="● Hello\n❯ "), \
+             patch.object(astra.content, "_has_response_start", return_value=True), \
+             patch.object(astra.content, "clean_pane_content", return_value="Hello"), \
+             patch.object(astra.content, "_collapse_tool_calls", return_value=["Hello"]), \
+             patch.object(astra.tmux, "_get_locally_viewed_windows", return_value=set()), \
+             patch.object(astra.routing, "_pane_idle_state", return_value=(True, "")):
+            astra._debug_tick()
+        out = capsys.readouterr().out
+        assert "[1]" in out
+        assert "Markdown OK" in out or "Bare underscores" in out
+
+    def test_tick_shows_keyboard(self, capsys, monkeypatch):
+        """Inject a permission signal with god mode off — should show keyboard."""
+        sessions = _fake_sessions()
+        sig = {"event": "permission", "pane": "%5", "wid": "w3a",
+               "project": "my-proj", "cli": "claude", "cmd": "echo hello",
+               "message": "permission"}
+        os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+        sig_path = os.path.join(config.SIGNAL_DIR, "1234.000000_2.json")
+        with open(sig_path, "w") as f:
+            json.dump(sig, f)
+
+        monkeypatch.setattr(sys, "argv", ["astra", "debug", "tick"])
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions), \
+             patch.object(astra.routing, "_get_session_statuses",
+                          return_value={"w3a": "idle", "w5a": "idle"}), \
+             patch.object(astra.tmux, "_get_pane_width", return_value=120), \
+             patch.object(astra.tmux, "_capture_pane", return_value="Run echo hello?\n  1. Yes\n  2. Always\n  3. No\n❯ 1. Yes"), \
+             patch.object(astra.tmux, "_get_locally_viewed_windows", return_value=set()), \
+             patch.object(astra.routing, "_pane_idle_state", return_value=(False, "")), \
+             patch.object(astra.routing, "_select_option"), \
+             patch.object(astra.content, "_extract_pane_permission",
+                          return_value=("needs permission", "echo hello", ["1. Yes", "2. Always", "3. No"], "")):
+            astra._debug_tick()
+        out = capsys.readouterr().out
+        assert "Keyboard:" in out
+
+
+# --- _check_bare_underscores ---
+
+class TestCheckBareUnderscores:
+    def test_clean_text(self):
+        assert not astra._check_bare_underscores("hello world")
+
+    def test_underscore_in_code(self):
+        assert not astra._check_bare_underscores("run `my_func` now")
+
+    def test_underscore_in_code_block(self):
+        assert not astra._check_bare_underscores("```\nmy_func()\n```")
+
+    def test_bare_underscore(self):
+        assert astra._check_bare_underscores("file_name.txt")
+
+    def test_mixed(self):
+        assert astra._check_bare_underscores("`ok_code` but bad_text")

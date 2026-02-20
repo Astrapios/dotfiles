@@ -112,6 +112,9 @@ astra send-photo <path> [caption]  Send a photo to Telegram
 astra send-doc <path> [caption]    Send a file as a document to Telegram
 astra keys <wN> <key...>  Send keys to a session (e.g. shift+tab, ctrl+c)
 astra debug [on|off|clear|N]  Debug log for outbound Telegram messages
+astra debug state [wN]        Dump internal state (sessions, prompts, flags)
+astra debug inject <event> <wid>  Inject fake signal (stop, perm, question)
+astra debug tick              Dry-run one listener tick (intercepts Telegram)
 astra help                Show help
 ```
 

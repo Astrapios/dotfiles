@@ -186,7 +186,7 @@ def cmd_local():
 
 
 def cmd_debug():
-    """Manage debug logging from CLI."""
+    """Manage debug logging and debug subcommands from CLI."""
     arg = sys.argv[2] if len(sys.argv) > 2 else ""
     if arg == "on":
         config._set_debug(True)
@@ -200,6 +200,12 @@ def cmd_debug():
         except OSError:
             pass
         print("Debug log cleared.")
+    elif arg == "state":
+        _debug_state()
+    elif arg == "inject":
+        _debug_inject()
+    elif arg == "tick":
+        _debug_tick()
     elif not arg or arg.isdigit():
         n = int(arg) if arg else 20
         enabled = config._is_debug_enabled()
@@ -218,8 +224,320 @@ def cmd_debug():
             except FileNotFoundError:
                 print("(no log file)")
     else:
-        print("Usage: astra debug [on|off|clear|N]", file=sys.stderr)
+        print("Usage: astra debug [on|off|clear|N|state|inject|tick]", file=sys.stderr)
         sys.exit(1)
+
+
+def _debug_state():
+    """Dump listener-visible state for debugging."""
+    from astra import routing, signals
+    sessions = tmux.scan_claude_sessions()
+    state._current_sessions = sessions
+    target_wid = sys.argv[3] if len(sys.argv) > 3 else None
+
+    if target_wid:
+        idx = state._resolve_name(target_wid, sessions)
+        if not idx:
+            print(f"No session '{target_wid}'.", file=sys.stderr)
+            sys.exit(1)
+        _debug_state_detail(idx, sessions)
+    else:
+        _debug_state_overview(sessions)
+
+
+def _debug_state_overview(sessions: dict):
+    """Print overview of all sessions and global state."""
+    from astra import routing
+    if not sessions:
+        print("Sessions: 0")
+    else:
+        statuses = routing._get_session_statuses(sessions)
+        print(f"Sessions: {len(sessions)}")
+        for idx in tmux._sort_session_keys(sessions):
+            info = sessions[idx]
+            project = info.project if hasattr(info, "project") else info[1]
+            cli_type = info.cli if hasattr(info, "cli") else "claude"
+            status = statuses.get(idx, "?")
+            busy_ts = state._busy_since(idx)
+            busy_note = ""
+            if status == "busy" and busy_ts:
+                elapsed = int(time.time() - busy_ts)
+                busy_note = f" ({elapsed}s)"
+            display = tmux._display_wid(idx, sessions)
+            print(f"  {display:5s} {project} ({cli_type}) {status}{busy_note}")
+
+    # Global toggles
+    focus = state._load_focus_state()
+    deepfocus = state._load_deepfocus_state()
+    smartfocus = state._load_smartfocus_state()
+    god_wids = state._god_mode_wids()
+    focus_str = focus["wid"] if focus else "off"
+    deepfocus_str = deepfocus["wid"] if deepfocus else "off"
+    smartfocus_str = smartfocus["wid"] if smartfocus else "off"
+    god_str = ", ".join(god_wids) if god_wids else "off"
+    af = "on" if state._is_autofocus_enabled() else "off"
+    local = "on" if state._is_local_suppress_enabled() else "off"
+    debug = "on" if config._is_debug_enabled() else "off"
+    print(f"Focus: {focus_str} | Deepfocus: {deepfocus_str} | Smartfocus: {smartfocus_str}")
+    print(f"God: {god_str} | Autofocus: {af} | Local: {local} | Debug: {debug}")
+
+    # Per-session state
+    for idx in tmux._sort_session_keys(sessions):
+        prompt_info = _read_prompt_file(idx)
+        bash_cmd = _read_bash_cmd_file(idx)
+        queued = state._load_queued_msgs(idx)
+        parts = []
+        if prompt_info:
+            n = prompt_info.get("total", 0)
+            sc = prompt_info.get("shortcuts", {})
+            ft = prompt_info.get("free_text_at")
+            parts.append(f"prompt (total={n}, shortcuts={{{','.join(f'{k}:{v}' for k, v in sc.items())}}}, free_text_at={ft})")
+        else:
+            parts.append("no prompt")
+        if bash_cmd:
+            parts.append(f"bash_cmd")
+        parts.append(f"{len(queued)} queued")
+        display = tmux._display_wid(idx, sessions)
+        print(f"  {display}: {', '.join(parts)}")
+
+    # Pending signals
+    pending = 0
+    if os.path.isdir(config.SIGNAL_DIR):
+        for f in os.listdir(config.SIGNAL_DIR):
+            if f.endswith(".json") and not f.startswith("_"):
+                pending += 1
+    print(f"Pending signals: {pending}")
+
+
+def _debug_state_detail(idx: str, sessions: dict):
+    """Print detailed state for a single session."""
+    from astra import routing
+    info = sessions[idx]
+    project = info.project if hasattr(info, "project") else info[1]
+    cli_type = info.cli if hasattr(info, "cli") else "claude"
+    pane = info.pane_target if hasattr(info, "pane_target") else info[0]
+    pane_id = info.pane_id if hasattr(info, "pane_id") else "?"
+
+    idle, typed = routing._pane_idle_state(pane)
+    status = "idle" if idle else "busy"
+    busy = state._is_busy(idx)
+    busy_ts = state._busy_since(idx)
+
+    print(f"{idx} ({project}, {cli_type}):")
+    print(f"  Pane: {pane} (id={pane_id}) | Status: {status}")
+
+    prompt_info = _read_prompt_file(idx)
+    if prompt_info:
+        total = prompt_info.get("total", 0)
+        sc = prompt_info.get("shortcuts", {})
+        ft = prompt_info.get("free_text_at")
+        print(f"  Prompt: total={total}, shortcuts={{{','.join(f'{k}:{v}' for k, v in sc.items())}}}, free_text_at={ft}")
+    else:
+        print("  Prompt: (none)")
+
+    bash_cmd = _read_bash_cmd_file(idx)
+    queued = state._load_queued_msgs(idx)
+    name = state._load_session_names().get(idx, "")
+    god = state._is_god_mode_for(idx)
+    print(f"  Bash cmd: {bash_cmd[:100] if bash_cmd else '(none)'} | Queued: {len(queued)} | Busy flag: {'yes' if busy else 'no'}")
+    if busy_ts:
+        elapsed = int(time.time() - busy_ts)
+        print(f"  Busy since: {elapsed}s ago")
+    print(f"  Name: {name or '(none)'} | God: {'yes' if god else 'no'}")
+    if typed:
+        print(f"  Typed text: {typed[:100]}")
+
+
+def _read_prompt_file(wid: str) -> dict | None:
+    """Read active prompt file NON-DESTRUCTIVELY (unlike load_active_prompt which deletes)."""
+    path = os.path.join(config.SIGNAL_DIR, f"_active_prompt_{wid}.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _read_bash_cmd_file(wid: str) -> str:
+    """Read bash command file non-destructively."""
+    path = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+    try:
+        with open(path) as f:
+            return json.load(f).get("cmd", "")
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def _debug_inject():
+    """Write a fake signal file for testing."""
+    args = sys.argv[3:]
+    if len(args) < 2:
+        print("Usage: astra debug inject <event> <wid> [args...]", file=sys.stderr)
+        print("Events: stop, perm, question", file=sys.stderr)
+        sys.exit(1)
+
+    event_type = args[0]
+    raw_wid = args[1]
+    extra_args = args[2:]
+
+    sessions = tmux.scan_claude_sessions()
+    state._current_sessions = sessions
+    idx = state._resolve_name(raw_wid, sessions)
+    if idx and idx in sessions:
+        info = sessions[idx]
+        pane = info.pane_target if hasattr(info, "pane_target") else info[0]
+        project = info.project if hasattr(info, "project") else info[1]
+        cli = info.cli if hasattr(info, "cli") else "claude"
+    else:
+        idx = raw_wid if raw_wid.startswith("w") else f"w{raw_wid}"
+        pane = ""
+        project = "unknown"
+        cli = "claude"
+
+    signal = {"event": "", "pane": pane, "wid": idx, "project": project, "cli": cli}
+
+    if event_type == "stop":
+        signal["event"] = "stop"
+    elif event_type == "perm":
+        signal["event"] = "permission"
+        if extra_args and extra_args[0] == "--plan":
+            signal["message"] = "plan approval"
+        else:
+            cmd = extra_args[0] if extra_args else "echo hello"
+            signal["cmd"] = cmd
+            signal["message"] = "permission"
+    elif event_type == "question":
+        signal["event"] = "question"
+        signal["questions"] = [{
+            "question": "Test question?",
+            "options": [
+                {"label": "Option A", "description": "First choice"},
+                {"label": "Option B", "description": "Second choice"},
+            ],
+        }]
+    else:
+        print(f"Unknown event type: {event_type}", file=sys.stderr)
+        print("Events: stop, perm, question", file=sys.stderr)
+        sys.exit(1)
+
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    filename = f"{time.time():.6f}_{os.getpid()}.json"
+    path = os.path.join(config.SIGNAL_DIR, filename)
+    with open(path, "w") as f:
+        json.dump(signal, f)
+    print(f"Injected {event_type} signal for {idx}: {filename}")
+
+
+def _check_bare_underscores(text: str) -> bool:
+    """Check if text has bare underscores outside code spans/blocks that would break Markdown V1.
+
+    Returns True if problematic underscores found.
+    """
+    # Remove code blocks
+    cleaned = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+    # Remove inline code spans
+    cleaned = re.sub(r'`[^`]+`', '', cleaned)
+    # Check for underscores in remaining text
+    return '_' in cleaned
+
+
+def _debug_tick():
+    """Dry-run one listener tick, intercepting Telegram I/O."""
+    from unittest.mock import patch as mock_patch, MagicMock
+    from astra import routing
+
+    sessions = tmux.scan_claude_sessions()
+    state._current_sessions = sessions
+    statuses = routing._get_session_statuses(sessions)
+    interrupted = {idx for idx, st in statuses.items() if st == "interrupted"}
+
+    s = listener._ListenerState(
+        sessions=sessions,
+        last_scan=time.time(),
+        offset=0,
+        interrupted_notified=interrupted,
+        god_wids=state._god_mode_wids(),
+    )
+
+    collected: list[dict] = []
+
+    def fake_tg_send(text, chat_id="", reply_markup=None, silent=False):
+        collected.append({"type": "send", "text": text, "reply_markup": reply_markup, "silent": silent})
+        return len(collected)
+
+    def fake_send_long(header, body, wid="", reply_markup=None, footer="", silent=False):
+        collected.append({"type": "long", "header": header, "body": body, "footer": footer,
+                          "reply_markup": reply_markup, "silent": silent})
+        return len(collected)
+
+    def fake_fire_and_forget(fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+    with mock_patch.object(telegram, "tg_send", side_effect=fake_tg_send), \
+         mock_patch.object(telegram, "_send_long_message", side_effect=fake_send_long), \
+         mock_patch.object(telegram, "_poll_updates", return_value=(None, 0)), \
+         mock_patch.object(telegram, "_fire_and_forget", side_effect=fake_fire_and_forget), \
+         mock_patch.object(telegram, "_answer_callback_query"), \
+         mock_patch.object(telegram, "_remove_inline_keyboard"), \
+         mock_patch.object(listener, "_check_file_changes", return_value=False):
+        result = listener._listen_tick(s)
+
+    if not collected:
+        print("(no messages sent)")
+    else:
+        for i, msg in enumerate(collected, 1):
+            kind = msg["type"].upper()
+            print(f"[{i}] {kind}:")
+            if msg["type"] == "long":
+                print(f"  Header: {msg['header'].strip()}")
+                body_lines = msg["body"].splitlines()
+                print(f"  Body: ({len(body_lines)} lines)")
+                for line in body_lines[:5]:
+                    print(f"    {line}")
+                if len(body_lines) > 5:
+                    print(f"    ... ({len(body_lines) - 5} more)")
+                if msg["footer"]:
+                    print(f"  Footer: {msg['footer'].strip()}")
+                # _send_long_message escapes inner ``` to ''' then wraps in code block
+                safe_body = msg["body"].replace("```", "'''")
+                full_text = msg["header"] + "```\n" + safe_body + "\n```" + msg.get("footer", "")
+            else:
+                text = msg["text"]
+                lines = text.splitlines()
+                for line in lines[:8]:
+                    print(f"  {line}")
+                if len(lines) > 8:
+                    print(f"  ... ({len(lines) - 8} more)")
+                full_text = text
+
+            # Keyboard layout
+            kb = msg.get("reply_markup")
+            if kb and "inline_keyboard" in kb:
+                parts = []
+                cb_values = []
+                for row in kb["inline_keyboard"]:
+                    for btn in row:
+                        label = btn.get("text", "?")
+                        cb = btn.get("callback_data", "?")
+                        parts.append(f"[{label}:{cb}]")
+                        cb_values.append(cb)
+                print(f"  Keyboard: {' '.join(parts)}")
+                # Duplicate callback warning
+                if len(cb_values) != len(set(cb_values)):
+                    print(f"  ⚠️ DUPLICATE callback_data detected!")
+            elif kb and "keyboard" in kb:
+                print("  Keyboard: reply_kb")
+
+            # Markdown V1 check
+            if _check_bare_underscores(full_text):
+                print(f"  ⚠️ Bare underscores outside code blocks (Markdown V1 risk)")
+            else:
+                print(f"  ✓ Markdown OK")
+
+    if result:
+        print(f"\nTick result: {result}")
+    else:
+        print(f"\nTick result: continue")
 
 
 def cmd_autofocus():
@@ -711,6 +1029,9 @@ Config (no Telegram credentials needed):
   autofocus [on|off]           Toggle autofocus
   notification [1..7|all|off]  Configure notification levels
   debug [on|off|clear|N]       Debug log for outbound Telegram messages
+  debug state [wN]             Dump internal state (sessions, prompts, flags)
+  debug inject <event> <wid>   Inject a fake signal (stop, perm, question)
+  debug tick                   Dry-run one listener tick (intercepts Telegram)
 
 Session management (no Telegram credentials needed):
   status [wN] [lines]          List sessions or show pane output

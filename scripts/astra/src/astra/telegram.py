@@ -56,6 +56,15 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
         elif reply_markup.get("keyboard"):
             kb_summary = "reply_kb"
     config._debug_tg("SEND", f"silent={'yes' if silent else 'no'} kb={kb_summary}", text)
+    # Log keyboard layout detail
+    if reply_markup:
+        inline = reply_markup.get("inline_keyboard")
+        if inline:
+            kb_parts = []
+            for row in inline:
+                for btn in row:
+                    kb_parts.append(f"[{btn.get('text', '?')}:{btn.get('callback_data', '?')}]")
+            config._debug_tg("KB", " ".join(kb_parts), "")
     return msg_id
 
 

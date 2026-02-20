@@ -565,6 +565,7 @@ def _listen_tick(s):
         callback = chat_msg.get("callback")
         if callback:
             cb_data = callback.get("data", "")
+            config._debug_tg("CALLBACK", cb_data, "")
 
             # Handle pending file Skip / Cancel buttons
             if cb_data in ("file_skip", "file_cancel"):
@@ -591,6 +592,8 @@ def _listen_tick(s):
             continue
 
         text = chat_msg["text"]
+        if text:
+            config._debug_tg("RECV", text[:200], "")
         photo_id = chat_msg.get("photo")
 
         # Reply-to routing: use wid from the replied-to message
