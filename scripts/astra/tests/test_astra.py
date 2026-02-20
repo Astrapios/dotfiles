@@ -47,6 +47,13 @@ class TestMarkdownSafety(unittest.TestCase):
         self.assertIn("`scripts/test_hook.py`", header)
         self._assert_no_bare_underscores(header)
 
+    def test_permission_opts_with_underscores(self):
+        """Options with underscores should be inside code blocks."""
+        opts_text = "1. Yes\n2. Yes, and don't ask again for pip --version commands in /tmp/test_perms\n3. No"
+        opts_block = f"```\n{opts_text}\n```"
+        msg = f"🔧 w1 Claude Code (`my_proj`) needs permission:\n\n```\npip --version\n```\n{opts_block}"
+        self._assert_no_bare_underscores(msg)
+
     def test_permission_bash_message(self):
         msg = f"🔧 w1 Claude Code (`my_proj`) needs permission:\n\n```\nrm /tmp/test_file.txt\n```\n1. Yes"
         self._assert_no_bare_underscores(msg)
@@ -3283,20 +3290,19 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n  line2\n  new stuff\n❯ prompt"))
     @patch("time.sleep")
-    def test_smartfocus_stop_with_prev_sends_tail(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
-        """Stop signal with smartfocus_prev sends only new (tail) content."""
+    def test_smartfocus_stop_with_prev_sends_full(self, mock_sleep, mock_run, mock_proj, mock_kb, mock_long, mock_send):
+        """Stop signal with smartfocus_prev sends full collapsed content."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
-        # prev_lines matches first part of response — only "new stuff" is new
         prev = ["Answer", "  line1", "  line2"]
         astra.process_signals(smartfocus_prev=prev)
-        # Tail content via _send_long_message
+        # Full content via _send_long_message (stop is a summary)
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
         self.assertIn("finished", header)
         body = mock_long.call_args[0][1]
         self.assertIn("new stuff", body)
-        self.assertNotIn("line1", body)
+        self.assertIn("line1", body)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.telegram, "_send_long_message")
@@ -6619,17 +6625,17 @@ class TestSmartfocusColdStart(unittest.TestCase):
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
-    def test_prev_matches_already_sent_sends_short(self, mock_sleep, mock_run, mock_proj,
+    def test_prev_matches_already_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
                                                     mock_kb, mock_long, mock_send):
-        """Smartfocus stop: prev matches all content, already sent 👁 → short 'finished'."""
+        """Smartfocus stop: prev matches all content, already sent 👁 → full content."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
         prev = ["Answer", "  line1"]
         astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
-        # Only short notification, no long message
-        mock_long.assert_not_called()
-        calls = [c[0][0] for c in mock_send.call_args_list]
-        self.assertTrue(any("finished" in c for c in calls))
+        # Full content via _send_long_message (stop is always a summary)
+        mock_long.assert_called_once()
+        header = mock_long.call_args[0][0]
+        self.assertIn("finished", header)
 
 
     @patch.object(astra.telegram, "tg_send", return_value=1)

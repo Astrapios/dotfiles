@@ -88,6 +88,13 @@ def cmd_hook():
             cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
             with open(cmd_file, "w") as f:
                 json.dump({"cmd": cmd}, f)
+        else:
+            # Clean up stale bash_cmd from auto-approved shell commands
+            cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
+            try:
+                os.remove(cmd_file)
+            except OSError:
+                pass
         if state._is_god_mode_for(wid):
             tool_input = data.get("tool_input", {})
             if internal_tool == "shell":

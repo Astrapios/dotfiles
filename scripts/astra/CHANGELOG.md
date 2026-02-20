@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.22.1
+
+- **Fix stale bash command in non-bash permissions** — auto-approved shell commands left `_bash_cmd_{wid}.json` files that polluted the next Write/Edit permission with the old bash command body; non-shell PreToolUse now cleans up stale files
+- **Fix 2-option permission keyboard** — permissions with only 2 options (Yes/No) had "Always" and "Deny" mapped to the same callback (`perm_{wid}_2`); now shows only Allow/Deny buttons when `n < 3`
+- **Fix Markdown V1 breakage on underscore options** — numbered options containing underscores (e.g. `/tmp/test_perms`) broke Telegram's Markdown parser; `opts_text` is now wrapped in code blocks at all 4 sites
+- **Fix stop message showing only tail** — smartfocus stop messages used `_compute_new_lines()` which showed only unseen lines; now always sends full collapsed content as a summary notification
+
 ## 0.22.0
 
 - **Deduplicate stop signals** — multiple Stop events for the same session in a single tick are now collapsed into one notification, fixing duplicate "✅ finished:" messages when rapid tool-use turns fire several stops

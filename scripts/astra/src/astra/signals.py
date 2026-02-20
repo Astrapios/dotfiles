@@ -2,7 +2,6 @@
 
 Signal files live in config.SIGNAL_DIR as ``*.json`` (state files use ``_`` prefix).
 """
-import difflib
 import json
 import os
 import re
@@ -210,33 +209,14 @@ def process_signals(focused_wids: set[str] | None = None,
                         if not idle:
                             cleaned = ""
                 _stop_silent = state._is_silent(_CAT_STOP)
-                if cleaned and smartfocus_prev:
-                    cur_lines = cleaned.splitlines()
-                    new = content._compute_new_lines(smartfocus_prev, cur_lines)
-                    if new:
-                        new = content._collapse_tool_calls(new, profile=profile)
-                        tail_text = "\n".join(new).strip()
-                        if tail_text:
-                            header = f"✅{tag} (`{project}`) finished:\n\n"
-                            _stop_send_args = ("long", header, tail_text, wid, stop_kb, _stop_silent)
-                        else:
-                            _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
-                    elif smartfocus_has_sent:
-                        sm = difflib.SequenceMatcher(None, smartfocus_prev, cur_lines)
-                        if sm.ratio() < 0.3:
-                            collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip()
-                            header = f"✅{tag} (`{project}`) finished:\n\n"
-                            _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
-                        else:
-                            _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
-                    else:
-                        collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip()
+                if cleaned:
+                    collapsed = "\n".join(content._collapse_tool_calls(
+                        cleaned.splitlines(), profile=profile)).strip()
+                    if collapsed:
                         header = f"✅{tag} (`{project}`) finished:\n\n"
                         _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
-                elif cleaned:
-                    collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip()
-                    header = f"✅{tag} (`{project}`) finished:\n\n"
-                    _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
+                    else:
+                        _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
                 else:
                     _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
             else:
@@ -325,16 +305,24 @@ def process_signals(focused_wids: set[str] | None = None,
                 free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
 
                 if not is_local:
-                    perm_kb = telegram._build_inline_keyboard([[
-                        ("\u2705 Approve", f"perm_{wid}_1"),
-                        ("\u2705 Always", f"perm_{wid}_2"),
-                        ("\u274c Deny", f"perm_{wid}_{n}"),
-                    ]])
+                    if n >= 3:
+                        perm_buttons = [
+                            ("\u2705 Approve", f"perm_{wid}_1"),
+                            ("\u2705 Always", f"perm_{wid}_2"),
+                            ("\u274c Deny", f"perm_{wid}_{n}"),
+                        ]
+                    else:
+                        perm_buttons = [
+                            ("\u2705 Approve", f"perm_{wid}_1"),
+                            ("\u274c Deny", f"perm_{wid}_{n}"),
+                        ]
+                    perm_kb = telegram._build_inline_keyboard([perm_buttons])
                     header_str = f"📋{tag} {dn} (`{project}`) has a plan for review:\n\n"
                     body = plan_text or "(could not read plan file)"
+                    opts_block = f"```\n{opts_text}\n```" if opts_text else ""
                     kb_id = telegram._send_long_message(
                         header_str, body, wid, reply_markup=perm_kb,
-                        footer=opts_text + free_text_hint,
+                        footer=opts_block + free_text_hint,
                         silent=state._is_silent(_CAT_PERMISSION))
                     config._save_keyboard_msg(wid, kb_id)
                 shortcuts = {"y": 1, "yes": 1, "allow": 1, "approve": 1,
@@ -367,28 +355,37 @@ def process_signals(focused_wids: set[str] | None = None,
                 free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
 
                 if not is_local:
-                    perm_kb = telegram._build_inline_keyboard([[
-                        ("\u2705 Allow", f"perm_{wid}_1"),
-                        ("\u2705 Always", f"perm_{wid}_2"),
-                        ("\u274c Deny", f"perm_{wid}_{n}"),
-                    ]])
+                    if n >= 3:
+                        perm_buttons = [
+                            ("\u2705 Allow", f"perm_{wid}_1"),
+                            ("\u2705 Always", f"perm_{wid}_2"),
+                            ("\u274c Deny", f"perm_{wid}_{n}"),
+                        ]
+                    else:
+                        perm_buttons = [
+                            ("\u2705 Allow", f"perm_{wid}_1"),
+                            ("\u274c Deny", f"perm_{wid}_{n}"),
+                        ]
+                    perm_kb = telegram._build_inline_keyboard([perm_buttons])
                     context_str = f"```\n{perm_context}\n```\n\n" if perm_context else ""
                     if bash_cmd:
                         if perm_context:
                             code_block = f"```\n{perm_context}\n\n{bash_cmd[:2000]}\n```"
                         else:
                             code_block = f"```\n{bash_cmd[:2000]}\n```"
-                        msg = f"🔧{tag} {dn} (`{project}`) needs permission:\n\n{code_block}\n{opts_text}{free_text_hint}"
+                        opts_block = f"\n```\n{opts_text}\n```" if opts_text else ""
+                        msg = f"🔧{tag} {dn} (`{project}`) needs permission:\n\n{code_block}{opts_block}{free_text_hint}"
                         kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                         config._save_last_msg(wid, msg)
                         config._save_keyboard_msg(wid, kb_id)
                     else:
                         title = perm_header or "needs permission"
                         header_str = f"🔧{tag} {dn} (`{project}`) {title}:\n\n{context_str}"
+                        opts_block = f"```\n{opts_text}\n```" if opts_text else ""
                         if perm_body:
-                            kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_text + free_text_hint, silent=state._is_silent(_CAT_PERMISSION))
+                            kb_id = telegram._send_long_message(header_str, perm_body, wid, reply_markup=perm_kb, footer=opts_block + free_text_hint, silent=state._is_silent(_CAT_PERMISSION))
                         else:
-                            msg = f"{header_str}{opts_text}{free_text_hint}"
+                            msg = f"{header_str}{opts_block}{free_text_hint}"
                             kb_id = telegram.tg_send(msg, reply_markup=perm_kb, silent=state._is_silent(_CAT_PERMISSION))
                             config._save_last_msg(wid, msg)
                         config._save_keyboard_msg(wid, kb_id)

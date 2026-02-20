@@ -375,8 +375,8 @@ class TestStopWithSmartfocusTail(SimTestBase):
         combined = " ".join(m["text"] for m in finish_msgs)
         self.assertIn("Point one", combined)
 
-    def test_stop_short_when_content_unchanged(self):
-        """Stop with identical content to prev_lines sends short finish."""
+    def test_stop_sends_full_even_when_content_unchanged(self):
+        """Stop with identical content to prev_lines still sends full content."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
@@ -405,9 +405,9 @@ class TestStopWithSmartfocusTail(SimTestBase):
 
         finish_msgs = self.h.tg.find_sent("finished")
         self.assertTrue(len(finish_msgs) > 0)
-        # Should be a short message since content is identical
+        # Stop always sends full content as a summary notification
         msg_text = finish_msgs[0]["text"]
-        self.assertNotIn("```", msg_text, "Short finish should not have code block")
+        self.assertIn("Fixed the bug", msg_text)
 
     def test_stop_clears_smartfocus(self):
         """Stop signal clears smartfocus state."""

@@ -1110,5 +1110,154 @@ class TestPlanPermission(SimTestBase):
         assert len(perm_msgs) > 0
 
 
+class TestStaleBashCmdCleanup(SimTestBase):
+    """Bug fix: non-shell PreToolUse cleans up stale _bash_cmd file."""
+
+    def test_stale_bash_cmd_not_shown_for_write_permission(self):
+        """Write permission should NOT show stale bash command from auto-approved shell."""
+        import json as _json
+        self.h.tmux.add_session("4", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        # Simulate stale _bash_cmd file from auto-approved shell command
+        cmd_file = os.path.join(config.SIGNAL_DIR, "_bash_cmd_w4.json")
+        with open(cmd_file, "w") as f:
+            _json.dump({"cmd": "echo hello"}, f)
+
+        # Inject a Write permission (non-bash) — the stale file should NOT be consumed
+        perm_content = (
+            "● Write(app.py)\n"
+            "  ⎿  from flask import Flask\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again\n"
+            "  3. No\n"
+        )
+        self.h.tmux.set_pane_content("4", perm_content)
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="",
+                             message="Claude wants to write app.py")
+        self.h.tick(s)
+
+        # Permission message should NOT contain the stale bash command
+        perm_msgs = self.h.tg.find_sent("permission|Write|app.py")
+        assert len(perm_msgs) > 0, f"Expected perm msg. All: {self.h.dump_timeline()}"
+        for msg in perm_msgs:
+            assert "echo hello" not in msg["text"], \
+                f"Stale bash cmd leaked into Write permission: {msg['text'][:200]}"
+
+
+class TestTwoOptionKeyboard(SimTestBase):
+    """Bug fix: 2-option permissions don't have duplicate callbacks."""
+
+    def test_two_option_perm_no_always_button(self):
+        """Permission with only 2 options should show Allow/Deny, not Always."""
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. No\n"
+            "  Enter to select\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=perm_content)
+        s = self.h.make_listener_state()
+
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="ls")
+        self.h.tick(s)
+
+        perm_msgs = self.h.tg.find_sent("permission")
+        assert len(perm_msgs) > 0
+        kb = perm_msgs[0].get("reply_markup")
+        assert kb is not None, "Expected keyboard on permission msg"
+
+        # Extract all callback data from the keyboard
+        callbacks = []
+        for row in kb.get("inline_keyboard", []):
+            for btn in row:
+                callbacks.append(btn.get("callback_data", ""))
+
+        # Should have exactly 2 buttons: Allow (perm_w4a_1) and Deny (perm_w4a_2)
+        assert len(callbacks) == 2, f"Expected 2 buttons, got {len(callbacks)}: {callbacks}"
+        assert callbacks[0] == "perm_w4a_1", f"First button should be Allow: {callbacks[0]}"
+        assert callbacks[1] == "perm_w4a_2", f"Second button should be Deny: {callbacks[1]}"
+        # No duplicate callbacks
+        assert len(set(callbacks)) == len(callbacks), f"Duplicate callbacks: {callbacks}"
+
+    def test_three_option_perm_has_always_button(self):
+        """Permission with 3 options should show Allow/Always/Deny."""
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls -la\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again\n"
+            "  3. No\n"
+            "  Enter to select\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=perm_content)
+        s = self.h.make_listener_state()
+
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="ls -la")
+        self.h.tick(s)
+
+        perm_msgs = self.h.tg.find_sent("permission")
+        assert len(perm_msgs) > 0
+        kb = perm_msgs[0].get("reply_markup")
+        assert kb is not None
+
+        callbacks = []
+        for row in kb.get("inline_keyboard", []):
+            for btn in row:
+                callbacks.append(btn.get("callback_data", ""))
+
+        assert len(callbacks) == 3, f"Expected 3 buttons, got {len(callbacks)}: {callbacks}"
+        assert callbacks[0] == "perm_w4a_1"
+        assert callbacks[1] == "perm_w4a_2"
+        assert callbacks[2] == "perm_w4a_3"
+
+
+class TestStopFullContent(SimTestBase):
+    """Bug fix: stop message always shows full content, not just tail."""
+
+    def test_smartfocus_stop_shows_full_content(self):
+        """Stop with smartfocus tracking should show full collapsed content."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Simulate smartfocus with prev_lines that overlap with response
+        state._save_smartfocus_state("w4a", "%20", "myproject")
+        s.smartfocus_target_wid = "w4a"
+        s.smartfocus_pane_width = 120
+        # prev_lines already "saw" the tool call
+        s.smartfocus_prev_lines = [
+            "🔧 Read(app.py)",
+            "  Contents of file...",
+        ]
+        s.smartfocus_has_sent = True
+
+        # Pane shows full response including tool call + final text
+        self.h.tmux.set_pane_content("4",
+            "● Here is the analysis\n"
+            "🔧 Read(app.py)\n"
+            "  Contents of file...\n"
+            "The code looks good. All tests pass.\n"
+            "❯ "
+        )
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+
+        # Should show full content, not just the tail
+        self.h.assert_sent("finished")
+        finished = self.h.tg.find_sent("finished")
+        # Should include the analysis text (which is in the full response)
+        assert any("analysis" in m["text"] or "code looks good" in m["text"]
+                    for m in finished), \
+            f"Stop msg missing full content: {[m['text'][:200] for m in finished]}"
+
+
 if __name__ == "__main__":
     unittest.main()
