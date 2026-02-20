@@ -1259,5 +1259,131 @@ class TestStopFullContent(SimTestBase):
             f"Stop msg missing full content: {[m['text'][:200] for m in finished]}"
 
 
+class TestMultiQuestion(SimTestBase):
+    """Multi-question AskUserQuestion flow."""
+
+    def _setup(self):
+        self.h.tmux.add_session("4", "%20", "myproject",
+                                content="  1. Option A\n  2. Option B\n❯ ")
+        return self.h.make_listener_state()
+
+    def test_multi_question_sends_all_questions_sequentially(self):
+        """Answering Q1 should send Q2 with buttons."""
+        s = self._setup()
+        questions = [
+            {"question": "Which approach?", "options": [
+                {"label": "A", "description": "First"},
+                {"label": "B", "description": "Second"},
+            ]},
+            {"question": "Which style?", "options": [
+                {"label": "Min", "description": "Minimal"},
+                {"label": "Max", "description": "Maximal"},
+            ]},
+        ]
+        self.h.inject_signal("question", "w4", pane="%20", project="myproject",
+                             questions=questions)
+        self.h.tick(s)
+
+        # Q1 sent with buttons
+        self.h.assert_sent("Which approach?")
+        q1_msgs = self.h.tg.find_sent("Which approach?")
+        assert q1_msgs, "Q1 not sent"
+        assert q1_msgs[0].get("reply_markup"), "Q1 missing keyboard buttons"
+
+        # Answer Q1 via button callback
+        self.h.tg.inject_callback("q_w4a_1", message_id=1)
+        self.h.tick(s)
+
+        # Q2 sent with buttons
+        self.h.assert_sent("Which style?")
+        q2_msgs = self.h.tg.find_sent("Which style?")
+        assert q2_msgs, "Q2 not sent"
+        assert q2_msgs[0].get("reply_markup"), "Q2 missing keyboard buttons"
+
+    def test_multi_question_submit_confirmation(self):
+        """After last question in a multi-question set, should ask to submit."""
+        s = self._setup()
+        questions = [
+            {"question": "Q1?", "options": [
+                {"label": "Yes", "description": "ok"},
+            ]},
+            {"question": "Q2?", "options": [
+                {"label": "No", "description": "nope"},
+            ]},
+        ]
+        self.h.inject_signal("question", "w4", pane="%20", project="myproject",
+                             questions=questions)
+        self.h.tick(s)
+        self.h.assert_sent("Q1?")
+
+        # Answer Q1
+        self.h.tg.inject_callback("q_w4a_1", message_id=1)
+        self.h.tick(s)
+        self.h.assert_sent("Q2?")
+
+        # Answer Q2 — remaining_qs is now [], should trigger submit
+        self.h.tg.inject_callback("q_w4a_1", message_id=1)
+        self.h.tick(s)
+        self.h.assert_sent("Submit answers")
+
+    def test_multi_question_text_answer(self):
+        """Typing a number to answer should work the same as button."""
+        s = self._setup()
+        questions = [
+            {"question": "Pick?", "options": [
+                {"label": "A", "description": "First"},
+                {"label": "B", "description": "Second"},
+            ]},
+            {"question": "Style?", "options": [
+                {"label": "X", "description": "Style X"},
+            ]},
+        ]
+        self.h.inject_signal("question", "w4", pane="%20", project="myproject",
+                             questions=questions)
+        self.h.tick(s)
+        self.h.assert_sent("Pick?")
+
+        # Answer via text (no prefix — single session)
+        self.h.tg.inject_text_message("1")
+        self.h.tick(s)
+        self.h.assert_sent("Style?")
+
+    def test_prompt_survives_restart_cleanup(self):
+        """Active prompt files should survive listener startup cleanup."""
+        s = self._setup()
+        questions = [
+            {"question": "Q1?", "options": [
+                {"label": "A", "description": "ok"},
+            ]},
+            {"question": "Q2?", "options": [
+                {"label": "B", "description": "ok"},
+            ]},
+        ]
+        self.h.inject_signal("question", "w4", pane="%20", project="myproject",
+                             questions=questions)
+        self.h.tick(s)
+        self.h.assert_sent("Q1?")
+
+        # Verify prompt file exists
+        assert state.has_active_prompt("w4a"), "Prompt should exist after Q1"
+
+        # Simulate startup cleanup (what cmd_listen does on restart)
+        sig_dir = config.SIGNAL_DIR
+        for f in os.listdir(sig_dir):
+            if f.startswith(("_bash_cmd_", "_busy_")):
+                try:
+                    os.remove(os.path.join(sig_dir, f))
+                except OSError:
+                    pass
+
+        # Prompt should still exist
+        assert state.has_active_prompt("w4a"), "Prompt should survive restart cleanup"
+
+        # And answering should still work
+        self.h.tg.inject_callback("q_w4a_1", message_id=1)
+        self.h.tick(s)
+        self.h.assert_sent("Q2?")
+
+
 if __name__ == "__main__":
     unittest.main()

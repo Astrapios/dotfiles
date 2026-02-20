@@ -226,9 +226,15 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             if remaining_qs:
                 next_q = remaining_qs[0]
                 rest = remaining_qs[1:]
-                n_opts = len(next_q.get("options", []))
+                opts = next_q.get("options", [])
+                n_opts = len(opts)
                 msg = signals._format_question_msg(tag, proj, next_q)
-                telegram.tg_send(msg, silent=state._is_silent(3))
+                # Build inline keyboard buttons like the initial question
+                q_buttons = [(opt.get("label", "?")[:20], f"q_{wid}_{i}")
+                             for i, opt in enumerate(opts, 1)]
+                q_rows = [q_buttons[i:i+3] for i in range(0, len(q_buttons), 3)]
+                q_kb = telegram._build_inline_keyboard(q_rows) if q_buttons else None
+                telegram.tg_send(msg, reply_markup=q_kb, silent=state._is_silent(3))
                 config._save_last_msg(wid, msg)
                 state.save_active_prompt(wid, prompt_pane, total=n_opts + 2,
                                          free_text_at=n_opts,

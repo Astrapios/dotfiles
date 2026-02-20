@@ -819,11 +819,13 @@ def cmd_listen():
     lock_fd.flush()
 
     state._clear_signals()
-    # Clear stale state — after restart, no in-memory context to handle prompts
-    # and stop signals that would clear busy files are lost during reload
+    # Clear stale bash_cmd and busy files — stop signals that would clear busy
+    # files are lost during reload.  Keep _active_prompt_ files: they contain
+    # all needed context (pane, options, remaining_qs) and _cleanup_stale_prompts
+    # will remove them once the pane is idle.
     if os.path.isdir(config.SIGNAL_DIR):
         for f in os.listdir(config.SIGNAL_DIR):
-            if f.startswith(("_active_prompt_", "_bash_cmd_", "_busy_")):
+            if f.startswith(("_bash_cmd_", "_busy_")):
                 try:
                     os.remove(os.path.join(config.SIGNAL_DIR, f))
                 except OSError:

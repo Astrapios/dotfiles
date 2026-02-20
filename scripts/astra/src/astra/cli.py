@@ -408,13 +408,34 @@ def _debug_inject():
             signal["message"] = "permission"
     elif event_type == "question":
         signal["event"] = "question"
-        signal["questions"] = [{
-            "question": "Test question?",
-            "options": [
-                {"label": "Option A", "description": "First choice"},
-                {"label": "Option B", "description": "Second choice"},
-            ],
-        }]
+        # --multi: inject 3 questions to test multi-question flow
+        if extra_args and extra_args[0] == "--multi":
+            signal["questions"] = [
+                {"question": "Which approach?", "header": "Approach",
+                 "options": [
+                     {"label": "Option A", "description": "First approach"},
+                     {"label": "Option B", "description": "Second approach"},
+                 ], "multiSelect": False},
+                {"question": "Which style?", "header": "Style",
+                 "options": [
+                     {"label": "Minimal", "description": "Keep it simple"},
+                     {"label": "Detailed", "description": "Full coverage"},
+                     {"label": "Auto", "description": "Let Claude decide"},
+                 ], "multiSelect": False},
+                {"question": "Run tests?", "header": "Tests",
+                 "options": [
+                     {"label": "Yes", "description": "Run test suite"},
+                     {"label": "No", "description": "Skip tests"},
+                 ], "multiSelect": False},
+            ]
+        else:
+            signal["questions"] = [{
+                "question": "Test question?",
+                "options": [
+                    {"label": "Option A", "description": "First choice"},
+                    {"label": "Option B", "description": "Second choice"},
+                ],
+            }]
     else:
         print(f"Unknown event type: {event_type}", file=sys.stderr)
         print("Events: stop, perm, question", file=sys.stderr)

@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.23.1
+
+- **Fix multi-question prompts lost on listener restart** — `cmd_listen` startup cleared `_active_prompt_*` files, so any pending AskUserQuestion (especially multi-question flows in plan mode) was lost when the listener auto-reloaded; prompts now persist across restarts and `_cleanup_stale_prompts` handles expired ones
+- **Fix question callback `[0]` indexing on SessionInfo** — the `q_{wid}_{n}` callback handler used `sessions[resolved][0]` which broke after the SessionInfo migration; fixed to use tuple unpacking
+- **Add inline keyboard buttons to follow-up questions** — `_advance_question` now sends option buttons for Q2, Q3, etc. (previously only Q1 had buttons)
+- **Multi-question `debug inject`** — `astra debug inject question wN --multi` injects a 3-question signal for testing the full multi-question flow
+
 ## 0.23.0
 
 - **Debug subcommands** — new diagnostic tools under `astra debug` for inspecting and testing the listener without touching Telegram

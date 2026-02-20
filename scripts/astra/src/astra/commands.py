@@ -1059,7 +1059,7 @@ def _handle_callback(callback: dict, sessions: dict,
         config._mark_remote(wid)
         resolved = tmux.resolve_session_id(wid, sessions)
         if resolved:
-            pane = sessions[resolved][0]
+            pane, project = sessions[resolved]
             confirm = routing.route_to_pane(pane, resolved, n_str)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             last_win_idx = resolved
