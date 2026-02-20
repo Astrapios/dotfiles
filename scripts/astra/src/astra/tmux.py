@@ -103,9 +103,12 @@ def _capture_pane(pane: str, num_lines: int = 20) -> str:
             capture_output=True, text=True, timeout=5,
         )
         lines = result.stdout.splitlines()
+        # Strip trailing empty lines (tall panes have blank lines below content)
+        while lines and not lines[-1].strip():
+            lines.pop()
         if len(lines) > num_lines:
             return "\n".join(lines[-num_lines:]) + "\n"
-        return result.stdout
+        return "\n".join(lines) + "\n" if lines else ""
     except Exception:
         return ""
 
@@ -118,9 +121,11 @@ def _capture_pane_ansi(pane: str, num_lines: int = 20) -> str:
             capture_output=True, text=True, timeout=5,
         )
         lines = result.stdout.splitlines()
+        while lines and not lines[-1].strip():
+            lines.pop()
         if len(lines) > num_lines:
             return "\n".join(lines[-num_lines:]) + "\n"
-        return result.stdout
+        return "\n".join(lines) + "\n" if lines else ""
     except Exception:
         return ""
 

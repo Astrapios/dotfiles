@@ -5,6 +5,7 @@ FakeTelegram, FakeTmux, and FakeClock replacing the three external
 boundaries (Telegram API, tmux, subprocess).
 """
 import os
+import pathlib
 import unittest
 
 from astra import state, config, listener
@@ -933,6 +934,180 @@ class TestReplyRouting(SimTestBase):
         self.h.tick(s)
 
         self.h.assert_sent("w4")
+
+
+class TestStopSignalDedup(SimTestBase):
+    """Stop signal deduplication — multiple stops for same wid produce one message."""
+
+    def test_multiple_stop_signals_deduped(self):
+        """3 stop signals for same wid → only 1 '✅' message."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Set pane content with a completed response
+        self.h.tmux.set_pane_content("4",
+            "● Done with the task\n"
+            "All changes applied.\n"
+            "❯ "
+        )
+
+        # Inject 3 stop signals for the same wid
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+
+        # Should have exactly 1 "finished" message
+        finished_msgs = self.h.tg.find_sent("finished")
+        assert len(finished_msgs) == 1, \
+            f"Expected 1 finished msg, got {len(finished_msgs)}: {self.h.dump_timeline()}"
+
+    def test_stop_signals_different_wids_not_deduped(self):
+        """2 stop signals for different wids → 2 '✅' messages."""
+        self.h.tmux.add_session("4", "%20", "projA", idle=True)
+        self.h.tmux.add_session("5", "%21", "projB", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tmux.set_pane_content("4",
+            "● Done A\n❯ "
+        )
+        self.h.tmux.set_pane_content("5",
+            "● Done B\n❯ "
+        )
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="projA")
+        self.h.inject_signal("stop", "w5", pane="%21", project="projB")
+        self.h.tick(s)
+
+        finished_msgs = self.h.tg.find_sent("finished")
+        assert len(finished_msgs) == 2, \
+            f"Expected 2 finished msgs, got {len(finished_msgs)}: {self.h.dump_timeline()}"
+
+
+class TestPlanPermission(SimTestBase):
+    """Plan permission reads plan file and sends full content."""
+
+    def _write_plan_file(self, content):
+        """Write a fake plan file to ~/.claude/plans/ for testing."""
+        import tempfile
+        plans_dir = pathlib.Path.home() / ".claude" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        self._plan_file = plans_dir / "_test_plan.md"
+        self._plan_file.write_text(content)
+        # Touch to ensure it's the most recent
+        self._plan_file.touch()
+
+    def _cleanup_plan_file(self):
+        if hasattr(self, '_plan_file') and self._plan_file.exists():
+            self._plan_file.unlink()
+
+    def setUp(self):
+        super().setUp()
+        self._write_plan_file(
+            "# Plan: Add cowsay integration\n\n"
+            "## Changes\n\n"
+            "1. Add /moo command handler\n"
+            "2. Wire into CLI\n"
+        )
+
+    def tearDown(self):
+        self._cleanup_plan_file()
+        super().tearDown()
+
+    def test_plan_permission_shows_plan_file_content(self):
+        """Plan permission reads plan file and shows it with buttons."""
+        pane_content = (
+            "● ExitPlanMode\n"
+            "───────────────────────────────\n"
+            "  1. Yes, execute this plan\n"
+            "  2. Yes, and don't ask again\n"
+            "  3. No\n"
+            "  4. Type something to tell Claude...\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=pane_content)
+        s = self.h.make_listener_state()
+
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject",
+                             message="Claude has a plan ready to execute.")
+        self.h.tick(s)
+
+        # Should send plan message with plan file content
+        plan_msgs = self.h.tg.find_sent("plan for review")
+        assert len(plan_msgs) > 0, \
+            f"Expected plan msg. All sent: {self.h.dump_timeline()}"
+        # Should contain plan file content
+        assert "Add cowsay integration" in plan_msgs[0]["text"]
+        assert "Add /moo command" in plan_msgs[0]["text"]
+        # Should have inline keyboard
+        assert plan_msgs[0].get("reply_markup") is not None
+
+    def test_plan_permission_has_options(self):
+        """Plan permission includes numbered options from pane."""
+        pane_content = (
+            "● ExitPlanMode\n"
+            "───────────────────────────────\n"
+            "  1. Yes, execute this plan\n"
+            "  2. Yes, and don't ask again\n"
+            "  3. No\n"
+            "  4. Type something to tell Claude...\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=pane_content)
+        s = self.h.make_listener_state()
+
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject",
+                             message="plan approval needed")
+        self.h.tick(s)
+
+        plan_msgs = self.h.tg.find_sent("plan for review")
+        # Options should be in the message text
+        assert "Yes, execute" in plan_msgs[0]["text"] or \
+               "1." in plan_msgs[0]["text"]
+
+    def test_plan_permission_not_auto_accepted_god_mode(self):
+        """Plan permission is NOT auto-accepted in god mode."""
+        from unittest.mock import patch as _patch
+        pane_content = (
+            "● ExitPlanMode\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. No\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=pane_content)
+        s = self.h.make_listener_state()
+
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject",
+                             message="plan ready for execution")
+        with _patch.object(state, "_is_god_mode_for", return_value=True):
+            self.h.tick(s)
+
+        # Should NOT have auto-accepted (no "Auto-allowed" message)
+        self.h.assert_not_sent("Auto-allowed")
+
+    def test_normal_permission_not_affected(self):
+        """Non-plan permission still goes through normal path."""
+        perm_content = (
+            "  Claude wants to run:\n"
+            "  bash: ls -la\n"
+            "───────────────────────────────\n"
+            "  1. Yes\n"
+            "  2. Yes, and don't ask again\n"
+            "  3. No\n"
+        )
+        self.h.tmux.add_session("4", "%20", "myproject", content=perm_content)
+        s = self.h.make_listener_state()
+
+        self.h.inject_signal("permission", "w4", pane="%20",
+                             project="myproject", cmd="ls -la",
+                             message="Claude wants to run a bash command")
+        self.h.tick(s)
+
+        # Should send regular permission (not plan)
+        self.h.assert_not_sent("plan for review")
+        perm_msgs = self.h.tg.find_sent("permission")
+        assert len(perm_msgs) > 0
 
 
 if __name__ == "__main__":

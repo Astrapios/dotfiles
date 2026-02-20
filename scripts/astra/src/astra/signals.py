@@ -8,6 +8,8 @@ import os
 import re
 import time
 
+import pathlib
+
 from astra import config, telegram, tmux, content, state, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
@@ -15,6 +17,24 @@ _CAT_PERMISSION = 1
 _CAT_STOP = 2
 _CAT_QUESTION = 3
 _CAT_CONFIRM = 7
+
+
+def _read_latest_plan() -> str:
+    """Read the most recently modified plan file from ~/.claude/plans/.
+
+    Returns the file content or empty string if no plan files found.
+    """
+    plans_dir = pathlib.Path.home() / ".claude" / "plans"
+    if not plans_dir.is_dir():
+        return ""
+    md_files = list(plans_dir.glob("*.md"))
+    if not md_files:
+        return ""
+    latest = max(md_files, key=lambda p: p.stat().st_mtime)
+    try:
+        return latest.read_text().strip()
+    except OSError:
+        return ""
 
 
 def has_pending_signals() -> bool:
@@ -79,6 +99,7 @@ def process_signals(focused_wids: set[str] | None = None,
         return None
 
     last_wid = None
+    stop_processed: set[str] = set()
     for fname in files:
         if not fname.endswith(".json") or fname.startswith("_"):
             continue
@@ -146,6 +167,13 @@ def process_signals(focused_wids: set[str] | None = None,
                 telegram._fire_and_forget(telegram._remove_inline_keyboard, old_kb)
 
         if event == "stop":
+            if wid in stop_processed:
+                try:
+                    os.remove(fpath)
+                except OSError:
+                    pass
+                continue
+            stop_processed.add(wid)
             state._clear_busy(wid)
             sf = state._load_smartfocus_state()
             was_smartfocus = sf and sf["wid"] == wid
@@ -186,6 +214,7 @@ def process_signals(focused_wids: set[str] | None = None,
                     cur_lines = cleaned.splitlines()
                     new = content._compute_new_lines(smartfocus_prev, cur_lines)
                     if new:
+                        new = content._collapse_tool_calls(new, profile=profile)
                         tail_text = "\n".join(new).strip()
                         if tail_text:
                             header = f"✅{tag} (`{project}`) finished:\n\n"
@@ -195,16 +224,19 @@ def process_signals(focused_wids: set[str] | None = None,
                     elif smartfocus_has_sent:
                         sm = difflib.SequenceMatcher(None, smartfocus_prev, cur_lines)
                         if sm.ratio() < 0.3:
+                            collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip()
                             header = f"✅{tag} (`{project}`) finished:\n\n"
-                            _stop_send_args = ("long", header, cleaned, wid, stop_kb, _stop_silent)
+                            _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
                         else:
                             _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
                     else:
+                        collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip()
                         header = f"✅{tag} (`{project}`) finished:\n\n"
-                        _stop_send_args = ("long", header, cleaned, wid, stop_kb, _stop_silent)
+                        _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
                 elif cleaned:
+                    collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip()
                     header = f"✅{tag} (`{project}`) finished:\n\n"
-                    _stop_send_args = ("long", header, cleaned, wid, stop_kb, _stop_silent)
+                    _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
                 else:
                     _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
             else:
@@ -219,8 +251,9 @@ def process_signals(focused_wids: set[str] | None = None,
                 else:
                     pw = 0
                 cleaned = content.clean_pane_content(raw, "stop", pw, profile=profile) if raw else "(could not capture pane)"
+                collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip() if cleaned else cleaned
                 header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
-                _stop_send_args = ("long", header, cleaned, wid, stop_kb, state._is_silent(_CAT_STOP))
+                _stop_send_args = ("long", header, collapsed or cleaned, wid, stop_kb, state._is_silent(_CAT_STOP))
 
             # Fire-and-forget: send stop message + queued messages in background
             # to avoid blocking signal processing on TG round-trips.
@@ -268,6 +301,49 @@ def process_signals(focused_wids: set[str] | None = None,
                         telegram.tg_send,
                         f"\u26a1{tag} Auto-allowed (`{project}`): `{desc}`",
                         silent=state._is_silent(_CAT_CONFIRM))
+            elif is_plan_perm:
+                # Plan approval: read plan file for body, extract options from pane
+                plan_text = _read_latest_plan()
+                _, _, options, _ = content._extract_pane_permission(pane)
+                if options and not any(o.startswith("1.") for o in options):
+                    options.insert(0, "1. Yes")
+                max_opt = 0
+                for o in options:
+                    m_opt = re.match(r'(\d+)', o)
+                    if m_opt:
+                        max_opt = max(max_opt, int(m_opt.group(1)))
+                opts_text = "\n".join(options)
+                n = max_opt or 3
+
+                free_text_at = None
+                for o in options:
+                    if re.search(r'\btype\b.*\b(here|something|your)\b', o, re.IGNORECASE):
+                        m_ft = re.match(r'(\d+)', o)
+                        if m_ft:
+                            free_text_at = int(m_ft.group(1)) - 1
+                        break
+                free_text_hint = "\n\n_Or type a message to give feedback._" if free_text_at is not None else ""
+
+                if not is_local:
+                    perm_kb = telegram._build_inline_keyboard([[
+                        ("\u2705 Approve", f"perm_{wid}_1"),
+                        ("\u2705 Always", f"perm_{wid}_2"),
+                        ("\u274c Deny", f"perm_{wid}_{n}"),
+                    ]])
+                    header_str = f"📋{tag} {dn} (`{project}`) has a plan for review:\n\n"
+                    body = plan_text or "(could not read plan file)"
+                    kb_id = telegram._send_long_message(
+                        header_str, body, wid, reply_markup=perm_kb,
+                        footer=opts_text + free_text_hint,
+                        silent=state._is_silent(_CAT_PERMISSION))
+                    config._save_keyboard_msg(wid, kb_id)
+                shortcuts = {"y": 1, "yes": 1, "allow": 1, "approve": 1,
+                             "n": n, "no": n, "deny": n}
+                for i in range(1, n + 1):
+                    shortcuts[str(i)] = i
+                state.save_active_prompt(wid, pane, total=n,
+                                         shortcuts=shortcuts,
+                                         free_text_at=free_text_at)
             else:
                 perm_header, perm_body, options, perm_context = content._extract_pane_permission(pane)
                 if options and not any(o.startswith("1.") for o in options):

@@ -152,6 +152,7 @@ def _interrupt_session(idx: str, sessions: dict):
     """Interrupt a CLI session: Escape, clear prompt, clear busy/prompt state."""
     pane, project = sessions[idx]
     p = shlex.quote(pane)
+    config._mark_remote(idx)
     # Escape interrupts current operation, Ctrl+U clears the prompt line
     subprocess.run(["bash", "-c",
                     f"tmux send-keys -t {p} Escape && sleep 0.1 && "
@@ -200,10 +201,7 @@ def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: s
     """Activate smart focus after a message is sent (not queued/prompt reply)."""
     if not (confirm.startswith("📨 Sent to") or confirm.startswith("📷 Photo sent to") or confirm.startswith("📎 Document sent to")):
         return
-    # Mark window as remotely active (for auto-local detection)
-    bare_m = re.match(r'^w?(\d+)', win_idx)
-    if bare_m:
-        config._remote_sessions[bare_m.group(1)] = time.time()
+    config._mark_remote(win_idx)
     if not state._is_autofocus_enabled():
         return
     # Skip if manual focus or deepfocus already covers this wid
@@ -723,6 +721,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if idx:
             pane, project = sessions[idx]
             p = shlex.quote(pane)
+            config._mark_remote(idx)
             tokens = key_str.split()
             tmux_keys = [_resolve_key(t) for t in tokens]
             keys_arg = " ".join(tmux_keys)
@@ -753,6 +752,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if idx:
             pane, project = sessions[idx]
             p = shlex.quote(pane)
+            config._mark_remote(idx)
             subprocess.run(
                 ["bash", "-c",
                  f"tmux send-keys -t {p} C-c && sleep 0.1 && "
@@ -789,6 +789,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
+            config._mark_remote(idx)
             # Remember CLI type before killing (SessionInfo carries it)
             orig_info = sessions[idx]
             if isinstance(orig_info, tmux.SessionInfo):
@@ -1027,6 +1028,7 @@ def _handle_callback(callback: dict, sessions: dict,
     m = re.match(r"^perm_(w\d+[a-z]?)_(\d+)$", cb_data)
     if m:
         wid, n = m.group(1), int(m.group(2))
+        config._mark_remote(wid)
         prompt = state.load_active_prompt(wid)
         if prompt:
             total = prompt.get("total", 3)
@@ -1054,6 +1056,7 @@ def _handle_callback(callback: dict, sessions: dict,
     m = re.match(r"^q_(w\d+[a-z]?)_(\d+)$", cb_data)
     if m:
         wid, n_str = m.group(1), m.group(2)
+        config._mark_remote(wid)
         resolved = tmux.resolve_session_id(wid, sessions)
         if resolved:
             pane = sessions[resolved][0]
@@ -1077,6 +1080,7 @@ def _handle_callback(callback: dict, sessions: dict,
         if tmux_key:
             resolved = tmux.resolve_session_id(wid, sessions)
             if resolved:
+                config._mark_remote(resolved)
                 pane, project = sessions[resolved]
                 p = shlex.quote(pane)
                 subprocess.run(["bash", "-c",

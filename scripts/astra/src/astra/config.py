@@ -87,6 +87,15 @@ def _debug_tg(kind: str, detail: str, text: str):
 
 _remote_sessions: dict[str, float] = {}  # bare win_idx -> tg_send_timestamp
 
+
+def _mark_remote(wid: str):
+    """Mark a session as remotely active (TG interaction), disabling local suppress."""
+    import re, time as _time
+    m = re.match(r'^w?(\d+)', wid)
+    if m:
+        _remote_sessions[m.group(1)] = _time.time()
+
+
 _last_messages: dict[str, str] = {}  # wid -> last sent message
 _keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
 _render_bodies: dict[int, str] = {}  # msg_id -> body text for "render as image"

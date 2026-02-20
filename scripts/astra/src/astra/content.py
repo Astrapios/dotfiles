@@ -363,6 +363,59 @@ def _filter_tool_calls(lines: list[str]) -> list[str]:
     return filtered
 
 
+def _collapse_tool_calls(lines: list[str], profile=None) -> list[str]:
+    """Collapse tool call sections to single-line headers.
+
+    Replaces tool headers (e.g. ``● Read(file.py)``) with a compact
+    ``🔧 Read(file.py)`` line and removes tool body/continuation lines.
+    Text bullets pass through unchanged.
+
+    For Gemini, tool blocks use box-drawing characters (``╭``/``│``/``╰``);
+    the header line (``╭─ ✓  ToolName ...``) is collapsed and body lines
+    (``│``/``╰``) are removed.
+    """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    tool_re = profile.tool_header_re
+    bullet = profile.response_bullet
+    is_gemini = profile.name == "gemini"
+
+    collapsed: list[str] = []
+    in_tool = False
+    for line in lines:
+        s = line.strip()
+        if is_gemini:
+            # Gemini tool blocks: ╭ starts, │/╰ continue
+            if s.startswith("╭"):
+                # Extract tool name from "╭─ ✓  ToolName args ─╮"
+                m = re.search(r'✓\s+(\w+.*?)\s*─*╮?$', s)
+                header = m.group(1).strip() if m else s.strip("╭─╮ ")
+                collapsed.append(f"🔧 {header}")
+                in_tool = True
+                continue
+            if in_tool and (s.startswith("│") or s.startswith("╰")):
+                if s.startswith("╰"):
+                    in_tool = False
+                continue
+            in_tool = False
+            collapsed.append(line)
+        else:
+            # Claude: tool bullets match "● Word("
+            if re.match(tool_re, s):
+                # Extract "Word(args)" from "● Word(args)"
+                header = s[2:] if s.startswith("● ") else s
+                collapsed.append(f"🔧 {header}")
+                in_tool = True
+                continue
+            if s.startswith(bullet) if bullet else False:
+                in_tool = False
+            if in_tool:
+                continue
+            collapsed.append(line)
+    return collapsed
+
+
 def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     """Find genuinely new (inserted) lines between two captures."""
     if not old_lines:

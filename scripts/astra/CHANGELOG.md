@@ -5,6 +5,21 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.22.0
+
+- **Deduplicate stop signals** — multiple Stop events for the same session in a single tick are now collapsed into one notification, fixing duplicate "✅ finished:" messages when rapid tool-use turns fire several stops
+- **Collapse tool calls in focus output** — smartfocus (👁), focus (🔍), and stop (✅) messages now show compact `🔧 ToolName(args)` headers instead of full tool call bodies, reducing noise while preserving text output
+- **Plan permission shows plan file content** — ExitPlanMode permission reads the plan file from `~/.claude/plans/` and sends the full plan text with Approve/Always/Deny buttons and numbered options, instead of extracting (often incomplete) pane content
+- **Fix deepfocus profile awareness** — deep focus monitoring now uses the correct CLI profile for `_filter_noise` and prompt character detection instead of hardcoding Claude's `❯`
+
+## 0.21.5
+
+- **Fix false busy detection on tall panes** — `_capture_pane` now strips trailing empty lines before taking the last N, fixing idle detection failure when a pane has few content lines but many blank lines below (e.g. after `/clear`)
+
+## 0.21.4
+
+- **Auto-local override on all TG interactions** — any Telegram interaction targeting a session (keys, interrupt, kill, restart, permission/question responses, quick-pick keys) now disables local suppress for that window, not just text/photo/doc sends
+
 ## 0.21.3
 
 - **Fix `/status` local icons with auto-local** — `/status` now applies remote override subtraction so the `👁` icon correctly reflects whether local suppression is active (not shown for windows with a pending TG override)

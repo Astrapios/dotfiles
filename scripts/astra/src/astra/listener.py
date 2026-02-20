@@ -431,7 +431,9 @@ def _listen_tick(s):
                 raw = tmux._capture_pane(fp, n)
                 if content._has_response_start(raw, profile=_fprofile):
                     break
-            cleaned = content.clean_pane_content(raw, "stop", s.focus_pane_width, profile=_fprofile)
+            cleaned_lines = content.clean_pane_content(raw, "stop", s.focus_pane_width, profile=_fprofile).splitlines()
+            cleaned_lines = content._collapse_tool_calls(cleaned_lines, profile=_fprofile)
+            cleaned = "\n".join(cleaned_lines).strip()
             if cleaned:
                 h = hash(cleaned)
                 if h != s.focus_last_hash and s.focus_last_hash != 0:
@@ -478,6 +480,7 @@ def _listen_tick(s):
                 if s.smartfocus_prev_lines:
                     new = content._compute_new_lines(s.smartfocus_prev_lines, cur_lines)
                     if new:
+                        new = content._collapse_tool_calls(new, profile=_sfprofile)
                         new_text = "\n".join(new).strip()
                         if new_text:
                             header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
@@ -512,10 +515,13 @@ def _listen_tick(s):
                 deepfocus_state = None
 
     if deepfocus_state:
+        _dfinfo = s.sessions.get(dfw)
+        _dfprofile = profiles.get_profile(_dfinfo.cli) if _dfinfo and hasattr(_dfinfo, 'cli') else None
+        _dfpc = _dfprofile.prompt_char if _dfprofile else "❯"
         raw = tmux._capture_pane(dfp, 50)
-        cur_lines = content._filter_noise(raw)
+        cur_lines = content._filter_noise(raw, profile=_dfprofile)
         for i in range(len(cur_lines) - 1, -1, -1):
-            if cur_lines[i].strip().startswith("❯"):
+            if cur_lines[i].strip().startswith(_dfpc):
                 cur_lines = cur_lines[:i]
                 break
         if s.deepfocus_pane_width:
@@ -625,6 +631,7 @@ def _listen_tick(s):
                     caption, s.sessions, s.last_win_idx)
 
                 if target_wid:
+                    config._mark_remote(target_wid)
                     pane, project = s.sessions[target_wid]
                     if len(paths) == 1:
                         instruction = f"Read {paths[0]}"
@@ -708,6 +715,7 @@ def _listen_tick(s):
                     caption, s.sessions, s.last_win_idx)
 
                 if target_wid:
+                    config._mark_remote(target_wid)
                     pane, project = s.sessions[target_wid]
                     instruction = f"Read {path}"
                     if remaining_text:

@@ -8190,5 +8190,97 @@ class TestRenderCallback:
         assert _maybe_add_render_button(None, False) is None
 
 
+class TestCollapseToolCalls:
+    """Test _collapse_tool_calls collapses tool headers and removes body."""
+
+    def test_collapse_mixed_content(self):
+        """Tool bullets collapsed, text bullets preserved."""
+        lines = [
+            "● Here is my analysis",
+            "  The code looks good.",
+            "● Read(src/main.py)",
+            "  def main():",
+            "  print('hello')",
+            "● The fix is simple.",
+        ]
+        result = astra._collapse_tool_calls(lines)
+        assert result == [
+            "● Here is my analysis",
+            "  The code looks good.",
+            "🔧 Read(src/main.py)",
+            "● The fix is simple.",
+        ]
+
+    def test_collapse_preserves_text_only(self):
+        """Input with only text bullets → unchanged."""
+        lines = [
+            "● Here is the answer",
+            "  The result is 42.",
+            "● Another point",
+        ]
+        result = astra._collapse_tool_calls(lines)
+        assert result == lines
+
+    def test_collapse_all_tools(self):
+        """Input with only tool bullets → all collapsed, body removed."""
+        lines = [
+            "● Bash(echo hello)",
+            "  ⎿  hello",
+            "● Read(file.py)",
+            "  content here",
+            "  more content",
+        ]
+        result = astra._collapse_tool_calls(lines)
+        assert result == [
+            "🔧 Bash(echo hello)",
+            "🔧 Read(file.py)",
+        ]
+
+    def test_collapse_gemini_profile(self):
+        """Gemini box-drawing tool headers handled correctly."""
+        lines = [
+            "✦ Here is my response",
+            "╭─ ✓  ReadFile path.py ─╮",
+            "│ file content here",
+            "│ more content",
+            "╰─╯",
+            "✦ Done with the task.",
+        ]
+        result = astra._collapse_tool_calls(lines, profile=astra.GEMINI)
+        assert result == [
+            "✦ Here is my response",
+            "🔧 ReadFile path.py",
+            "✦ Done with the task.",
+        ]
+
+    def test_collapse_nested_tool_after_text(self):
+        """Tool after text bullet → only tool part collapsed."""
+        lines = [
+            "● Let me check the file",
+            "  I'll read it now.",
+            "● Read(config.py)",
+            "  DEBUG = True",
+            "  PORT = 8080",
+            "● The config has debug mode enabled.",
+        ]
+        result = astra._collapse_tool_calls(lines)
+        assert result == [
+            "● Let me check the file",
+            "  I'll read it now.",
+            "🔧 Read(config.py)",
+            "● The config has debug mode enabled.",
+        ]
+
+    def test_collapse_empty_input(self):
+        """Empty input → empty output."""
+        assert astra._collapse_tool_calls([]) == []
+
+    def test_collapse_no_bullets_at_all(self):
+        """Lines without any bullet markers pass through."""
+        lines = ["line one", "line two"]
+        result = astra._collapse_tool_calls(lines)
+        assert result == lines
+
+
 if __name__ == "__main__":
     unittest.main()
