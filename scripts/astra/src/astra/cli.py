@@ -99,8 +99,16 @@ def cmd_hook():
             tool_input = data.get("tool_input", {})
             if internal_tool == "shell":
                 desc = tool_input.get("command", "")[:200]
-            elif internal_tool in ("edit", "write", "read"):
-                desc = tool_input.get("file_path", "")[:200]
+            elif internal_tool in ("edit", "write", "read", "notebook"):
+                desc = tool_input.get("file_path", tool_input.get("notebook_path", ""))[:200]
+            elif internal_tool == "fetch":
+                desc = tool_input.get("url", "")[:200]
+            elif internal_tool == "search":
+                desc = tool_input.get("query", "")[:200]
+            elif internal_tool in ("glob", "grep"):
+                desc = tool_input.get("pattern", "")[:200]
+            elif internal_tool == "task":
+                desc = tool_input.get("description", tool_input.get("prompt", ""))[:200]
             else:
                 desc = internal_tool or tool
             print(json.dumps({"decision": "approve"}))
