@@ -102,7 +102,7 @@ def cmd_hook():
             elif internal_tool in ("edit", "write", "read"):
                 desc = tool_input.get("file_path", "")[:200]
             else:
-                desc = internal_tool
+                desc = internal_tool or tool
             print(json.dumps({"decision": "approve"}))
             state.write_signal("god_approve", data, cmd=desc, tool=internal_tool, cli=cli_name)
         return

@@ -76,6 +76,15 @@
             "command": "astra hook"
           }
         ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "astra hook"
+          }
+        ]
       }
     ]
   },

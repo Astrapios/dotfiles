@@ -78,6 +78,78 @@ def _get_pane_width(pane: str) -> int:
         return 0
 
 
+def _get_pane_pid(pane: str) -> int | None:
+    """Get the PID of the initial process in a tmux pane."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display", "-t", pane, "-p", "#{pane_pid}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return None
+
+
+def _get_process_tree_resources(pid: int) -> tuple[float, int]:
+    """Get total CPU% and RSS (KB) for a process and all its descendants.
+
+    Returns (cpu_percent, rss_kb). CPU% is summed across all threads/cores
+    so can exceed 100% on multi-core systems.
+    """
+    try:
+        # Build parent→children map from all processes
+        result = subprocess.run(
+            ["ps", "-e", "-o", "pid,ppid", "--no-headers"],
+            capture_output=True, text=True, timeout=5,
+        )
+        children: dict[int, list[int]] = {}
+        for line in result.stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) == 2:
+                p, pp = int(parts[0]), int(parts[1])
+                children.setdefault(pp, []).append(p)
+        # Collect all descendants
+        pids = [pid]
+        stack = [pid]
+        while stack:
+            p = stack.pop()
+            for c in children.get(p, []):
+                pids.append(c)
+                stack.append(c)
+        # Get CPU and RSS for all
+        result = subprocess.run(
+            ["ps", "-p", ",".join(str(p) for p in pids),
+             "-o", "%cpu,rss", "--no-headers"],
+            capture_output=True, text=True, timeout=5,
+        )
+        total_cpu = 0.0
+        total_rss = 0
+        for line in result.stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                total_cpu += float(parts[0])
+                total_rss += int(parts[1])
+        return total_cpu, total_rss
+    except Exception:
+        return 0.0, 0
+
+
+def _get_session_resources(sessions: dict) -> dict[str, tuple[float, int]]:
+    """Get CPU% and RSS (KB) for each session's process tree.
+
+    Returns {wid: (cpu_percent, rss_kb)}.
+    """
+    resources = {}
+    for idx in sessions:
+        val = sessions[idx]
+        pane = val.pane_target if isinstance(val, SessionInfo) else val[0]
+        pid = _get_pane_pid(pane)
+        if pid:
+            cpu, rss = _get_process_tree_resources(pid)
+            resources[idx] = (cpu, rss)
+    return resources
+
+
 def _join_wrapped_lines(lines: list[str], width: int) -> list[str]:
     """Join lines that were soft-wrapped by Claude Code's terminal formatter."""
     if width < 40 or not lines:
@@ -327,13 +399,65 @@ def _display_wid(wid: str, sessions: dict) -> str:
     return wid
 
 
+def _format_resources(cpu: float, rss_kb: int) -> str:
+    """Format CPU% and RSS into a compact string like '140% · 4.2G'."""
+    cpu_str = f"{cpu:.0f}%"
+    rss_mb = rss_kb / 1024
+    if rss_mb >= 1024:
+        mem_str = f"{rss_mb / 1024:.1f}G"
+    else:
+        mem_str = f"{rss_mb:.0f}M"
+    return f"{cpu_str} · {mem_str}"
+
+
+def _get_system_memory() -> tuple[int, int]:
+    """Return (used_kb, total_kb) of system memory."""
+    try:
+        with open("/proc/meminfo") as f:
+            info = {}
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    info[parts[0].rstrip(":")] = int(parts[1])
+        total = info.get("MemTotal", 0)
+        avail = info.get("MemAvailable", 0)
+        return total - avail, total
+    except Exception:
+        return 0, 0
+
+
+def _get_gpu_info() -> list[tuple[str, int, int, int]] | None:
+    """Query nvidia-smi for GPU stats.
+
+    Returns list of (name, utilization%, used_mb, total_mb), or None if unavailable.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        gpus = []
+        for line in result.stdout.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 4:
+                gpus.append((parts[0], int(parts[1]), int(parts[2]), int(parts[3])))
+        return gpus or None
+    except Exception:
+        return None
+
+
 def format_sessions_message(sessions: dict[str, tuple[str, str]],
                             statuses: dict[str, str] | None = None,
-                            locally_viewed: set[str] | None = None) -> str:
+                            locally_viewed: set[str] | None = None,
+                            resources: dict[str, tuple[float, int]] | None = None) -> str:
     """Format a sessions map into a Telegram message.
 
     statuses: optional dict of {idx: "idle"|"busy"|"interrupted"} for each session.
     locally_viewed: optional set of window indices currently viewed in tmux.
+    resources: optional dict of {idx: (cpu_percent, rss_kb)} for each session.
     """
     if not sessions:
         return "⚠️ No active sessions found in tmux."
@@ -382,7 +506,29 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]],
         if statuses and idx in statuses:
             status_icon = f" {_status_icons.get(statuses[idx], '')}"
         local_icon = " 👁" if locally_viewed and (idx in locally_viewed or win_idx in locally_viewed) else ""
-        lines.append(f"  {label} — `{project}`{status_icon}{cli_tag}{god}{local_icon}")
+        res_tag = ""
+        if resources and idx in resources:
+            cpu, rss = resources[idx]
+            if cpu > 0 or rss > 0:
+                res_tag = f" `{_format_resources(cpu, rss)}`"
+        lines.append(f"  {label} — `{project}`{status_icon}{cli_tag}{god}{local_icon}{res_tag}")
+
+    # System resource summary
+    if resources:
+        total_cpu = sum(r[0] for r in resources.values())
+        total_rss = sum(r[1] for r in resources.values())
+        ncpus = os.cpu_count() or 1
+        used_mem, total_mem = _get_system_memory()
+        total_gb = total_mem / (1024 * 1024)
+        used_gb = used_mem / (1024 * 1024)
+        sessions_gb = total_rss / (1024 * 1024)
+        lines.append(f"\n🔲 CPU `{total_cpu:.0f}`/`{ncpus * 100}%`")
+        lines.append(f"🟦 RAM `{used_gb:.1f}`/`{total_gb:.0f}G` (sessions `{sessions_gb:.1f}G`)")
+        gpus = _get_gpu_info()
+        if gpus:
+            for name, util, used_mb, total_mb in gpus:
+                lines.append(f"🟩 GPU `{util}%` · `{used_mb}`/`{total_mb}M` (`{name}`)")
+
     lines.append("\nPrefix messages with `wN` to route (e.g. `w1 fix the bug`).")
     return "\n".join(lines)
 

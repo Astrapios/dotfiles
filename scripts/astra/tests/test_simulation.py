@@ -1491,15 +1491,9 @@ class TestAutofocusOnBusyAttach(SimTestBase):
 
     def test_autofocus_on_attaches_to_busy_session(self):
         """Toggling autofocus on while a session is busy auto-attaches smartfocus."""
-        from unittest.mock import patch as _patch
-        import astra.state as state_mod
-
         self.h.tmux.add_session("4", "%20", "myproject",
                                 content="● Working on something...\n  esc to interrupt\n")
         s = self.h.make_listener_state()
-
-        # Mark w4a as busy
-        state._mark_busy("w4a")
 
         self.h.tg.inject_text_message("/autofocus on")
         self.h.tick(s)
@@ -1511,7 +1505,6 @@ class TestAutofocusOnBusyAttach(SimTestBase):
 
         # Confirmation should mention the session
         self.h.assert_sent("watching.*w4")
-        state._clear_busy("w4a")
 
     def test_autofocus_on_prefers_last_win_idx(self):
         """When multiple sessions are busy, prefer last_win_idx."""
@@ -1522,17 +1515,12 @@ class TestAutofocusOnBusyAttach(SimTestBase):
         s = self.h.make_listener_state()
         s.last_win_idx = "w5a"
 
-        state._mark_busy("w4a")
-        state._mark_busy("w5a")
-
         self.h.tg.inject_text_message("/autofocus on")
         self.h.tick(s)
 
         sf = state._load_smartfocus_state()
         assert sf is not None
         assert sf["wid"] == "w5a", f"Should prefer last_win_idx w5a, got {sf['wid']}"
-        state._clear_busy("w4a")
-        state._clear_busy("w5a")
 
     def test_autofocus_on_no_busy_session(self):
         """When no sessions are busy, just confirm without attaching."""
@@ -1555,30 +1543,35 @@ class TestAutofocusOnBusyAttach(SimTestBase):
         self.h.assert_sent("Autofocus.*on")
         self.h.assert_not_sent("watching")
 
-    def test_autofocus_toggle_on_attaches(self):
-        """Bare /autofocus toggle from off→on attaches to busy session."""
-        from unittest.mock import patch as _patch
-        import astra.state as state_mod
-
+    def test_bare_autofocus_shows_busy_picker(self):
+        """Bare /autofocus shows busy session picker."""
         self.h.tmux.add_session("4", "%20", "myproject",
                                 content="● Working...\n  esc to interrupt\n")
         s = self.h.make_listener_state()
 
-        state._mark_busy("w4a")
-
-        # Autofocus is currently off
-        self.h._patches.append(
-            _patch.object(state_mod, "_is_autofocus_enabled", return_value=False)
-        )
-        self.h._patches[-1].start()
-
         self.h.tg.inject_text_message("/autofocus")
         self.h.tick(s)
 
+        # Should show picker, not toggle
+        self.h.assert_sent("Watch which session")
+        # Smartfocus should NOT be auto-activated (user must pick)
         sf = state._load_smartfocus_state()
-        assert sf is not None, "Toggle on should attach"
-        assert sf["wid"] == "w4a"
+        assert sf is None, "Bare /autofocus should show picker, not attach"
         state._clear_busy("w4a")
+
+    def test_autofocus_wN_attaches(self):
+        """'/autofocus wN' turns on autofocus and attaches to that session."""
+        self.h.tmux.add_session("4", "%20", "myproject",
+                                content="● Working...\n  esc to interrupt\n")
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("/autofocus w4")
+        self.h.tick(s)
+
+        sf = state._load_smartfocus_state()
+        assert sf is not None, "Should attach to specified session"
+        assert sf["wid"] == "w4a"
+        self.h.assert_sent("watching.*w4")
 
 
 class TestSmartfocusBulletBatching(SimTestBase):

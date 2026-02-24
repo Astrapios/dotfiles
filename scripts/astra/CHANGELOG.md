@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.24.1
+
+- **CPU and RAM in `/status`** — each session shows CPU% and memory usage of its full process tree; system summary line shows total CPU, system RAM used/total, and aggregate session memory
+- **Bare `/autofocus` shows busy session picker** — instead of toggling, bare `/autofocus` now shows an inline keyboard of currently busy sessions to pick which one to watch; also adds `/autofocus wN` to attach directly to a specific session; when no sessions are busy, shows current autofocus status
+- **Fix autofocus busy detection** — `/autofocus on` and bare `/autofocus` now use real pane idle state (`_pane_idle_state`) instead of the file-based `_is_busy` flag, matching how `/status` detects busy sessions
+
 ## 0.24.0
 
 - **Fix focus mode sending full response on every change** — `/focus` now uses diff-based tracking (like smartfocus) to send only new lines instead of re-sending the entire response every time content changes; first tick establishes a baseline without sending

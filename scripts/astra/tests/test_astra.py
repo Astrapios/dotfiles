@@ -5251,25 +5251,31 @@ class TestAutofocusCommand(unittest.TestCase):
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_toggle_off(self, mock_send):
-        """Toggle from default on to off."""
+    def test_bare_no_busy_shows_status(self, mock_send, mock_scan, mock_idle):
+        """Bare /autofocus with no busy sessions shows status."""
+        mock_scan.return_value = self.sessions
         astra._handle_command("/autofocus", self.sessions, None)
         msg = mock_send.call_args[0][0]
-        self.assertIn("off", msg)
-        self.assertFalse(astra._is_autofocus_enabled())
+        self.assertIn("Autofocus is", msg)
+        self.assertIn("No busy sessions", msg)
 
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(False, ""))
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_command_sessions_keyboard", return_value={"inline_keyboard": []})
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_toggle_on(self, mock_send):
-        """Toggle from off to on."""
-        astra._set_autofocus(False)
+    def test_bare_busy_shows_picker(self, mock_send, mock_kb, mock_scan, mock_idle):
+        """Bare /autofocus with busy sessions shows session picker."""
+        mock_scan.return_value = self.sessions
         astra._handle_command("/autofocus", self.sessions, None)
         msg = mock_send.call_args[0][0]
-        self.assertIn("on", msg)
-        self.assertTrue(astra._is_autofocus_enabled())
+        self.assertIn("Watch which session", msg)
 
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_explicit_on(self, mock_send):
+    def test_explicit_on(self, mock_send, mock_idle):
         astra._set_autofocus(False)
         astra._handle_command("/autofocus on", self.sessions, None)
         msg = mock_send.call_args[0][0]

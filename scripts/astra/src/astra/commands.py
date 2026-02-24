@@ -279,6 +279,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if text.lower() == "/status":
         sessions = tmux.scan_claude_sessions()
         statuses = routing._get_session_statuses(sessions)
+        resources = tmux._get_session_resources(sessions)
         viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else None
         # Apply auto-local overrides so icons reflect effective state
         if viewed and config._remote_sessions:
@@ -290,7 +291,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if config._remote_sessions:
                 viewed = viewed - set(config._remote_sessions.keys())
         telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
-                                                       locally_viewed=viewed),
+                                                       locally_viewed=viewed,
+                                                       resources=resources),
                          reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
@@ -417,35 +419,28 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         telegram.tg_send("🔍 Focus stopped.")
         return None, sessions, last_win_idx
 
-    # /autofocus [on|off]
-    af_m = re.match(r"^/autofocus(?:\s+(on|off))?$", text.lower())
+    # /autofocus [on|off|wN]
+    af_m = re.match(r"^/autofocus(?:\s+(.+))?$", text.lower())
     if af_m:
-        arg = af_m.group(1)
-        turning_on = False
-        if arg == "on":
-            state._set_autofocus(True)
-            turning_on = True
-        elif arg == "off":
+        arg = af_m.group(1).strip() if af_m.group(1) else None
+        if arg == "off":
             state._set_autofocus(False)
             state._clear_smartfocus_state()
             telegram.tg_send("👁 Autofocus *off*.")
-        else:
-            # Toggle
-            currently_on = state._is_autofocus_enabled()
-            state._set_autofocus(not currently_on)
-            if currently_on:
-                state._clear_smartfocus_state()
-                telegram.tg_send("👁 Autofocus *off*.")
-            else:
-                turning_on = True
-        if turning_on:
+        elif arg == "on":
+            state._set_autofocus(True)
             # Auto-attach to a busy session if one exists
             busy_target = None
-            if last_win_idx and last_win_idx in sessions and state._is_busy(last_win_idx):
-                busy_target = last_win_idx
-            else:
+            if last_win_idx and last_win_idx in sessions:
+                pane_t, _ = sessions[last_win_idx]
+                idle, _ = routing._pane_idle_state(pane_t)
+                if not idle:
+                    busy_target = last_win_idx
+            if not busy_target:
                 for wid in sessions:
-                    if state._is_busy(wid):
+                    pane_t, _ = sessions[wid]
+                    idle, _ = routing._pane_idle_state(pane_t)
+                    if not idle:
                         busy_target = wid
                         break
             if busy_target:
@@ -454,6 +449,43 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send(f"👁 Autofocus *on* — watching {state._wid_label(busy_target)} (`{project}`).")
             else:
                 telegram.tg_send("👁 Autofocus *on*.")
+        elif arg:
+            # /autofocus wN — attach to specific session
+            target_m = re.match(r"^w?(\w[\w-]*)$", arg)
+            if target_m:
+                raw_target = target_m.group(1)
+                idx = state._resolve_name(raw_target)
+                if idx:
+                    state._set_autofocus(True)
+                    pane, project = sessions[idx]
+                    state._save_smartfocus_state(idx, pane, project)
+                    telegram.tg_send(f"👁 Autofocus *on* — watching {state._wid_label(idx)} (`{project}`).")
+                    return None, sessions, idx
+                else:
+                    telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                                     reply_markup=tmux._sessions_keyboard(sessions))
+            else:
+                telegram.tg_send(f"⚠️ Unknown `/autofocus` argument: `{arg}`")
+        else:
+            # Bare /autofocus — show busy sessions to pick from
+            sessions = tmux.scan_claude_sessions()
+            busy = {}
+            for wid in sessions:
+                pane_t, _ = sessions[wid]
+                idle, _ = routing._pane_idle_state(pane_t)
+                if not idle:
+                    busy[wid] = sessions[wid]
+            if busy:
+                kb = tmux._command_sessions_keyboard("autofocus", busy)
+                telegram.tg_send("👁 Watch which session?", reply_markup=kb)
+            else:
+                currently_on = state._is_autofocus_enabled()
+                status = "*on*" if currently_on else "*off*"
+                sf = state._load_smartfocus_state()
+                if sf:
+                    telegram.tg_send(f"👁 Autofocus is {status}, watching {state._wid_label(sf['wid'])} (`{sf['project']}`).")
+                else:
+                    telegram.tg_send(f"👁 Autofocus is {status}. No busy sessions.")
         return None, sessions, last_win_idx
 
     # /local [on|off]
@@ -1109,7 +1141,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|deepfocus|interrupt|kill|restart|last|god|keys)_(w?\d+[a-z]?)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|autofocus|interrupt|kill|restart|last|god|keys)_(w?\d+[a-z]?)$", cb_data)
     if m:
         cmd, wid_part = m.group(1), m.group(2)
         wid_str = wid_part if wid_part.startswith("w") else f"w{wid_part}"
