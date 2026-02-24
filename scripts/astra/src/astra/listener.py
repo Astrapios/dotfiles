@@ -404,6 +404,7 @@ def _listen_tick(s):
         focused_wids=focused_wids or None,
         smartfocus_prev=s.smartfocus_prev_lines if smartfocus_state else None,
         smartfocus_has_sent=s.smartfocus_has_sent if smartfocus_state else False,
+        smartfocus_pending=s.smartfocus_pending if smartfocus_state else None,
         locally_viewed=locally_viewed or None,
         sessions=s.sessions,
     )
@@ -442,6 +443,7 @@ def _listen_tick(s):
                     new = content._collapse_tool_calls(new, profile=_fprofile)
                     new_text = "\n".join(new).strip()
                     if new_text:
+                        config._log("focus", f"sending {len(new)} new lines for {fw}")
                         header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
                         telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
             s.focus_prev_lines = cleaned_lines
@@ -502,10 +504,12 @@ def _listen_tick(s):
                 # Flush conditions for pending buffer
                 _sf_flush = []
                 _sf_keep = []
+                _sf_reason = ""
                 if s.smartfocus_pending:
                     if _sf_idle:
                         # Response complete — flush everything
                         _sf_flush = s.smartfocus_pending
+                        _sf_reason = "idle"
                     else:
                         # Check for bullet boundary: a text bullet (not tool call)
                         bullet_idx = None
@@ -518,14 +522,17 @@ def _listen_tick(s):
                             # Flush everything before the bullet, keep bullet onward
                             _sf_flush = s.smartfocus_pending[:bullet_idx]
                             _sf_keep = s.smartfocus_pending[bullet_idx:]
+                            _sf_reason = "bullet"
                         elif s.smartfocus_last_new_ts and (time.time() - s.smartfocus_last_new_ts >= 5):
                             # Time fallback — no new content for 5s
                             _sf_flush = s.smartfocus_pending
+                            _sf_reason = "timeout"
 
                 if _sf_flush:
                     _sf_flush = content._collapse_tool_calls(_sf_flush, profile=_sfprofile)
                     flush_text = "\n".join(_sf_flush).strip()
                     if flush_text:
+                        config._log("smartfocus", f"flush({_sf_reason}) {len(_sf_flush)} lines for {sfw}")
                         header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
                         telegram._send_long_message(header, flush_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                         s.smartfocus_has_sent = True
@@ -589,8 +596,10 @@ def _listen_tick(s):
         max_delay_ok = s.deepfocus_pending and s.deepfocus_first_new_ts and (now - s.deepfocus_first_new_ts >= 15)
 
         if debounce_ok or max_delay_ok:
+            _df_reason = "debounce" if debounce_ok else "max_delay"
             chunk = "\n".join(s.deepfocus_pending).strip()
             if chunk:
+                config._log("deepfocus", f"flush({_df_reason}) {len(s.deepfocus_pending)} lines for {dfw}")
                 msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
                 telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
                 config._save_last_msg(dfw, msg)

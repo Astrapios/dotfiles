@@ -5251,10 +5251,9 @@ class TestAutofocusCommand(unittest.TestCase):
         import shutil
         shutil.rmtree(self.signal_dir, ignore_errors=True)
 
-    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_bare_no_busy_shows_status(self, mock_send, mock_scan, mock_idle):
+    def test_bare_no_busy_shows_status(self, mock_send, mock_scan):
         """Bare /autofocus with no busy sessions shows status."""
         mock_scan.return_value = self.sessions
         astra._handle_command("/autofocus", self.sessions, None)
@@ -5262,20 +5261,20 @@ class TestAutofocusCommand(unittest.TestCase):
         self.assertIn("Autofocus is", msg)
         self.assertIn("No busy sessions", msg)
 
-    @patch.object(astra.routing, "_pane_idle_state", return_value=(False, ""))
     @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.tmux, "_command_sessions_keyboard", return_value={"inline_keyboard": []})
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_bare_busy_shows_picker(self, mock_send, mock_kb, mock_scan, mock_idle):
+    def test_bare_busy_shows_picker(self, mock_send, mock_kb, mock_scan):
         """Bare /autofocus with busy sessions shows session picker."""
         mock_scan.return_value = self.sessions
+        astra._mark_busy("w4a")
         astra._handle_command("/autofocus", self.sessions, None)
         msg = mock_send.call_args[0][0]
         self.assertIn("Watch which session", msg)
+        astra._clear_busy("w4a")
 
-    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_explicit_on(self, mock_send, mock_idle):
+    def test_explicit_on(self, mock_send):
         astra._set_autofocus(False)
         astra._handle_command("/autofocus on", self.sessions, None)
         msg = mock_send.call_args[0][0]
@@ -6631,17 +6630,19 @@ class TestSmartfocusColdStart(unittest.TestCase):
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
-    def test_prev_matches_already_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
-                                                    mock_kb, mock_long, mock_send):
-        """Smartfocus stop: prev matches all content, already sent 👁 → full content."""
+    def test_prev_matches_already_sent_sends_short(self, mock_sleep, mock_run, mock_proj,
+                                                     mock_kb, mock_long, mock_send):
+        """Smartfocus stop: prev matches all content, already sent 👁 → short 'finished'."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
         prev = ["Answer", "  line1"]
         astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
-        # Full content via _send_long_message (stop is always a summary)
-        mock_long.assert_called_once()
-        header = mock_long.call_args[0][0]
-        self.assertIn("finished", header)
+        # Delta is empty — should NOT send full content via _send_long_message
+        mock_long.assert_not_called()
+        # Should send short "finished" via tg_send
+        mock_send.assert_called()
+        last_msg = mock_send.call_args[0][0]
+        self.assertIn("finished", last_msg)
 
 
     @patch.object(astra.telegram, "tg_send", return_value=1)

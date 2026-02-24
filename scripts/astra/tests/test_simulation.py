@@ -1495,6 +1495,8 @@ class TestAutofocusOnBusyAttach(SimTestBase):
                                 content="● Working on something...\n  esc to interrupt\n")
         s = self.h.make_listener_state()
 
+        state._mark_busy("w4a")
+
         self.h.tg.inject_text_message("/autofocus on")
         self.h.tick(s)
 
@@ -1505,6 +1507,7 @@ class TestAutofocusOnBusyAttach(SimTestBase):
 
         # Confirmation should mention the session
         self.h.assert_sent("watching.*w4")
+        state._clear_busy("w4a")
 
     def test_autofocus_on_prefers_last_win_idx(self):
         """When multiple sessions are busy, prefer last_win_idx."""
@@ -1515,12 +1518,17 @@ class TestAutofocusOnBusyAttach(SimTestBase):
         s = self.h.make_listener_state()
         s.last_win_idx = "w5a"
 
+        state._mark_busy("w4a")
+        state._mark_busy("w5a")
+
         self.h.tg.inject_text_message("/autofocus on")
         self.h.tick(s)
 
         sf = state._load_smartfocus_state()
         assert sf is not None
         assert sf["wid"] == "w5a", f"Should prefer last_win_idx w5a, got {sf['wid']}"
+        state._clear_busy("w4a")
+        state._clear_busy("w5a")
 
     def test_autofocus_on_no_busy_session(self):
         """When no sessions are busy, just confirm without attaching."""
@@ -1548,6 +1556,8 @@ class TestAutofocusOnBusyAttach(SimTestBase):
         self.h.tmux.add_session("4", "%20", "myproject",
                                 content="● Working...\n  esc to interrupt\n")
         s = self.h.make_listener_state()
+
+        state._mark_busy("w4a")
 
         self.h.tg.inject_text_message("/autofocus")
         self.h.tick(s)

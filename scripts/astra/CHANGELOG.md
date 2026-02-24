@@ -5,11 +5,15 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.24.2
+
+- **Fix smartfocus stop repeating content** — stop signal for a smartfocus session now sends only the delta (new content since last smartfocus update + any unflushed pending) instead of repeating the full response that smartfocus already sent; sends short "finished" when there's nothing new
+- **Focus mode logging** — focus, smartfocus, and deepfocus sends now log to journal (`config._log`) with line counts and flush reasons (idle/bullet/timeout/debounce/max\_delay) for easier debugging
+
 ## 0.24.1
 
 - **CPU and RAM in `/status`** — each session shows CPU% and memory usage of its full process tree; system summary line shows total CPU, system RAM used/total, and aggregate session memory
 - **Bare `/autofocus` shows busy session picker** — instead of toggling, bare `/autofocus` now shows an inline keyboard of currently busy sessions to pick which one to watch; also adds `/autofocus wN` to attach directly to a specific session; when no sessions are busy, shows current autofocus status
-- **Fix autofocus busy detection** — `/autofocus on` and bare `/autofocus` now use real pane idle state (`_pane_idle_state`) instead of the file-based `_is_busy` flag, matching how `/status` detects busy sessions
 
 ## 0.24.0
 

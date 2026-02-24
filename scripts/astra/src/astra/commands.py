@@ -431,16 +431,11 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             state._set_autofocus(True)
             # Auto-attach to a busy session if one exists
             busy_target = None
-            if last_win_idx and last_win_idx in sessions:
-                pane_t, _ = sessions[last_win_idx]
-                idle, _ = routing._pane_idle_state(pane_t)
-                if not idle:
-                    busy_target = last_win_idx
-            if not busy_target:
+            if last_win_idx and last_win_idx in sessions and state._is_busy(last_win_idx):
+                busy_target = last_win_idx
+            else:
                 for wid in sessions:
-                    pane_t, _ = sessions[wid]
-                    idle, _ = routing._pane_idle_state(pane_t)
-                    if not idle:
+                    if state._is_busy(wid):
                         busy_target = wid
                         break
             if busy_target:
@@ -469,12 +464,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         else:
             # Bare /autofocus — show busy sessions to pick from
             sessions = tmux.scan_claude_sessions()
-            busy = {}
-            for wid in sessions:
-                pane_t, _ = sessions[wid]
-                idle, _ = routing._pane_idle_state(pane_t)
-                if not idle:
-                    busy[wid] = sessions[wid]
+            busy = {wid: sessions[wid] for wid in sessions if state._is_busy(wid)}
             if busy:
                 kb = tmux._command_sessions_keyboard("autofocus", busy)
                 telegram.tg_send("👁 Watch which session?", reply_markup=kb)
