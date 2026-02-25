@@ -1634,6 +1634,25 @@ class TestSuggestionAfterStop(SimTestBase):
 
         self.h.assert_not_sent("💡")
 
+    def test_stop_cursor_at_zero_no_false_suggestion(self):
+        """cursor_x=0 (transient state) must not capture prompt char as suggestion."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Pane with suggestion text, but cursor_x=0 (transient)
+        self.h.tmux.set_pane_content("4",
+            "● Done\n"
+            "❯   Fix the imports\n"
+        )
+        self.h.tmux.panes["4"].cursor_x = 0
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+        import time as _real_time
+        _real_time.sleep(0.1)
+
+        self.h.assert_not_sent("💡")
+
     def test_user_message_clears_suggestion(self):
         """Sending a message clears the suggestion keyboard."""
         s = self._stop_with_suggestion()

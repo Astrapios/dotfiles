@@ -281,9 +281,8 @@ def process_signals(focused_wids: set[str] | None = None,
                         sug_kb = telegram._build_inline_keyboard([[
                             ("📨 Send", f"suggest_{_sug_wid}"),
                         ]])
-                        sug_label = state._wid_label(_sug_wid)
                         sug_msg_id = telegram.tg_send(
-                            f"💡{_sug_tag} {sug_label}: `{_sug}`",
+                            f"💡{_sug_tag}: `{_sug}`",
                             reply_markup=sug_kb, silent=_cs)
                         config._save_keyboard_msg(_sug_wid, sug_msg_id)
                         config._save_suggestion(_sug_wid, _sug)

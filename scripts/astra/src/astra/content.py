@@ -471,6 +471,9 @@ def _extract_suggestion(pane: str, profile=None) -> str:
     This captures the last 5 lines, finds the prompt, gets cursor_x, and returns
     everything on the prompt line after the cursor position.
     Returns "" if no prompt or no suggestion found.
+
+    Guards against transient states where cursor_x is 0 (before the prompt char)
+    by requiring cursor_x to be past the prompt prefix.
     """
     if profile is None:
         from astra import profiles
@@ -483,8 +486,16 @@ def _extract_suggestion(pane: str, profile=None) -> str:
     if cursor_x is None:
         return ""
     for line in reversed(raw.splitlines()):
-        if line.strip().startswith(prompt_char):
+        m = re.match(rf'^(\s*{re.escape(prompt_char)}\s*)', line)
+        if m:
+            prompt_prefix_len = len(m.group(1))
+            # cursor must be at or past the prompt prefix
+            if cursor_x < prompt_prefix_len:
+                return ""
             suggestion = line[cursor_x:].strip()
+            # Reject if it's just the prompt char itself or empty
+            if not suggestion or suggestion == prompt_char:
+                return ""
             return suggestion
     return ""
 

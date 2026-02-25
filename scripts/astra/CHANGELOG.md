@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.25.2
+
+- **Fix suggestion capture** — guard against transient `cursor_x=0` state that captured the prompt char (`❯`) as a false suggestion; fix duplicate label in suggestion message (`w3 [proj] w3 [proj]` → `w3 [proj]`)
+
 ## 0.25.1
 
 - **Show suggestion text after stop** — when Claude finishes and shows a grey auto-suggestion in the prompt (e.g. "Fix the imports in utils.py"), forward it to Telegram with a "Send" button. Clicking "Send" routes the suggestion text to the session. Sending your own message clears the suggestion button.
