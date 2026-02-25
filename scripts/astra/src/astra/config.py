@@ -85,6 +85,24 @@ def _debug_tg(kind: str, detail: str, text: str):
         pass
 
 
+def _debug_log(msg: str):
+    """Append a raw debug line if debug logging is enabled."""
+    if not _is_debug_enabled():
+        return
+    ts = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    line = f"[{ts}] {msg}\n"
+    try:
+        with open(DEBUG_LOG, "a") as f:
+            f.write(line)
+        if os.path.getsize(DEBUG_LOG) > _DEBUG_MAX:
+            with open(DEBUG_LOG, "r") as f:
+                data = f.read()
+            with open(DEBUG_LOG, "w") as f:
+                f.write(data[len(data) // 2:])
+    except OSError:
+        pass
+
+
 _remote_sessions: dict[str, float] = {}  # bare win_idx -> tg_send_timestamp
 
 

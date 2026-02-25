@@ -214,6 +214,8 @@ def cmd_debug():
         _debug_inject()
     elif arg == "tick":
         _debug_tick()
+    elif arg == "smartfocus":
+        _debug_smartfocus()
     elif not arg or arg.isdigit():
         n = int(arg) if arg else 20
         enabled = config._is_debug_enabled()
@@ -232,7 +234,7 @@ def cmd_debug():
             except FileNotFoundError:
                 print("(no log file)")
     else:
-        print("Usage: astra debug [on|off|clear|N|state|inject|tick]", file=sys.stderr)
+        print("Usage: astra debug [on|off|clear|N|state|inject|tick|smartfocus]", file=sys.stderr)
         sys.exit(1)
 
 
@@ -567,6 +569,113 @@ def _debug_tick():
         print(f"\nTick result: {result}")
     else:
         print(f"\nTick result: continue")
+
+
+def _debug_smartfocus():
+    """Run smartfocus pipeline once on a target session and print diagnostics."""
+    from astra import profiles, content
+    target = sys.argv[3] if len(sys.argv) > 3 else None
+    sessions = tmux.scan_claude_sessions()
+    if not sessions:
+        print("No active sessions.")
+        return
+
+    # Resolve target or use smartfocus state
+    sf_state = state._load_smartfocus_state()
+    if target:
+        idx = state._resolve_name(target.lstrip("w")) or target
+        if idx not in sessions:
+            print(f"Session '{target}' not found. Available: {list(sessions.keys())}")
+            return
+    elif sf_state:
+        idx = sf_state["wid"]
+        print(f"Using active smartfocus target: {idx}")
+    else:
+        print("Usage: astra debug smartfocus <wN>")
+        print(f"Available: {list(sessions.keys())}")
+        return
+
+    info = sessions[idx]
+    pane, project = info
+    profile = profiles.get_profile(info.cli) if hasattr(info, 'cli') else profiles.CLAUDE
+    pw = tmux._get_pane_width(pane)
+    pc = profile.prompt_char
+    bullet = profile.response_bullet
+    tool_re = profile.tool_header_re
+
+    print(f"Session: {idx} pane={pane} project={project} width={pw}")
+    print(f"Profile: {profile.name} prompt='{pc}' bullet='{bullet}'")
+    print()
+
+    # Step 1: Raw capture
+    raw = tmux._capture_pane(pane, 200)
+    raw_lines = raw.splitlines()
+    print(f"[1] Raw capture: {len(raw_lines)} lines")
+    print(f"    Last 3 raw:")
+    for l in raw_lines[-3:]:
+        print(f"      {l[:120]}")
+
+    # Step 2: Idle detection
+    idle = any(l.strip().startswith(pc) for l in raw_lines[-5:])
+    print(f"\n[2] Idle detection: {idle}")
+    print(f"    Last 5 lines checked:")
+    for l in raw_lines[-5:]:
+        s = l.strip()
+        marker = " <-- PROMPT" if s.startswith(pc) else ""
+        print(f"      '{s[:80]}'{marker}")
+
+    # Step 3: Filter noise
+    filtered = content._filter_noise(raw, profile=profile)
+    print(f"\n[3] After _filter_noise: {len(filtered)} lines (removed {len(raw_lines) - len(filtered)})")
+
+    # Step 4: Strip prompt at end
+    pre_strip = len(filtered)
+    for i in range(len(filtered) - 1, -1, -1):
+        if filtered[i].strip().startswith(pc):
+            filtered = filtered[:i]
+            break
+    print(f"[4] After prompt strip: {len(filtered)} lines (removed {pre_strip - len(filtered)})")
+
+    # Step 5: Join wrapped lines
+    if pw:
+        filtered = tmux._join_wrapped_lines(filtered, pw)
+        print(f"[5] After wrap join (width={pw}): {len(filtered)} lines")
+
+    # Step 6: Show content summary
+    print(f"\n[6] Final cur_lines ({len(filtered)} lines):")
+    bullets = [(i, l) for i, l in enumerate(filtered) if l.strip().startswith(bullet)]
+    print(f"    Bullet lines: {len(bullets)}")
+    for i, l in bullets:
+        is_tool = "TOOL" if re.match(tool_re, l.strip()) else "TEXT"
+        print(f"      [{i}] ({is_tool}) {l.strip()[:100]}")
+
+    # Step 7: If prev exists (from state file or second run), show diff
+    prev_file = os.path.join(config.SIGNAL_DIR, "_debug_sf_prev.json")
+    try:
+        import json as _json
+        with open(prev_file) as f:
+            prev = _json.load(f)
+    except (OSError, json.JSONDecodeError):
+        prev = None
+
+    if prev:
+        new = content._compute_new_lines(prev, filtered)
+        print(f"\n[7] Diff vs previous capture: {len(new)} new lines")
+        if new:
+            for l in new[:10]:
+                print(f"      + {l[:120]}")
+            if len(new) > 10:
+                print(f"      ... ({len(new) - 10} more)")
+        else:
+            print("      (no changes)")
+    else:
+        print(f"\n[7] No previous capture (first run). Run again to see diff.")
+
+    # Save current as prev for next run
+    with open(prev_file, "w") as f:
+        json.dump(filtered, f)
+
+    print(f"\n    Prev saved to {prev_file}")
 
 
 def cmd_autofocus():

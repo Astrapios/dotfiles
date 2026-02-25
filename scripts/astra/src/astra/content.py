@@ -234,6 +234,32 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
     return filtered
 
 
+def _strip_dialog(lines: list[str]) -> list[str]:
+    """Strip permission dialog overlay from filtered pane content.
+
+    The dialog appears at the bottom of the pane as a UI overlay containing
+    tool descriptions, option lines, and footers. Strip everything from the
+    earliest dialog marker (searching the last ~25 lines) to the end.
+    """
+    _dialog_headers = re.compile(
+        r'^(Bash command|Edit file|Create file|Replace file|Read file|'
+        r'Do you want to proceed\?|This command requires approval|'
+        r'Esc to cancel|Enter to confirm|esc to interrupt)')
+    # Search last 25 lines for the earliest dialog marker
+    search_start = max(0, len(lines) - 25)
+    cut = len(lines)
+    for i in range(search_start, len(lines)):
+        s = lines[i].strip()
+        if _dialog_headers.match(s):
+            # Walk back over any blank/indented preamble lines
+            start = i
+            while start > search_start and not lines[start - 1].strip():
+                start -= 1
+            cut = start
+            break
+    return lines[:cut] if cut < len(lines) else lines
+
+
 def _has_response_start(raw: str, profile=None) -> bool:
     """Check if captured pane content contains the response bullet that starts a response."""
     if profile is None:
@@ -417,12 +443,17 @@ def _collapse_tool_calls(lines: list[str], profile=None) -> list[str]:
 
 
 def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
-    """Find genuinely new (inserted) lines between two captures."""
+    """Find genuinely new (inserted/replaced) lines between two captures.
+
+    Returns lines from "insert" and "replace" operations. For "replace",
+    only the net new lines are returned (lines beyond what was replaced).
+    Callers should use _strip_dialog() before passing to remove ephemeral
+    UI overlays that confuse the diff.
+    """
     if not old_lines:
         return new_lines
     sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     opcodes = sm.get_opcodes()
-    # No actual changes — content is identical or only has replacements
     has_changes = any(tag != "equal" for tag, *_ in opcodes)
     if not has_changes:
         return []
@@ -430,7 +461,13 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     if equal_count == 0:
         return new_lines
     new = []
-    for tag, _i1, _i2, j1, j2 in opcodes:
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag == "insert":
             new.extend(new_lines[j1:j2])
+        elif tag == "replace":
+            # Include net new lines from replacements (skip 1:1 in-place updates)
+            old_count = i2 - i1
+            new_count = j2 - j1
+            if new_count > old_count:
+                new.extend(new_lines[j1 + old_count:j2])
     return new

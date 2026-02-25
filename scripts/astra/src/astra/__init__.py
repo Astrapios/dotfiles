@@ -29,7 +29,7 @@ from . import cli
 # config
 from .config import (
     _load_env_file, BOT, CHAT_ID, TG_HOOKS_ENABLED, TG_MAX, SIGNAL_DIR,
-    DEBUG_LOG, _is_debug_enabled, _set_debug, _debug_tg,
+    DEBUG_LOG, _is_debug_enabled, _set_debug, _debug_tg, _debug_log,
     _log, _remote_sessions, _mark_remote, _last_messages, _save_last_msg,
 )
 
@@ -78,7 +78,7 @@ from .state import (
 
 # content
 from .content import (
-    _extract_pane_permission, _filter_noise, _filter_tool_calls,
+    _extract_pane_permission, _filter_noise, _strip_dialog, _filter_tool_calls,
     _collapse_tool_calls,
     _has_response_start, _has_table, _detect_interrupted, _detect_compacting,
     clean_pane_content, clean_pane_status, _compute_new_lines,

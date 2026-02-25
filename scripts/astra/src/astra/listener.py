@@ -483,22 +483,38 @@ def _listen_tick(s):
                 _sfbullet = _sfprofile.response_bullet if _sfprofile else "●"
                 _sftool_re = _sfprofile.tool_header_re if _sfprofile else r"^●\s+\w+\("
                 raw = tmux._capture_pane(sfp, 200)
+                _sf_raw_lines = raw.splitlines()
                 # Detect idle from raw content (before _filter_noise strips prompt lines)
-                _sf_idle = any(line.strip().startswith(_sfpc)
-                               for line in raw.splitlines()[-5:])
+                # Check last 5 lines for prompt char, but NOT inside permission dialogs
+                _sf_busy_indicator = _sfprofile.busy_indicator if _sfprofile else "esc to interr"
+                _sf_tail = [line.strip() for line in _sf_raw_lines[-8:]]
+                _sf_has_busy = any(_sf_busy_indicator in l for l in _sf_tail)
+                _sf_has_dialog = any(l.startswith("Esc to cancel") or l.startswith("Enter to confirm") for l in _sf_tail)
+                if _sf_has_busy or _sf_has_dialog:
+                    _sf_idle = False
+                else:
+                    _sf_idle = any(line.startswith(_sfpc)
+                                   for line in _sf_tail[-5:])
                 cur_lines = content._filter_noise(raw, profile=_sfprofile)
+                _sf_pre_prompt_len = len(cur_lines)
                 for i in range(len(cur_lines) - 1, -1, -1):
                     if cur_lines[i].strip().startswith(_sfpc):
                         cur_lines = cur_lines[:i]
                         break
                 if s.smartfocus_pane_width:
                     cur_lines = tmux._join_wrapped_lines(cur_lines, s.smartfocus_pane_width)
-                # Accumulate new lines into pending buffer
+                config._debug_log(f"[SF] raw={len(_sf_raw_lines)} filtered={_sf_pre_prompt_len} cur={len(cur_lines)} prev={len(s.smartfocus_prev_lines)} idle={_sf_idle} pending={len(s.smartfocus_pending)}")
+                # Diff against full content, then strip dialog from result
                 if s.smartfocus_prev_lines:
                     new = content._compute_new_lines(s.smartfocus_prev_lines, cur_lines)
                     if new:
+                        new = content._strip_dialog(new)
+                    if new:
                         s.smartfocus_pending.extend(new)
                         s.smartfocus_last_new_ts = time.time()
+                        config._debug_log(f"[SF] +{len(new)} new lines: {[l[:80] for l in new[:5]]}")
+                else:
+                    config._debug_log(f"[SF] baseline set ({len(cur_lines)} lines)")
                 s.smartfocus_prev_lines = cur_lines
 
                 # Flush conditions for pending buffer
@@ -533,6 +549,7 @@ def _listen_tick(s):
                     flush_text = "\n".join(_sf_flush).strip()
                     if flush_text:
                         config._log("smartfocus", f"flush({_sf_reason}) {len(_sf_flush)} lines for {sfw}")
+                        config._debug_log(f"[SF] FLUSH({_sf_reason}) {len(_sf_flush)} lines:\n" + "\n".join(f"  | {l[:120]}" for l in _sf_flush[:10]))
                         header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
                         telegram._send_long_message(header, flush_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                         s.smartfocus_has_sent = True
