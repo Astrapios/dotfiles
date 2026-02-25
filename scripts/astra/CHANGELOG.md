@@ -5,9 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
-## 0.24.7
+## 0.25.0
 
-- **`astra smartfocus` CLI command** — activate (`smartfocus wN`), deactivate (`smartfocus off`), or query (`smartfocus`) smartfocus directly from the terminal; mirrors Telegram `/autofocus wN` logic
+- **Unified focus/smartfocus pipeline** — focus and smartfocus now share the same content processing: `_focus_capture_lines` (filter noise → strip prompt → wrap) → diff → strip dialog → collapse → send immediately. Smartfocus is now just automatic activation of focus. Removed pending buffer and bullet-aware batching (no more delayed sends)
+- **`astra smartfocus` CLI command** — activate (`smartfocus wN`), deactivate (`smartfocus off`), or query (`smartfocus`) smartfocus directly from the terminal
 
 ## 0.24.6
 

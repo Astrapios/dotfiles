@@ -572,7 +572,11 @@ def _debug_tick():
 
 
 def _debug_smartfocus():
-    """Run smartfocus pipeline once on a target session and print diagnostics."""
+    """Run smartfocus/focus pipeline once on a target session and print diagnostics.
+
+    Uses the same pipeline as both focus and smartfocus: escalating capture,
+    clean_pane_content (bullet-to-prompt extraction), diff, collapse.
+    """
     from astra import profiles, content
     target = sys.argv[3] if len(sys.argv) > 3 else None
     sessions = tmux.scan_claude_sessions()
@@ -599,57 +603,37 @@ def _debug_smartfocus():
     pane, project = info
     profile = profiles.get_profile(info.cli) if hasattr(info, 'cli') else profiles.CLAUDE
     pw = tmux._get_pane_width(pane)
-    pc = profile.prompt_char
     bullet = profile.response_bullet
     tool_re = profile.tool_header_re
 
     print(f"Session: {idx} pane={pane} project={project} width={pw}")
-    print(f"Profile: {profile.name} prompt='{pc}' bullet='{bullet}'")
+    print(f"Profile: {profile.name} prompt='{profile.prompt_char}' bullet='{bullet}'")
     print()
 
-    # Step 1: Raw capture
+    # Step 1: Raw capture (200 lines, same as focus/smartfocus)
     raw = tmux._capture_pane(pane, 200)
     raw_lines = raw.splitlines()
-    print(f"[1] Raw capture: {len(raw_lines)} lines")
+    print(f"[1] Capture: {len(raw_lines)} lines")
     print(f"    Last 3 raw:")
     for l in raw_lines[-3:]:
         print(f"      {l[:120]}")
 
-    # Step 2: Idle detection
-    idle = any(l.strip().startswith(pc) for l in raw_lines[-5:])
-    print(f"\n[2] Idle detection: {idle}")
-    print(f"    Last 5 lines checked:")
-    for l in raw_lines[-5:]:
-        s = l.strip()
-        marker = " <-- PROMPT" if s.startswith(pc) else ""
-        print(f"      '{s[:80]}'{marker}")
+    # Step 2: _focus_capture_lines (filter noise + strip prompt + wrap)
+    cleaned_lines = content._focus_capture_lines(raw, pw, profile=profile)
+    print(f"\n[2] clean_pane_content: {len(cleaned_lines)} lines")
+    if cleaned_lines:
+        print(f"    First: {cleaned_lines[0][:120]}")
+        if len(cleaned_lines) > 1:
+            print(f"    Last:  {cleaned_lines[-1][:120]}")
 
-    # Step 3: Filter noise
-    filtered = content._filter_noise(raw, profile=profile)
-    print(f"\n[3] After _filter_noise: {len(filtered)} lines (removed {len(raw_lines) - len(filtered)})")
-
-    # Step 4: Strip prompt at end
-    pre_strip = len(filtered)
-    for i in range(len(filtered) - 1, -1, -1):
-        if filtered[i].strip().startswith(pc):
-            filtered = filtered[:i]
-            break
-    print(f"[4] After prompt strip: {len(filtered)} lines (removed {pre_strip - len(filtered)})")
-
-    # Step 5: Join wrapped lines
-    if pw:
-        filtered = tmux._join_wrapped_lines(filtered, pw)
-        print(f"[5] After wrap join (width={pw}): {len(filtered)} lines")
-
-    # Step 6: Show content summary
-    print(f"\n[6] Final cur_lines ({len(filtered)} lines):")
-    bullets = [(i, l) for i, l in enumerate(filtered) if l.strip().startswith(bullet)]
-    print(f"    Bullet lines: {len(bullets)}")
+    # Step 3: Content summary
+    bullets = [(i, l) for i, l in enumerate(cleaned_lines) if l.strip().startswith(bullet)]
+    print(f"\n[3] Bullet lines: {len(bullets)}")
     for i, l in bullets:
         is_tool = "TOOL" if re.match(tool_re, l.strip()) else "TEXT"
         print(f"      [{i}] ({is_tool}) {l.strip()[:100]}")
 
-    # Step 7: If prev exists (from state file or second run), show diff
+    # Step 4: If prev exists (from state file or second run), show diff
     prev_file = os.path.join(config.SIGNAL_DIR, "_debug_sf_prev.json")
     try:
         import json as _json
@@ -659,21 +643,23 @@ def _debug_smartfocus():
         prev = None
 
     if prev:
-        new = content._compute_new_lines(prev, filtered)
-        print(f"\n[7] Diff vs previous capture: {len(new)} new lines")
+        new = content._compute_new_lines(prev, cleaned_lines)
+        print(f"\n[4] Diff vs previous capture: {len(new)} new lines")
         if new:
-            for l in new[:10]:
+            collapsed = content._collapse_tool_calls(new, profile=profile)
+            print(f"    After collapse: {len(collapsed)} lines")
+            for l in collapsed[:10]:
                 print(f"      + {l[:120]}")
-            if len(new) > 10:
-                print(f"      ... ({len(new) - 10} more)")
+            if len(collapsed) > 10:
+                print(f"      ... ({len(collapsed) - 10} more)")
         else:
             print("      (no changes)")
     else:
-        print(f"\n[7] No previous capture (first run). Run again to see diff.")
+        print(f"\n[4] No previous capture (first run). Run again to see diff.")
 
     # Save current as prev for next run
     with open(prev_file, "w") as f:
-        json.dump(filtered, f)
+        json.dump(cleaned_lines, f)
 
     print(f"\n    Prev saved to {prev_file}")
 

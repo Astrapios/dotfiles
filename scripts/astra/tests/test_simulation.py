@@ -272,7 +272,6 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         # Send message to activate smartfocus
         self.h.tg.inject_text_message("w4a do something")
         self.h.tick(s)
-        initial_sent = len(self.h.tg.sent_messages)
 
         # Now simulate Claude working — pane shows response content
         self.h.tmux.set_pane_content("4",
@@ -281,10 +280,9 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         )
         state._clear_busy("w4a")  # Clear so the route doesn't interfere
 
-        # Tick to establish prev_lines
+        # Tick to establish prev_lines (baseline)
         self.h.clock.advance(1)
         self.h.tick(s)
-        after_first = len(self.h.tg.sent_messages)
 
         # Change content — add new lines
         self.h.tmux.set_pane_content("4",
@@ -294,17 +292,13 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             "Found the bug in line 42\n"
         )
 
-        # Tick to accumulate new lines into pending buffer
+        # Tick — new lines should be sent immediately (same pipeline as focus)
         self.h.clock.advance(1)
-        self.h.tick(s)
-
-        # Advance past 5s timeout and tick again to flush pending
-        self.h.clock.advance(5)
         self.h.tick(s)
 
         # Should have sent an eye update for the new content
         eye_msgs = self.h.tg.find_sent("👁")
-        self.assertTrue(len(eye_msgs) > 0, f"Expected 👁 message. All sent: {self.h.dump_timeline()}")
+        assert len(eye_msgs) > 0, f"Expected 👁 message. All sent: {self.h.dump_timeline()}"
 
     def test_smartfocus_clears_on_stop(self):
         """Smartfocus state is cleared when stop signal is processed."""
@@ -1582,132 +1576,6 @@ class TestAutofocusOnBusyAttach(SimTestBase):
         assert sf is not None, "Should attach to specified session"
         assert sf["wid"] == "w4a"
         self.h.assert_sent("watching.*w4")
-
-
-class TestSmartfocusBulletBatching(SimTestBase):
-    """Feature: Smartfocus accumulates lines and flushes on bullet boundaries."""
-
-    def _setup_smartfocus(self):
-        """Helper: send message, establish baseline."""
-        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
-        s = self.h.make_listener_state()
-
-        self.h.tg.inject_text_message("w4a do work")
-        self.h.tick(s)
-        state._clear_busy("w4a")
-
-        # Establish baseline
-        self.h.tmux.set_pane_content("4",
-            "● Starting response\n"
-            "First line of content\n"
-        )
-        self.h.clock.advance(1)
-        self.h.tick(s)
-        return s
-
-    def test_pending_accumulates_no_immediate_send(self):
-        """New lines accumulate in pending buffer, not sent immediately."""
-        s = self._setup_smartfocus()
-        self.h.tg.clear_sent()
-
-        self.h.tmux.set_pane_content("4",
-            "● Starting response\n"
-            "First line of content\n"
-            "Second line added\n"
-            "Third line added\n"
-        )
-        self.h.clock.advance(1)
-        self.h.tick(s)
-
-        # Should NOT have sent yet (pending, no flush condition)
-        eye_msgs = self.h.tg.find_sent("👁")
-        assert len(eye_msgs) == 0, f"Should not send immediately: {self.h.dump_timeline()}"
-        assert len(s.smartfocus_pending) > 0, "Pending should have accumulated lines"
-
-    def test_timeout_flushes_pending(self):
-        """5s with no new content triggers flush."""
-        s = self._setup_smartfocus()
-        self.h.tg.clear_sent()
-
-        self.h.tmux.set_pane_content("4",
-            "● Starting response\n"
-            "First line of content\n"
-            "New content here\n"
-        )
-        self.h.clock.advance(1)
-        self.h.tick(s)  # Accumulates
-
-        # Advance past 5s timeout
-        self.h.clock.advance(5)
-        self.h.tick(s)  # Should flush
-
-        eye_msgs = self.h.tg.find_sent("👁")
-        assert len(eye_msgs) > 0, f"Timeout should flush. Sent: {self.h.dump_timeline()}"
-
-    def test_idle_flushes_immediately(self):
-        """Prompt char appearing (session idle) flushes all pending."""
-        s = self._setup_smartfocus()
-        self.h.tg.clear_sent()
-
-        # Content with prompt char at end (session went idle)
-        self.h.tmux.set_pane_content("4",
-            "● Starting response\n"
-            "First line of content\n"
-            "All done with this task\n"
-            "❯ "
-        )
-        self.h.clock.advance(1)
-        self.h.tick(s)  # Idle detected → immediate flush
-
-        eye_msgs = self.h.tg.find_sent("👁")
-        assert len(eye_msgs) > 0, f"Idle should flush immediately. Sent: {self.h.dump_timeline()}"
-
-    def test_bullet_boundary_flushes_before_bullet(self):
-        """A new text bullet flushes everything before it."""
-        s = self._setup_smartfocus()
-        self.h.tg.clear_sent()
-
-        # Add a tool call followed by a new text bullet
-        self.h.tmux.set_pane_content("4",
-            "● Starting response\n"
-            "First line of content\n"
-            "\n"
-            "● Read(file.py)\n"
-            "  file contents here\n"
-            "\n"
-            "● Here is what I found:\n"
-            "\n"
-            "- Bug on line 42\n"
-        )
-        self.h.clock.advance(1)
-        self.h.tick(s)
-
-        # The bullet boundary should flush the tool call before "● Here is what I found:"
-        # The tool call content should be sent (collapsed), the text bullet stays in pending
-        assert len(s.smartfocus_pending) > 0, "Text bullet and content should be in pending"
-
-    def test_pending_cleared_on_smartfocus_deactivate(self):
-        """When smartfocus is cleared, pending buffer is also cleared."""
-        s = self._setup_smartfocus()
-
-        # Accumulate some pending
-        self.h.tmux.set_pane_content("4",
-            "● Starting response\n"
-            "First line of content\n"
-            "More content\n"
-        )
-        self.h.clock.advance(1)
-        self.h.tick(s)
-        assert len(s.smartfocus_pending) > 0
-
-        # Clear smartfocus
-        state._clear_smartfocus_state()
-        self.h.clock.advance(1)
-        self.h.tick(s)
-
-        assert s.smartfocus_target_wid is None
-        assert len(s.smartfocus_pending) == 0
-        assert s.smartfocus_last_new_ts == 0
 
 
 if __name__ == "__main__":

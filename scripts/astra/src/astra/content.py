@@ -360,6 +360,28 @@ def clean_pane_content(raw: str, event: str, pane_width: int = 0, profile=None) 
     return "\n".join(filtered).strip()
 
 
+def _focus_capture_lines(raw: str, pane_width: int = 0, profile=None) -> list[str]:
+    """Clean captured pane content for focus/smartfocus monitoring.
+
+    Shared pipeline used by both focus and smartfocus:
+    filter noise → strip prompt lines at end → join wrapped lines.
+    Returns a list of cleaned lines suitable for diffing.
+    """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_char = profile.prompt_char
+    lines = _filter_noise(raw, profile=profile)
+    # Strip prompt lines at the end
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].strip().startswith(prompt_char):
+            lines = lines[:i]
+            break
+    if pane_width:
+        lines = tmux._join_wrapped_lines(lines, pane_width)
+    return lines
+
+
 def clean_pane_status(raw: str, pane_width: int = 0, profile=None) -> str:
     """Clean captured pane content for /status display."""
     filtered = _filter_noise(raw, keep_status=True, profile=profile)

@@ -77,7 +77,6 @@ def _format_question_msg(tag: str, project: str, question: dict, cli: str = "") 
 def process_signals(focused_wids: set[str] | None = None,
                      smartfocus_prev: list[str] | None = None,
                      smartfocus_has_sent: bool = False,
-                     smartfocus_pending: list[str] | None = None,
                      locally_viewed: set[str] | None = None,
                      sessions: dict | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
@@ -85,7 +84,6 @@ def process_signals(focused_wids: set[str] | None = None,
     smartfocus_prev: previous lines from smartfocus monitoring, used to send
     only the tail (new content) when a smartfocus session stops.
     smartfocus_has_sent: whether any 👁 update was sent during this smartfocus session.
-    smartfocus_pending: unflushed smartfocus lines to include in the stop message.
     locally_viewed: set of window indices currently viewed in tmux — suppresses Telegram sends."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return None
@@ -216,11 +214,9 @@ def process_signals(focused_wids: set[str] | None = None,
                     # If smartfocus already sent updates, only send the delta
                     if smartfocus_has_sent and smartfocus_prev:
                         new = content._compute_new_lines(smartfocus_prev, cleaned_lines)
-                        # Include any unflushed pending lines
-                        tail = (smartfocus_pending or []) + (new or [])
-                        if tail:
+                        if new:
                             collapsed = "\n".join(content._collapse_tool_calls(
-                                tail, profile=profile)).strip()
+                                new, profile=profile)).strip()
                         else:
                             collapsed = ""
                     else:

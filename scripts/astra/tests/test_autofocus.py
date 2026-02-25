@@ -484,10 +484,7 @@ class TestFullLifecycle(SimTestBase):
             "2. No rate limiting on login attempts\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)  # Accumulates; bullet boundary may flush tool call
-        # Advance past timeout to flush remaining pending
-        self.h.clock.advance(5)
-        self.h.tick(s)
+        self.h.tick(s)  # Sends new lines immediately
         eye1 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye1, 0, "First update after tool call")
 
@@ -515,9 +512,7 @@ class TestFullLifecycle(SimTestBase):
             "- Added rate limiter (max 5 attempts/minute)\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)  # Accumulates
-        self.h.clock.advance(5)
-        self.h.tick(s)  # Timeout flush
+        self.h.tick(s)  # Sends new lines immediately
         eye2 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye2, eye1, "Second update after edit")
 
@@ -555,7 +550,7 @@ class TestFullLifecycle(SimTestBase):
             "❯ "
         )
         self.h.clock.advance(1)
-        self.h.tick(s)  # Idle detected → immediate flush
+        self.h.tick(s)  # Sends new lines immediately
 
         # --- Step 6: Stop signal arrives ---
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")

@@ -79,7 +79,7 @@ from .state import (
 # content
 from .content import (
     _extract_pane_permission, _filter_noise, _strip_dialog, _filter_tool_calls,
-    _collapse_tool_calls,
+    _collapse_tool_calls, _focus_capture_lines,
     _has_response_start, _has_table, _detect_interrupted, _detect_compacting,
     clean_pane_content, clean_pane_status, _compute_new_lines,
 )
