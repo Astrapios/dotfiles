@@ -117,6 +117,7 @@ def _mark_remote(wid: str):
 _last_messages: dict[str, str] = {}  # wid -> last sent message
 _keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
 _render_bodies: dict[int, str] = {}  # msg_id -> body text for "render as image"
+_suggestions: dict[str, str] = {}  # wid -> suggestion text
 
 
 def _save_last_msg(wid: str, msg: str):
@@ -132,3 +133,13 @@ def _save_keyboard_msg(wid: str, msg_id: int):
 def _clear_keyboard_msg(wid: str) -> int | None:
     """Pop and return the tracked keyboard message_id for a window, or None."""
     return _keyboard_messages.pop(wid.lstrip("w"), None)
+
+
+def _save_suggestion(wid: str, text: str):
+    """Store suggestion text for a window."""
+    _suggestions[wid.lstrip("w")] = text
+
+
+def _pop_suggestion(wid: str) -> str | None:
+    """Pop and return stored suggestion text for a window, or None."""
+    return _suggestions.pop(wid.lstrip("w"), None)

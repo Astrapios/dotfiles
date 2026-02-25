@@ -31,6 +31,7 @@ from .config import (
     _load_env_file, BOT, CHAT_ID, TG_HOOKS_ENABLED, TG_MAX, SIGNAL_DIR,
     DEBUG_LOG, _is_debug_enabled, _set_debug, _debug_tg, _debug_log,
     _log, _remote_sessions, _mark_remote, _last_messages, _save_last_msg,
+    _save_suggestion, _pop_suggestion,
 )
 
 # telegram
@@ -78,7 +79,8 @@ from .state import (
 
 # content
 from .content import (
-    _extract_pane_permission, _filter_noise, _strip_dialog, _filter_tool_calls,
+    _extract_pane_permission, _extract_suggestion, _filter_noise,
+    _strip_dialog, _filter_tool_calls,
     _collapse_tool_calls, _focus_capture_lines,
     _has_response_start, _has_table, _detect_interrupted, _detect_compacting,
     clean_pane_content, clean_pane_status, _compute_new_lines,
@@ -96,7 +98,7 @@ from .signals import _format_question_msg, process_signals
 # commands
 from .commands import (
     _ALIASES, _KEYS_MAP, _QUICK_KEYS, _resolve_key, _keys_combo_keyboard,
-    _any_active_prompt, _resolve_alias,
+    _any_active_prompt, _resolve_alias, _clear_suggestion_keyboard,
     _god_accept_pending_prompts, _enable_accept_edits, _maybe_activate_smartfocus,
     _handle_command, _handle_callback, _render_and_send_image,
 )

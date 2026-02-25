@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.25.1
+
+- **Show suggestion text after stop** — when Claude finishes and shows a grey auto-suggestion in the prompt (e.g. "Fix the imports in utils.py"), forward it to Telegram with a "Send" button. Clicking "Send" routes the suggestion text to the session. Sending your own message clears the suggestion button.
+
 ## 0.25.0
 
 - **Unified focus/smartfocus pipeline** — focus and smartfocus now share the same content processing: `_focus_capture_lines` (filter noise → strip prompt → wrap) → diff → strip dialog → collapse → send immediately. Smartfocus is now just automatic activation of focus. Removed pending buffer and bullet-aware batching (no more delayed sends)

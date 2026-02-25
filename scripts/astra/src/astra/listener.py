@@ -636,6 +636,7 @@ def _listen_tick(s):
 
                 if target_wid:
                     config._mark_remote(target_wid)
+                    commands._clear_suggestion_keyboard(target_wid)
                     pane, project = s.sessions[target_wid]
                     if len(paths) == 1:
                         instruction = f"Read {paths[0]}"
@@ -720,6 +721,7 @@ def _listen_tick(s):
 
                 if target_wid:
                     config._mark_remote(target_wid)
+                    commands._clear_suggestion_keyboard(target_wid)
                     pane, project = s.sessions[target_wid]
                     instruction = f"Read {path}"
                     if remaining_text:

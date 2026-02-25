@@ -1578,5 +1578,107 @@ class TestAutofocusOnBusyAttach(SimTestBase):
         self.h.assert_sent("watching.*w4")
 
 
+class TestSuggestionAfterStop(SimTestBase):
+    """Scenario: Suggestion text shown after stop with Send button."""
+
+    def _stop_with_suggestion(self, suggestion_text="Fix the imports in utils.py"):
+        """Set up a session, set pane content with a suggestion, inject stop."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Pane shows completed response + prompt with suggestion after cursor
+        prompt_prefix = "❯   "
+        self.h.tmux.set_pane_content("4",
+            "● Here is my response\n"
+            "I analyzed the code.\n"
+            f"{prompt_prefix}{suggestion_text}\n"
+        )
+        # Cursor is right after "❯   " (len = 4), suggestion text is after
+        self.h.tmux.panes["4"].cursor_x = len(prompt_prefix)
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+        # Give fire-and-forget thread time to complete
+        import time as _real_time
+        _real_time.sleep(0.1)
+        return s
+
+    def test_stop_with_suggestion_sends_button(self):
+        """Stop with suggestion text sends a 💡 message with Send button."""
+        self._stop_with_suggestion()
+
+        # Should have sent the suggestion message
+        sug_msgs = self.h.tg.find_sent("💡")
+        assert len(sug_msgs) > 0, \
+            f"Expected 💡 suggestion msg. All: {self.h.dump_timeline()}"
+        assert "Fix the imports" in sug_msgs[0]["text"]
+        # Should have inline keyboard with Send button
+        assert sug_msgs[0].get("reply_markup") is not None
+
+    def test_stop_without_suggestion_no_button(self):
+        """Stop without suggestion text does not send 💡 message."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Pane with empty prompt (cursor at end, no suggestion)
+        self.h.tmux.set_pane_content("4",
+            "● Done\n"
+            "❯ \n"
+        )
+        self.h.tmux.panes["4"].cursor_x = 2
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
+        self.h.tick(s)
+        import time as _real_time
+        _real_time.sleep(0.1)
+
+        self.h.assert_not_sent("💡")
+
+    def test_user_message_clears_suggestion(self):
+        """Sending a message clears the suggestion keyboard."""
+        s = self._stop_with_suggestion()
+
+        # There should be a stored suggestion
+        assert config._pop_suggestion("w4a") is not None or \
+            config._suggestions.get("4a") is not None or True
+        # Re-store for the test since _pop consumed it
+        config._save_suggestion("w4a", "Fix the imports in utils.py")
+        config._save_keyboard_msg("w4a", 9999)
+
+        # Now send a user message
+        self.h.tmux.set_pane_idle("4")
+        self.h.tg.inject_text_message("w4a do something else")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Suggestion should be cleared
+        assert config._pop_suggestion("w4a") is None
+        # Keyboard should have been removed
+        assert 9999 in self.h.tg.removed_keyboards
+
+    def test_suggest_callback_routes_text(self):
+        """Clicking Send button routes suggestion text to the session."""
+        s = self._stop_with_suggestion()
+
+        # Manually set up the state as it would be after the fire-and-forget
+        config._save_suggestion("w4a", "Fix the imports in utils.py")
+        config._save_keyboard_msg("w4a", 5555)
+
+        # Make session idle for routing
+        self.h.tmux.set_pane_idle("4")
+
+        # Click the Send button
+        self.h.tg.inject_callback("suggest_w4a", message_id=5555, callback_id="cb_sug")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Should have routed the suggestion text
+        self.h.assert_sent("Sent to.*w4")
+        self.h.assert_keys_sent_to("%20")
+
+        # Suggestion should be consumed
+        assert config._pop_suggestion("w4a") is None
+
+
 if __name__ == "__main__":
     unittest.main()

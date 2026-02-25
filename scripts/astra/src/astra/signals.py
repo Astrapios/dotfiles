@@ -245,6 +245,11 @@ def process_signals(focused_wids: set[str] | None = None,
                 header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
                 _stop_send_args = ("long", header, collapsed or cleaned, wid, stop_kb, state._is_silent(_CAT_STOP))
 
+            # Extract suggestion text from prompt (before fire-and-forget)
+            _suggestion = ""
+            if pane and _stop_send_args and not is_local:
+                _suggestion = content._extract_suggestion(pane, profile=profile)
+
             # Fire-and-forget: send stop message + queued messages in background
             # to avoid blocking signal processing on TG round-trips.
             queued = state._load_queued_msgs(wid) if not is_local else []
@@ -262,7 +267,9 @@ def process_signals(focused_wids: set[str] | None = None,
                     ]])
                 # Capture all values for the closure
                 _sa, _qp, _sk, _cs = _stop_send_args, _queued_preview, _saved_kb, state._is_silent(_CAT_CONFIRM)
-                def _send_stop(_sa=_sa, _qp=_qp, _sk=_sk, _cs=_cs):
+                _sug, _sug_wid, _sug_tag = _suggestion, wid, tag
+                def _send_stop(_sa=_sa, _qp=_qp, _sk=_sk, _cs=_cs,
+                               _sug=_sug, _sug_wid=_sug_wid, _sug_tag=_sug_tag):
                     if _sa:
                         if _sa[0] == "long":
                             telegram._send_long_message(_sa[1], _sa[2], _sa[3], reply_markup=_sa[4], silent=_sa[5])
@@ -270,6 +277,16 @@ def process_signals(focused_wids: set[str] | None = None,
                             telegram.tg_send(_sa[1], reply_markup=_sa[2], silent=_sa[3])
                     if _qp:
                         telegram.tg_send(_qp, reply_markup=_sk, silent=_cs)
+                    if _sug:
+                        sug_kb = telegram._build_inline_keyboard([[
+                            ("📨 Send", f"suggest_{_sug_wid}"),
+                        ]])
+                        sug_label = state._wid_label(_sug_wid)
+                        sug_msg_id = telegram.tg_send(
+                            f"💡{_sug_tag} {sug_label}: `{_sug}`",
+                            reply_markup=sug_kb, silent=_cs)
+                        config._save_keyboard_msg(_sug_wid, sug_msg_id)
+                        config._save_suggestion(_sug_wid, _sug)
                 telegram._fire_and_forget(_send_stop)
 
             # God mode: ensure accept-edits is on when session becomes idle

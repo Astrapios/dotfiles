@@ -464,6 +464,31 @@ def _collapse_tool_calls(lines: list[str], profile=None) -> list[str]:
     return collapsed
 
 
+def _extract_suggestion(pane: str, profile=None) -> str:
+    """Extract auto-suggestion text from the idle prompt line.
+
+    After Claude finishes, the prompt shows grey suggestion text after the cursor.
+    This captures the last 5 lines, finds the prompt, gets cursor_x, and returns
+    everything on the prompt line after the cursor position.
+    Returns "" if no prompt or no suggestion found.
+    """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    raw = tmux._capture_pane(pane, 5)
+    if not raw:
+        return ""
+    prompt_char = profile.prompt_char
+    cursor_x = tmux._get_cursor_x(pane)
+    if cursor_x is None:
+        return ""
+    for line in reversed(raw.splitlines()):
+        if line.strip().startswith(prompt_char):
+            suggestion = line[cursor_x:].strip()
+            return suggestion
+    return ""
+
+
 def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     """Find genuinely new (inserted/replaced) lines between two captures.
 

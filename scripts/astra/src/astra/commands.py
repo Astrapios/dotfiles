@@ -197,6 +197,14 @@ def _god_accept_pending_prompts(wids: list[str]):
         telegram.tg_send(f"⚡ {label} Auto-accepted pending prompt.")
 
 
+def _clear_suggestion_keyboard(wid: str):
+    """Clear any pending suggestion keyboard and stored text for a session."""
+    config._pop_suggestion(wid)
+    old_kb = config._clear_keyboard_msg(wid)
+    if old_kb:
+        telegram._fire_and_forget(telegram._remove_inline_keyboard, old_kb)
+
+
 def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: str):
     """Activate smart focus after a message is sent (not queued/prompt reply)."""
     if not (confirm.startswith("📨 Sent to") or confirm.startswith("📷 Photo sent to") or confirm.startswith("📎 Document sent to")):
@@ -991,6 +999,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         resolved = tmux.resolve_session_id(wid, sessions)
         if resolved:
             pane, project = sessions[resolved]
+            _clear_suggestion_keyboard(resolved)
             confirm = routing.route_to_pane(pane, resolved, prompt)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(resolved, confirm[:100])
@@ -1008,6 +1017,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         name_idx = state._resolve_name(words[0])
         if name_idx is not None:
             pane, project = sessions[name_idx]
+            _clear_suggestion_keyboard(name_idx)
             confirm = routing.route_to_pane(pane, name_idx, words[1].strip())
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(name_idx, confirm[:100])
@@ -1023,6 +1033,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
 
     if target_idx:
         pane, project = sessions[target_idx]
+        _clear_suggestion_keyboard(target_idx)
         confirm = routing.route_to_pane(pane, target_idx, text)
         telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
         config._log(target_idx, confirm[:100])
@@ -1175,6 +1186,27 @@ def _handle_callback(callback: dict, sessions: dict,
             state._pop_queued_msgs(wid)
             telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(wid)}.",
                              silent=state._is_silent(_CAT_CONFIRM))
+        return sessions, last_win_idx, None
+
+    # Suggestion callback: suggest_{wid}
+    m = re.match(r"^suggest_(w\d+[a-z]?)$", cb_data)
+    if m:
+        wid = m.group(1)
+        suggestion = config._pop_suggestion(wid)
+        if suggestion:
+            config._mark_remote(wid)
+            resolved = tmux.resolve_session_id(wid, sessions)
+            if resolved:
+                pane, project = sessions[resolved]
+                confirm = routing.route_to_pane(pane, resolved, suggestion)
+                telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                _maybe_activate_smartfocus(resolved, pane, project, confirm)
+                last_win_idx = resolved
+            else:
+                telegram.tg_send(f"⚠️ Session `{wid}` no longer active.",
+                                 silent=state._is_silent(_CAT_ERROR))
+        else:
+            telegram.tg_send("⚠️ Suggestion expired.")
         return sessions, last_win_idx, None
 
     # Render-as-image callback
