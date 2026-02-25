@@ -696,6 +696,35 @@ def cmd_autofocus():
         sys.exit(1)
 
 
+def cmd_smartfocus():
+    """Activate or deactivate smartfocus from CLI."""
+    arg = sys.argv[2] if len(sys.argv) > 2 else ""
+    if arg == "off":
+        state._clear_smartfocus_state()
+        print("Smartfocus: off.")
+        return
+    if not arg:
+        sf = state._load_smartfocus_state()
+        if sf:
+            print(f"Smartfocus: on — watching {sf['wid']} ({sf['project']})")
+        else:
+            print("Smartfocus: off")
+        return
+    # smartfocus wN — attach to specific session
+    sessions = tmux.scan_claude_sessions()
+    idx = state._resolve_name(arg.lstrip("w")) or arg
+    if not idx.startswith("w"):
+        idx = f"w{idx}"
+    if idx not in sessions:
+        print(f"Session '{arg}' not found. Available: {list(sessions.keys())}")
+        sys.exit(1)
+    pane, project = sessions[idx]
+    state._save_smartfocus_state(idx, pane, project)
+    state._clear_focus_state()
+    state._clear_deepfocus_state()
+    print(f"Smartfocus: on — watching {idx} ({project})")
+
+
 def cmd_notification():
     """Manage notification levels from CLI."""
     arg = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -1165,6 +1194,7 @@ Config (no Telegram credentials needed):
   god [all|off|wN|quiet|loud]  Manage god mode
   local [on|off]               Toggle local suppress
   autofocus [on|off]           Toggle autofocus
+  smartfocus [wN|off]          Activate/deactivate smartfocus
   notification [1..7|all|off]  Configure notification levels
   debug [on|off|clear|N]       Debug log for outbound Telegram messages
   debug state [wN]             Dump internal state (sessions, prompts, flags)
@@ -1251,7 +1281,7 @@ def main():
     # Config & session commands — no Telegram credentials needed
     _local_commands = {
         "god": cmd_god, "local": cmd_local, "debug": cmd_debug,
-        "autofocus": cmd_autofocus,
+        "autofocus": cmd_autofocus, "smartfocus": cmd_smartfocus,
         "notification": cmd_notification, "status": cmd_status,
         "focus": cmd_focus, "deepfocus": cmd_deepfocus, "unfocus": cmd_unfocus,
         "clear": cmd_clear, "interrupt": cmd_interrupt, "keys": cmd_keys,

@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.24.7
+
+- **`astra smartfocus` CLI command** — activate (`smartfocus wN`), deactivate (`smartfocus off`), or query (`smartfocus`) smartfocus directly from the terminal; mirrors Telegram `/autofocus wN` logic
+
 ## 0.24.6
 
 - **Fix smartfocus missing text and false idle** — permission dialog content (`Bash command`, `Do you want to proceed?`, option lines) is now stripped from captures via `_strip_dialog()` before diffing; idle detection checks for busy indicator (`esc to interr`) and dialog footers (`Esc to cancel`) as strong NOT-idle signals; `_compute_new_lines` now includes net-new lines from "replace" operations (not just "insert"); added `config._debug_log()` for verbose debug output and `astra debug smartfocus wN` CLI for step-by-step pipeline diagnostics
