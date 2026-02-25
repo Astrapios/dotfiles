@@ -479,6 +479,14 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]],
             wi = re.match(r'^w?(\d+)', idx).group(1) if idx else idx
             _panes_per_window[wi] = _panes_per_window.get(wi, 0) + 1
 
+    # Load focus states to show icons
+    _sf_state = state._load_smartfocus_state()
+    _sf_wid = _sf_state.get("wid") if _sf_state else None
+    _fc_state = state._load_focus_state()
+    _fc_wid = _fc_state.get("wid") if _fc_state else None
+    _df_state = state._load_deepfocus_state()
+    _df_wid = _df_state.get("wid") if _df_state else None
+
     lines = ["📋 *Active sessions:*"]
     for idx in _sort_session_keys(sessions):
         val = sessions[idx]
@@ -506,12 +514,19 @@ def format_sessions_message(sessions: dict[str, tuple[str, str]],
         if statuses and idx in statuses:
             status_icon = f" {_status_icons.get(statuses[idx], '')}"
         local_icon = " 👁" if locally_viewed and (idx in locally_viewed or win_idx in locally_viewed) else ""
+        focus_icon = ""
+        if idx == _df_wid:
+            focus_icon = " 🔬"
+        elif idx == _fc_wid:
+            focus_icon = " 🔍"
+        elif idx == _sf_wid:
+            focus_icon = " 👁‍🗨"
         res_tag = ""
         if resources and idx in resources:
             cpu, rss = resources[idx]
             if cpu > 0 or rss > 0:
                 res_tag = f" `{_format_resources(cpu, rss)}`"
-        lines.append(f"  {label} — `{project}`{status_icon}{cli_tag}{god}{local_icon}{res_tag}")
+        lines.append(f"  {label} — `{project}`{status_icon}{cli_tag}{god}{focus_icon}{local_icon}{res_tag}")
 
     # System resource summary
     if resources:
