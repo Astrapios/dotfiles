@@ -5,6 +5,11 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.25.3
+
+- **Fix suggestion capture with ANSI dim detection** — rewrite `_extract_suggestion` to use ANSI escape code detection instead of cursor position. Claude Code renders suggestion (ghost) text with dim attribute (`ESC[2m`); we now capture with ANSI codes and only extract text that is visually dim, avoiding false positives from submitted prompt text
+- **Fix stop content after smartfocus** — the stop handler was comparing smartfocus-format lines against stop-format lines (different cleaning pipelines), producing empty deltas. Now uses `_focus_capture_lines` on both sides for apples-to-apples comparison
+
 ## 0.25.2
 
 - **Fix suggestion capture** — guard against transient `cursor_x=0` state that captured the prompt char (`❯`) as a false suggestion; fix duplicate label in suggestion message (`w3 [proj] w3 [proj]` → `w3 [proj]`)

@@ -213,7 +213,11 @@ def process_signals(focused_wids: set[str] | None = None,
                     cleaned_lines = cleaned.splitlines()
                     # If smartfocus already sent updates, only send the delta
                     if smartfocus_has_sent and smartfocus_prev:
-                        new = content._compute_new_lines(smartfocus_prev, cleaned_lines)
+                        # Compare using focus format on both sides (apples to apples)
+                        stop_focus = content._focus_capture_lines(raw, pw, profile=profile)
+                        new = content._compute_new_lines(smartfocus_prev, stop_focus)
+                        if new:
+                            new = content._strip_dialog(new)
                         if new:
                             collapsed = "\n".join(content._collapse_tool_calls(
                                 new, profile=profile)).strip()

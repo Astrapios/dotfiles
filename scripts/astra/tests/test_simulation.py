@@ -1582,19 +1582,22 @@ class TestSuggestionAfterStop(SimTestBase):
     """Scenario: Suggestion text shown after stop with Send button."""
 
     def _stop_with_suggestion(self, suggestion_text="Fix the imports in utils.py"):
-        """Set up a session, set pane content with a suggestion, inject stop."""
+        """Set up a session, set pane content with a suggestion (dim text)."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
-        # Pane shows completed response + prompt with suggestion after cursor
-        prompt_prefix = "❯   "
+        # Plain content (for clean_pane_content / _capture_pane)
         self.h.tmux.set_pane_content("4",
             "● Here is my response\n"
             "I analyzed the code.\n"
-            f"{prompt_prefix}{suggestion_text}\n"
+            f"❯   {suggestion_text}\n"
         )
-        # Cursor is right after "❯   " (len = 4), suggestion text is after
-        self.h.tmux.panes["4"].cursor_x = len(prompt_prefix)
+        # ANSI content: suggestion text rendered with dim attribute (\x1b[2m)
+        self.h.tmux.set_pane_ansi_content("4",
+            "● Here is my response\n"
+            "I analyzed the code.\n"
+            f"❯   \x1b[2m{suggestion_text}\x1b[0m\n"
+        )
 
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
         self.h.tick(s)
@@ -1620,12 +1623,9 @@ class TestSuggestionAfterStop(SimTestBase):
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
-        # Pane with empty prompt (cursor at end, no suggestion)
-        self.h.tmux.set_pane_content("4",
-            "● Done\n"
-            "❯ \n"
-        )
-        self.h.tmux.panes["4"].cursor_x = 2
+        # Pane with empty prompt — no dim text in ANSI
+        self.h.tmux.set_pane_content("4", "● Done\n❯ \n")
+        self.h.tmux.set_pane_ansi_content("4", "● Done\n❯ \n")
 
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
         self.h.tick(s)
@@ -1634,17 +1634,16 @@ class TestSuggestionAfterStop(SimTestBase):
 
         self.h.assert_not_sent("💡")
 
-    def test_stop_cursor_at_zero_no_false_suggestion(self):
-        """cursor_x=0 (transient state) must not capture prompt char as suggestion."""
+    def test_stop_non_dim_text_no_suggestion(self):
+        """Text after prompt that is NOT dim is typed text, not a suggestion."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
-        # Pane with suggestion text, but cursor_x=0 (transient)
+        # Text after prompt is NOT dim (no \x1b[2m)
         self.h.tmux.set_pane_content("4",
-            "● Done\n"
-            "❯   Fix the imports\n"
-        )
-        self.h.tmux.panes["4"].cursor_x = 0
+            "● Done\n❯   Fix the imports\n")
+        self.h.tmux.set_pane_ansi_content("4",
+            "● Done\n❯   Fix the imports\n")
 
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")
         self.h.tick(s)

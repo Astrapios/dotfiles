@@ -467,36 +467,49 @@ def _collapse_tool_calls(lines: list[str], profile=None) -> list[str]:
 def _extract_suggestion(pane: str, profile=None) -> str:
     """Extract auto-suggestion text from the idle prompt line.
 
-    After Claude finishes, the prompt shows grey suggestion text after the cursor.
-    This captures the last 5 lines, finds the prompt, gets cursor_x, and returns
-    everything on the prompt line after the cursor position.
-    Returns "" if no prompt or no suggestion found.
-
-    Guards against transient states where cursor_x is 0 (before the prompt char)
-    by requiring cursor_x to be past the prompt prefix.
+    Claude Code renders suggestion (ghost) text with the ANSI dim attribute
+    (ESC[2m).  We capture with ANSI codes, find the last prompt line
+    (skipping UI chrome from the bottom), and check whether the text after
+    the prompt char is dim.  If so, we return the plain-text suggestion.
+    Returns "" if no prompt, no suggestion, or suggestion is not dim.
     """
     if profile is None:
         from astra import profiles
         profile = profiles.CLAUDE
-    raw = tmux._capture_pane(pane, 5)
-    if not raw:
+    raw_ansi = tmux._capture_pane_ansi(pane, 15)
+    if not raw_ansi:
         return ""
     prompt_char = profile.prompt_char
-    cursor_x = tmux._get_cursor_x(pane)
-    if cursor_x is None:
-        return ""
-    for line in reversed(raw.splitlines()):
-        m = re.match(rf'^(\s*{re.escape(prompt_char)}\s*)', line)
+    lines = raw_ansi.splitlines()
+    # Strip trailing empty lines (after removing ANSI)
+    while lines and not re.sub(r'\x1b\[[0-9;]*m', '', lines[-1]).strip():
+        lines.pop()
+    for i in range(len(lines) - 1, -1, -1):
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', lines[i]).strip()
+        if not plain or re.match(r'^[─━]{3,}$', plain):
+            continue
+        if plain.startswith(('⏵⏵ ', '⏸ ')):
+            continue
+        if re.match(r'^[^\w\s●❯] \w', plain) and re.search(r'\d+[hms]', plain):
+            continue
+        if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', plain):
+            continue
+        if re.search(r'\(ctrl\+\w to \w+\)', plain):
+            continue
+        plain_full = re.sub(r'\x1b\[[0-9;]*m', '', lines[i])
+        m = re.match(rf'^(\s*{re.escape(prompt_char)}\s*)(.*)', plain_full)
         if m:
-            prompt_prefix_len = len(m.group(1))
-            # cursor must be at or past the prompt prefix
-            if cursor_x < prompt_prefix_len:
-                return ""
-            suggestion = line[cursor_x:].strip()
-            # Reject if it's just the prompt char itself or empty
-            if not suggestion or suggestion == prompt_char:
-                return ""
-            return suggestion
+            # Check for dim attribute (ESC[…2…m) after the prompt char
+            ansi_line = lines[i]
+            idx = ansi_line.find(prompt_char)
+            after = ansi_line[idx + len(prompt_char):] if idx >= 0 else ''
+            if not re.search(r'\x1b\[[\d;]*2[\d;]*m', after):
+                break  # Text is not dim → typed text or submitted, not suggestion
+            suggestion = m.group(2).strip()
+            if suggestion and suggestion != prompt_char:
+                return suggestion
+            break
+        break  # First non-chrome, non-prompt line → stop
     return ""
 
 
