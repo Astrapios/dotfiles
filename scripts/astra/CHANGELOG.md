@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.24.4
+
+- **Fix smartfocus/deepfocus missing text content** — increased pane capture window from 50 to 200 lines so Claude's text responses aren't lost when long tool output scrolls them off-screen between ticks
+
 ## 0.24.3
 
 - **God mode covers all tools** — added PreToolUse hooks for Read, WebFetch, WebSearch, Glob, Grep, NotebookEdit, and Task so god mode auto-approves them; tool\_map now includes descriptive labels for all tools; god mode log shows URL for fetch, query for search, pattern for glob/grep, description for task

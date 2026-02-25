@@ -482,7 +482,7 @@ def _listen_tick(s):
                 _sfpc = _sfprofile.prompt_char if _sfprofile else "❯"
                 _sfbullet = _sfprofile.response_bullet if _sfprofile else "●"
                 _sftool_re = _sfprofile.tool_header_re if _sfprofile else r"^●\s+\w+\("
-                raw = tmux._capture_pane(sfp, 50)
+                raw = tmux._capture_pane(sfp, 200)
                 # Detect idle from raw content (before _filter_noise strips prompt lines)
                 _sf_idle = any(line.strip().startswith(_sfpc)
                                for line in raw.splitlines()[-5:])
@@ -572,7 +572,7 @@ def _listen_tick(s):
         _dfinfo = s.sessions.get(dfw)
         _dfprofile = profiles.get_profile(_dfinfo.cli) if _dfinfo and hasattr(_dfinfo, 'cli') else None
         _dfpc = _dfprofile.prompt_char if _dfprofile else "❯"
-        raw = tmux._capture_pane(dfp, 50)
+        raw = tmux._capture_pane(dfp, 200)
         cur_lines = content._filter_noise(raw, profile=_dfprofile)
         for i in range(len(cur_lines) - 1, -1, -1):
             if cur_lines[i].strip().startswith(_dfpc):
