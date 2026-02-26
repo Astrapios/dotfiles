@@ -290,6 +290,8 @@ def _resolve_name(target: str, sessions: dict | None = None) -> str | None:
     """Resolve a session name or numeric index to a session key.
     Handles bare numbers ('4' → 'w4'), full wids ('w4'), and names.
     Uses *sessions* if given, otherwise falls back to ``_current_sessions``.
+    On miss with cached sessions, rescans tmux to handle stale data
+    (e.g. multi-pane ambiguity after one pane exits).
     Returns the session key (e.g. 'w4a') or None."""
     if not target:
         return None
@@ -303,6 +305,17 @@ def _resolve_name(target: str, sessions: dict | None = None) -> str | None:
     for idx, name in names.items():
         if name.lower() == target.lower() and idx in sess:
             return idx
+    # Rescan fallback — stale _current_sessions may cause false ambiguity
+    # (e.g. w1a+w1b cached, but w1b exited → bare "w1" fails as ambiguous).
+    # Only rescan when using implicit _current_sessions, not caller-provided.
+    if sessions is None:
+        fresh = tmux.scan_claude_sessions()
+        resolved = tmux.resolve_session_id(target, fresh)
+        if resolved:
+            return resolved
+        for idx, name in names.items():
+            if name.lower() == target.lower() and idx in fresh:
+                return idx
     return None
 
 

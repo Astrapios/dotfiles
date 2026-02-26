@@ -8,6 +8,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 ## 0.25.4
 
 - **Fix Gemini session detection when busy** — `pane_title_pattern` only matched idle Gemini (`◇  Ready`) but not busy (`✦  Working…`) or action-required (`✋  Action Required`) states, causing Gemini sessions to disappear from `/status` while working
+- **Fix stale session resolution after pane exit** — when a multi-pane window lost a pane (e.g. Gemini exits from w1), bare `w1` became ambiguous against the cached `w1a`+`w1b` until the next 60s rescan. `_resolve_name` now rescans on miss, fixing all wid-targeted commands (`/status`, `/focus`, `/interrupt`, etc.)
 
 ## 0.25.3
 
