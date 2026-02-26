@@ -284,8 +284,7 @@
         "ec2_gov": "linux"
     },
     "editor.accessibilitySupport": "off",
-    "python.defaultInterpreterPath": "/Users/jisu/miniforge3/envs/array/bin/python",
-    "pythonREPL.pythonRunCommand": "PYTHONPATH=./ ipython",
+    "pythonREPL.pythonRunCommand": "PYTHONPATH=./ pixi run -e dev ipython",
     "editor.formatOnSave": true,
     "editor.formatOnPaste": false,
     "editor.codeActionsOnSave": {
