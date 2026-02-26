@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.25.4
+
+- **Fix Gemini session detection when busy** — `pane_title_pattern` only matched idle Gemini (`◇  Ready`) but not busy (`✦  Working…`) or action-required (`✋  Action Required`) states, causing Gemini sessions to disappear from `/status` while working
+
 ## 0.25.3
 
 - **Fix suggestion capture with ANSI dim detection** — rewrite `_extract_suggestion` to use ANSI escape code detection instead of cursor position. Claude Code renders suggestion (ghost) text with dim attribute (`ESC[2m`); we now capture with ANSI codes and only extract text that is visually dim, avoiding false positives from submitted prompt text

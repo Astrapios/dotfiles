@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "astra"
-version = "0.25.3"
+version = "0.25.4"
 description = "Telegram bridge for Claude Code & Gemini CLI hooks"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.28"]
