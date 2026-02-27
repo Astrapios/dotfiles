@@ -7,19 +7,32 @@ import re
 from astra import tmux
 
 
-_TABLE_CHARS = set("│┌┐└┘├┤┬┴┼─━║╔╗╚╝╠╣╦╩╬")
+_BOX_VERT = set("│║")
+_BOX_HORIZ_CORNER = set("┌┐└┘├┤┬┴┼─━╔╗╚╝╠╣╦╩╬")
 
 
 def _has_table(text: str) -> bool:
     """Check if text contains an ASCII/Unicode table.
 
-    Detects box-drawing characters or pipe-delimited rows (| col | col |).
+    Requires structural evidence of a table, not just any box-drawing char.
+    A single │ at line start is a tree/indent character (tool call output),
+    not a table.  Needs either:
+      - A line with 2+ vertical box chars (│ col │ col │)
+      - A line with horizontal rules + corners (┌──┬──┐, ├──┼──┤)
+      - Pipe-delimited rows (| col | col |)
     """
-    if any(ch in _TABLE_CHARS for ch in text):
-        return True
-    # Pipe-delimited rows: at least 2 pipes on a line with content between them
     for line in text.splitlines():
         stripped = line.strip()
+        # Box-drawing vertical: 2+ on same line means columns
+        vert_count = sum(1 for ch in stripped if ch in _BOX_VERT)
+        if vert_count >= 2:
+            return True
+        # Horizontal rules with corners/junctions (e.g. ┌──┬──┐)
+        if any(ch in _BOX_HORIZ_CORNER for ch in stripped):
+            horiz_count = sum(1 for ch in stripped if ch in _BOX_HORIZ_CORNER)
+            if horiz_count >= 3:
+                return True
+        # Pipe-delimited rows: at least 2 pipes on a line with content between them
         if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 3:
             return True
     return False

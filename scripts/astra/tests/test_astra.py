@@ -8092,12 +8092,21 @@ class TestHasTable:
     def test_single_pipe_not_table(self):
         assert astra._has_table("use foo | bar for piping") is False
 
-    def test_mixed_box_drawing(self):
-        text = "─━║╔╗"
+    def test_horizontal_rule_with_corners(self):
+        text = "╔════╦════╗"
         assert astra._has_table(text) is True
 
     def test_empty_string(self):
         assert astra._has_table("") is False
+
+    def test_tool_call_tree_not_table(self):
+        """Single │ at line start is tool call tree, not a table."""
+        text = "│  └  Reading 6 files…\n│     └ Explore range compression"
+        assert astra._has_table(text) is False
+
+    def test_single_box_vert_not_table(self):
+        """A lone │ should not trigger table detection."""
+        assert astra._has_table("│ some indented text") is False
 
 
 class TestResolveCaptionTarget:
