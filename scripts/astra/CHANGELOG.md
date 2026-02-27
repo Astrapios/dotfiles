@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.25.6
+
+- **Fix `/status` stripping in-progress work** — status used stop-mode content filtering which stripped spinners, task lists, and timing indicators, showing only previous completed `●` bullets. Now uses `clean_pane_status` (keep_status=True) with progressive capture so current work is always visible
+
 ## 0.25.5
 
 - **Fix false table detection on tool call tree and prose** — `_has_table()` triggered on any box-drawing char (`│`), including tool call tree indentation and `│` in prose text. Now requires 3+ vertical bars on a line (real table row), horizontal rules with corners, or pipe-delimited rows

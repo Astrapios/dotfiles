@@ -327,16 +327,15 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 lines = filtered.splitlines()
                 status_content = "\n".join(lines[-num_lines:]) if lines else ""
             else:
+                # Use clean_pane_status (keep_status=True) to preserve
+                # in-progress indicators (spinners, task lists, timing).
+                # The old bullet_view approach used stop-mode filtering which
+                # stripped these, making status show only completed bullets.
                 for n in (30, 80, 200):
                     raw = tmux._capture_pane(pane, n)
                     if content._has_response_start(raw, profile=_prof):
                         break
-                raw_view = content.clean_pane_status(tmux._capture_pane(pane, 30), pw, profile=_prof)
-                if content._has_response_start(raw, profile=_prof):
-                    bullet_view = content.clean_pane_content(raw, "stop", pw, profile=_prof)
-                    status_content = bullet_view if len(bullet_view) >= len(raw_view) else raw_view
-                else:
-                    status_content = raw_view
+                status_content = content.clean_pane_status(raw, pw, profile=_prof)
             status_content = status_content or "(empty)"
             header = f"📋 {state._wid_label(win_idx)} — `{project}`:\n\n"
             telegram._send_long_message(header, status_content, win_idx)

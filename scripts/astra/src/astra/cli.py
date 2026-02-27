@@ -784,12 +784,7 @@ def cmd_status():
             raw = tmux._capture_pane(pane, n)
             if content._has_response_start(raw, profile=_prof):
                 break
-        raw_view = content.clean_pane_status(tmux._capture_pane(pane, 30), pw, profile=_prof)
-        if content._has_response_start(raw, profile=_prof):
-            bullet_view = content.clean_pane_content(raw, "stop", pw, profile=_prof)
-            output = bullet_view if len(bullet_view) >= len(raw_view) else raw_view
-        else:
-            output = raw_view
+        output = content.clean_pane_status(raw, pw, profile=_prof)
     display = tmux._display_wid(idx, sessions)
     print(f"--- {display} ({project}) ---")
     print(output or "(empty)")
