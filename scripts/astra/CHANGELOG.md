@@ -7,7 +7,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 
 ## 0.25.5
 
-- **Fix false table detection on tool call tree output** — `_has_table()` triggered on any box-drawing char (`│`), which appears in Claude's tool call tree indentation. Now requires structural table evidence: 2+ vertical bars on a line (columns), horizontal rules with corners, or pipe-delimited rows
+- **Fix false table detection on tool call tree and prose** — `_has_table()` triggered on any box-drawing char (`│`), including tool call tree indentation and `│` in prose text. Now requires 3+ vertical bars on a line (real table row), horizontal rules with corners, or pipe-delimited rows
 
 ## 0.25.4
 
