@@ -5,6 +5,18 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.26.2
+
+- **Always-on message log** — all outbound Telegram messages (SEND, DOC, PHOTO) are logged as JSON lines to `/tmp/astra_messages.jsonl` with full untruncated text, timestamp, kind, and msg_id. Auto-truncates at 1 MB. Independent of `astra debug on/off`.
+
+## 0.26.1
+
+- **Fix table data stripped from messages** — `_filter_noise` and `_join_wrapped_lines` treated indented table rows starting with `│` as wrapped prompt continuations and dropped them. Added all box-drawing characters to the "keep" regex so table cell values are preserved in stop messages, focus output, and rendered table images.
+
+## 0.26.0
+
+- **Secondary bot token for document/photo sending** — `send-doc` and `send-photo` can route through a separate bot token (`TELEGRAM_DOC_BOT_TOKEN` + `TELEGRAM_DOC_CHAT_ID` in `astra.env`), useful for Obsidian Telegram sync or other plugins polling a dedicated bot. Falls back to the main bot when unset. Use `--main` flag to force the primary bot.
+
 ## 0.25.6
 
 - **Fix `/status` stripping in-progress work** — status used stop-mode content filtering which stripped spinners, task lists, and timing indicators, showing only previous completed `●` bullets. Now uses `clean_pane_status` (keep_status=True) with progressive capture so current work is always visible

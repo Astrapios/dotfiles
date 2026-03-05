@@ -160,7 +160,7 @@ def _join_wrapped_lines(lines: list[str], width: int) -> list[str]:
         s = line.lstrip()
         indent = len(line) - len(s)
         if (prev_len >= width - 15 and indent >= 2 and s and
-                not re.match(r'[●•─━❯✻⏵⏸>*\-\d]', s)):
+                not re.match(r'[●•─━❯✻⏵⏸>*\-\d│┃║|┌┐└┘├┤┬┴┼╔╗╚╝╠╣╦╩╬]', s)):
             result[-1] += " " + s
         else:
             result.append(line)

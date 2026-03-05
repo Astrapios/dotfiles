@@ -23,21 +23,31 @@ def cmd_ask(question: str) -> str:
     return reply
 
 
-def cmd_send_photo(path: str, caption: str = ""):
+def cmd_send_photo(path: str, caption: str = "", use_main: bool = False):
     """Send a photo file to Telegram."""
     if not os.path.isfile(path):
         print(f"File not found: {path}", file=sys.stderr)
         sys.exit(1)
-    telegram.tg_send_photo(path, caption)
+    if use_main:
+        bot_token, chat_id = config.BOT, config.CHAT_ID
+    else:
+        bot_token = config.DOC_BOT or config.BOT
+        chat_id = (config.DOC_CHAT_ID or config.CHAT_ID) if config.DOC_BOT else config.CHAT_ID
+    telegram.tg_send_photo(path, caption, chat_id=chat_id, bot_token=bot_token)
     print(f"Photo sent: {path}")
 
 
-def cmd_send_doc(path: str, caption: str = ""):
+def cmd_send_doc(path: str, caption: str = "", use_main: bool = False):
     """Send a file as a document to Telegram."""
     if not os.path.isfile(path):
         print(f"File not found: {path}", file=sys.stderr)
         sys.exit(1)
-    telegram.tg_send_document(path, caption)
+    if use_main:
+        bot_token, chat_id = config.BOT, config.CHAT_ID
+    else:
+        bot_token = config.DOC_BOT or config.BOT
+        chat_id = (config.DOC_CHAT_ID or config.CHAT_ID) if config.DOC_BOT else config.CHAT_ID
+    telegram.tg_send_document(path, caption, chat_id=chat_id, bot_token=bot_token)
     print(f"Document sent: {path}")
 
 
@@ -1167,8 +1177,8 @@ Commands:
   hook                Read hook JSON from stdin (called by hooks)
   notify <message>    Send a one-shot notification to Telegram
   ask <question>      Send a question, wait for reply, print to stdout
-  send-photo <path> [caption]  Send a photo to Telegram
-  send-doc <path> [caption]    Send a file as a document to Telegram
+  send-photo [--main] <path> [caption]  Send a photo to Telegram
+  send-doc [--main] <path> [caption]    Send a file as a document
   help                Show this help message
 
 Config (no Telegram credentials needed):
@@ -1203,6 +1213,8 @@ Setup:
   3. Save credentials to ~/.config/astra.env:
        TELEGRAM_BOT_TOKEN=your-bot-token
        TELEGRAM_CHAT_ID=your-chat-id
+       TELEGRAM_DOC_BOT_TOKEN=...  (optional, for send-doc/send-photo)
+       TELEGRAM_DOC_CHAT_ID=...    (optional, paired with DOC_BOT)
   4. Configure hooks (see claude_settings.json / gemini_settings.json)
   5. Run: astra listen
 
@@ -1284,19 +1296,27 @@ def main():
         question = sys.argv[2] if len(sys.argv) > 2 else "Yes or no?"
         cmd_ask(question)
     elif command == "send-photo":
-        if len(sys.argv) < 3:
-            print("Usage: astra send-photo <path> [caption]", file=sys.stderr)
+        args = sys.argv[2:]
+        use_main = "--main" in args
+        if use_main:
+            args = [a for a in args if a != "--main"]
+        if not args:
+            print("Usage: astra send-photo [--main] <path> [caption]", file=sys.stderr)
             sys.exit(1)
-        path = sys.argv[2]
-        caption = sys.argv[3] if len(sys.argv) > 3 else ""
-        cmd_send_photo(path, caption)
+        path = args[0]
+        caption = args[1] if len(args) > 1 else ""
+        cmd_send_photo(path, caption, use_main=use_main)
     elif command == "send-doc":
-        if len(sys.argv) < 3:
-            print("Usage: astra send-doc <path> [caption]", file=sys.stderr)
+        args = sys.argv[2:]
+        use_main = "--main" in args
+        if use_main:
+            args = [a for a in args if a != "--main"]
+        if not args:
+            print("Usage: astra send-doc [--main] <path> [caption]", file=sys.stderr)
             sys.exit(1)
-        path = sys.argv[2]
-        caption = sys.argv[3] if len(sys.argv) > 3 else ""
-        cmd_send_doc(path, caption)
+        path = args[0]
+        caption = args[1] if len(args) > 1 else ""
+        cmd_send_doc(path, caption, use_main=use_main)
     elif command == "listen":
         listener.cmd_listen()
     else:

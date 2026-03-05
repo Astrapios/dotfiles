@@ -1,5 +1,6 @@
 """Configuration, environment loading, logging, and shared state."""
 import datetime
+import json
 import os
 
 
@@ -25,7 +26,9 @@ def _load_env_file(path: str) -> dict[str, str]:
 _creds = _load_env_file("~/.config/astra.env") or _load_env_file("~/.config/tg_hook.env")
 
 BOT = os.environ.get("TELEGRAM_BOT_TOKEN", "") or _creds.get("TELEGRAM_BOT_TOKEN", "")
+DOC_BOT = os.environ.get("TELEGRAM_DOC_BOT_TOKEN", "") or _creds.get("TELEGRAM_DOC_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "") or _creds.get("TELEGRAM_CHAT_ID", "")
+DOC_CHAT_ID = os.environ.get("TELEGRAM_DOC_CHAT_ID", "") or _creds.get("TELEGRAM_DOC_CHAT_ID", "")
 TG_HOOKS_ENABLED = os.environ.get("NO_ASTRA", "0") == "0"
 TG_MAX = 4096  # Telegram message character limit
 SIGNAL_DIR = "/tmp/astra_signals"
@@ -99,6 +102,30 @@ def _debug_log(msg: str):
                 data = f.read()
             with open(DEBUG_LOG, "w") as f:
                 f.write(data[len(data) // 2:])
+    except OSError:
+        pass
+
+
+MSG_LOG = "/tmp/astra_messages.jsonl"
+_MSG_LOG_MAX = 1024 * 1024  # 1 MB auto-truncate
+
+
+def _log_msg(kind: str, text: str, **extra):
+    """Append a JSON line to the always-on message log."""
+    entry = {
+        "ts": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "kind": kind,
+        "text": text,
+        **extra,
+    }
+    try:
+        with open(MSG_LOG, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if os.path.getsize(MSG_LOG) > _MSG_LOG_MAX:
+            with open(MSG_LOG, "r") as f:
+                lines = f.readlines()
+            with open(MSG_LOG, "w") as f:
+                f.writelines(lines[len(lines) // 2:])
     except OSError:
         pass
 

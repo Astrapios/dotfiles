@@ -56,6 +56,7 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
         elif reply_markup.get("keyboard"):
             kb_summary = "reply_kb"
     config._debug_tg("SEND", f"silent={'yes' if silent else 'no'} kb={kb_summary}", text)
+    config._log_msg("SEND", text, silent=silent, msg_id=msg_id)
     # Log keyboard layout detail
     if reply_markup:
         inline = reply_markup.get("inline_keyboard")
@@ -194,9 +195,11 @@ def _get_image_dimensions(path: str) -> tuple[int, int]:
     return (0, 0)
 
 
-def tg_send_document(path: str, caption: str = "", chat_id: str = "") -> int:
+def tg_send_document(path: str, caption: str = "", chat_id: str = "",
+                     bot_token: str = "") -> int:
     """Send a file as a document to Telegram. Returns message_id."""
     chat_id = chat_id or config.CHAT_ID
+    token = bot_token or config.BOT
     mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
     with open(path, "rb") as f:
         data: dict = {"chat_id": chat_id}
@@ -204,7 +207,7 @@ def tg_send_document(path: str, caption: str = "", chat_id: str = "") -> int:
             data["caption"] = caption[:1024]
             data["parse_mode"] = "Markdown"
         r = requests.post(
-            f"https://api.telegram.org/bot{config.BOT}/sendDocument",
+            f"https://api.telegram.org/bot{token}/sendDocument",
             data=data,
             files={"document": (os.path.basename(path), f, mime_type)},
             timeout=60,
@@ -213,7 +216,7 @@ def tg_send_document(path: str, caption: str = "", chat_id: str = "") -> int:
             f.seek(0)
             data.pop("parse_mode", None)
             r = requests.post(
-                f"https://api.telegram.org/bot{config.BOT}/sendDocument",
+                f"https://api.telegram.org/bot{token}/sendDocument",
                 data=data,
                 files={"document": (os.path.basename(path), f, mime_type)},
                 timeout=60,
@@ -221,15 +224,18 @@ def tg_send_document(path: str, caption: str = "", chat_id: str = "") -> int:
     r.raise_for_status()
     msg_id = r.json()["result"]["message_id"]
     config._debug_tg("DOC", path, caption)
+    config._log_msg("DOC", caption, path=path, msg_id=msg_id)
     return msg_id
 
 
-def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
+def tg_send_photo(path: str, caption: str = "", chat_id: str = "",
+                  bot_token: str = "") -> int:
     """Send a photo to Telegram. Images >1280px auto-route via sendDocument. Returns message_id."""
     w, h = _get_image_dimensions(path)
     if w > 1280 or h > 1280:
-        return tg_send_document(path, caption, chat_id)
+        return tg_send_document(path, caption, chat_id, bot_token=bot_token)
     chat_id = chat_id or config.CHAT_ID
+    token = bot_token or config.BOT
     mime_type = mimetypes.guess_type(path)[0] or "image/png"
     with open(path, "rb") as f:
         data: dict = {"chat_id": chat_id}
@@ -237,7 +243,7 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
             data["caption"] = caption[:1024]
             data["parse_mode"] = "Markdown"
         r = requests.post(
-            f"https://api.telegram.org/bot{config.BOT}/sendPhoto",
+            f"https://api.telegram.org/bot{token}/sendPhoto",
             data=data,
             files={"photo": (os.path.basename(path), f, mime_type)},
             timeout=60,
@@ -246,7 +252,7 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
             f.seek(0)
             data.pop("parse_mode", None)
             r = requests.post(
-                f"https://api.telegram.org/bot{config.BOT}/sendPhoto",
+                f"https://api.telegram.org/bot{token}/sendPhoto",
                 data=data,
                 files={"photo": (os.path.basename(path), f, mime_type)},
                 timeout=60,
@@ -254,6 +260,7 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "") -> int:
     r.raise_for_status()
     msg_id = r.json()["result"]["message_id"]
     config._debug_tg("PHOTO", path, caption)
+    config._log_msg("PHOTO", caption, path=path, msg_id=msg_id)
     return msg_id
 
 

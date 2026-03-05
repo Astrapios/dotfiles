@@ -217,7 +217,7 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
         # Skip wrapped continuations of a filtered prompt line
         if in_prompt:
             indent = len(line) - len(line.lstrip())
-            if indent >= 2 and s and not re.match(r'[●•─━❯✻⏵⏸>*\-\d]', s):
+            if indent >= 2 and s and not re.match(r'[●•─━❯✻⏵⏸>*\-\d│┃║|┌┐└┘├┤┬┴┼╔╗╚╝╠╣╦╩╬]', s):
                 continue
             in_prompt = False
         if re.match(r'^[─━]{3,}$', s):

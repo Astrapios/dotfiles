@@ -48,6 +48,10 @@ Create `~/.config/astra.env`:
 ```
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 TELEGRAM_CHAT_ID=your-chat-id
+
+# Optional: secondary bot for send-doc/send-photo (e.g. Obsidian sync)
+TELEGRAM_DOC_BOT_TOKEN=789012:GHI-JKL...
+TELEGRAM_DOC_CHAT_ID=your-doc-chat-id
 ```
 
 ### 4. Install
@@ -108,8 +112,8 @@ astra listen              Start the Telegram listener daemon
 astra hook                Read Claude hook JSON from stdin (called by hooks)
 astra notify <message>    Send a one-shot notification
 astra ask <question>      Send a question, wait for reply, print to stdout
-astra send-photo <path> [caption]  Send a photo to Telegram
-astra send-doc <path> [caption]    Send a file as a document to Telegram
+astra send-photo [--main] <path> [caption]  Send a photo to Telegram
+astra send-doc [--main] <path> [caption]    Send a file as a document
 astra keys <wN> <key...>  Send keys to a session (e.g. shift+tab, ctrl+c)
 astra debug [on|off|clear|N]  Debug log for outbound Telegram messages
 astra debug state [wN]        Dump internal state (sessions, prompts, flags)

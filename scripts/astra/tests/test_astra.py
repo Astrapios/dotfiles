@@ -6394,7 +6394,7 @@ class TestTgSendPhotoAutoDetect(unittest.TestCase):
         """Image >1280px delegates to tg_send_document."""
         msg_id = astra.tg_send_photo("/fake/large.png", "hi")
         self.assertEqual(msg_id, 60)
-        mock_doc.assert_called_once_with("/fake/large.png", "hi", "")
+        mock_doc.assert_called_once_with("/fake/large.png", "hi", "", bot_token="")
 
     @patch("requests.post")
     @patch.object(astra.telegram, "_get_image_dimensions", return_value=(800, 600))
@@ -6453,7 +6453,11 @@ class TestCmdSendDoc(unittest.TestCase):
             path = f.name
         try:
             astra.cmd_send_doc(path, "caption")
-            mock_doc.assert_called_once_with(path, "caption")
+            mock_doc.assert_called_once()
+            args, kwargs = mock_doc.call_args
+            assert args == (path, "caption")
+            assert kwargs["chat_id"]
+            assert kwargs["bot_token"]
         finally:
             os.remove(path)
 
