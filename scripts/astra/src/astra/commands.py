@@ -89,6 +89,13 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
         if has_active_prompt:
             return text
         return _ALIASES[stripped]
+    # sw alias: sw4 cmd → w4 !cmd, s<name> cmd → <name> !cmd (shell in CLI)
+    m = re.match(r"^sw(\d+[a-z]?)\s+(.+)$", stripped, re.DOTALL)
+    if m:
+        return f"w{m.group(1)} !{m.group(2)}"
+    m = re.match(r"^s([a-z]\w[\w-]*)\s+(.+)$", stripped, re.DOTALL)
+    if m and state._resolve_name(m.group(1)) is not None:
+        return f"{m.group(1)} !{m.group(2)}"
     # Digit-containing aliases always resolve (unambiguous)
     m = re.match(r"^s(\d+[a-z]?)?(?:\s+(\d+))?$", stripped)
     if m:

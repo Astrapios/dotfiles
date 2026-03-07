@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.26.3
+
+- **`sw` alias for shell commands** — `sw4 git status` sends `!git status` to session w4. Also works with named sessions: `sauth git status` sends `!git status` to the session named "auth".
+
 ## 0.26.2
 
 - **Always-on message log** — all outbound Telegram messages (SEND, DOC, PHOTO) are logged as JSON lines to `/tmp/astra_messages.jsonl` with full untruncated text, timestamp, kind, and msg_id. Auto-truncates at 1 MB. Independent of `astra debug on/off`.
