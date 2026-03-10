@@ -62,6 +62,14 @@ systemctl --user daemon-reload
 systemctl --user enable astra
 echo "  astra service enabled (start with: systemctl --user start astra)"
 
+# rtk (Rust Token Killer) — reduces LLM token consumption on CLI output
+if command -v rtk &> /dev/null && rtk gain &> /dev/null; then
+    echo "  rtk already installed ($(rtk --version 2>/dev/null))"
+else
+    echo "  installing rtk..."
+    curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh
+fi
+
 # Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md

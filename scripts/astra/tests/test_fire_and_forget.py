@@ -99,7 +99,7 @@ def test_pre_tool_bash_god_mode_approves(god_mode_dir, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     result = json.loads(captured.out.strip())
-    assert result == {"decision": "approve"}
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
     sigs = _signal_files(astra.config.SIGNAL_DIR)
     assert len(sigs) == 1
     with open(os.path.join(astra.config.SIGNAL_DIR, sigs[0])) as f:
@@ -149,7 +149,7 @@ def test_pre_tool_edit_god_mode_approves(god_mode_dir, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     result = json.loads(captured.out.strip())
-    assert result == {"decision": "approve"}
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
     sigs = _signal_files(astra.config.SIGNAL_DIR)
     assert len(sigs) == 1
     with open(os.path.join(astra.config.SIGNAL_DIR, sigs[0])) as f:
@@ -171,7 +171,7 @@ def test_pre_tool_write_god_mode_approves(god_mode_dir, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     result = json.loads(captured.out.strip())
-    assert result == {"decision": "approve"}
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
 def test_pre_tool_plan_not_auto_approved(god_mode_dir, monkeypatch, capsys):
@@ -201,4 +201,4 @@ def test_pre_tool_god_mode_bare_wid(god_mode_dir, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     result = json.loads(captured.out.strip())
-    assert result == {"decision": "approve"}
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"

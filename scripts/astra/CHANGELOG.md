@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.26.4
+
+- **rtk rewrite integration** — god mode now rewrites Bash commands via `rtk rewrite` for compact output (when rtk is installed). Hook output migrated to `hookSpecificOutput` format (replaces deprecated `{"decision":"approve"}`).
+
 ## 0.26.3
 
 - **`sw` alias for shell commands** — `sw4 git status` sends `!git status` to session w4. Also works with named sessions: `sauth git status` sends `!git status` to the session named "auth".

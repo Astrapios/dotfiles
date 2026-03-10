@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -121,7 +122,26 @@ def cmd_hook():
                 desc = tool_input.get("description", tool_input.get("prompt", ""))[:200]
             else:
                 desc = internal_tool or tool
-            print(json.dumps({"decision": "approve"}))
+            decision: dict = {"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+            }}
+            # Integrate rtk rewrite for Bash commands (reduces output clutter)
+            if internal_tool == "shell" and shutil.which("rtk"):
+                raw_cmd = tool_input.get("command", "")
+                if raw_cmd:
+                    try:
+                        r = subprocess.run(
+                            ["rtk", "rewrite", raw_cmd],
+                            capture_output=True, text=True, timeout=5,
+                        )
+                        if r.returncode == 0 and r.stdout.strip():
+                            decision["hookSpecificOutput"]["updatedInput"] = {
+                                "command": r.stdout.strip(),
+                            }
+                    except Exception:
+                        pass
+            print(json.dumps(decision))
             state.write_signal("god_approve", data, cmd=desc, tool=internal_tool, cli=cli_name)
         return
 
