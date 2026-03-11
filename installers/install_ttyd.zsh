@@ -52,7 +52,7 @@ ExecStart=/usr/local/bin/ttyd \
     -t allowProposedApi=true \
     -t macOptionIsMeta=true \
     -t fontSize=14 \
-    -t "fontFamily='Source Code Pro'" \
+    -t "fontFamily='Source Code Pro, Menlo, Consolas, monospace'" \
     -t "theme={\"background\":\"#000000\",\"foreground\":\"#dddddd\",\"cursor\":\"#bbbbbb\",\"black\":\"#000000\",\"red\":\"#cc0403\",\"green\":\"#19cb00\",\"yellow\":\"#cecb00\",\"blue\":\"#0d73cc\",\"magenta\":\"#cb1ed1\",\"cyan\":\"#0dcdcd\",\"white\":\"#dddddd\",\"brightBlack\":\"#767676\",\"brightRed\":\"#f2201f\",\"brightGreen\":\"#23fd00\",\"brightYellow\":\"#fffd00\",\"brightBlue\":\"#1a8fff\",\"brightMagenta\":\"#fd28ff\",\"brightCyan\":\"#14ffff\",\"brightWhite\":\"#ffffff\"}" \
     -p $TTYD_PORT -W tmux new-session -A -s main
 Restart=always
