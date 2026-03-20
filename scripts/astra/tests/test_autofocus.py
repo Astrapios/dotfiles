@@ -387,8 +387,8 @@ class TestStopWithSmartfocusTail(SimTestBase):
         combined = " ".join(m["text"] for m in finish_msgs)
         self.assertIn("Point one", combined)
 
-    def test_stop_no_repeat_when_content_unchanged(self):
-        """Stop with identical content to prev_lines sends short 'finished' (no repeat)."""
+    def test_stop_always_sends_full_content(self):
+        """Stop always sends full response content regardless of smartfocus state."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
 
@@ -403,7 +403,7 @@ class TestStopWithSmartfocusTail(SimTestBase):
         ]
         s.smartfocus_has_sent = True
 
-        # Pane shows same content (user already saw everything)
+        # Pane shows same content
         self.h.tmux.set_pane_content("4",
             "● Done!\n"
             "\n"
@@ -417,9 +417,9 @@ class TestStopWithSmartfocusTail(SimTestBase):
 
         finish_msgs = self.h.tg.find_sent("finished")
         self.assertTrue(len(finish_msgs) > 0)
-        # Smartfocus already sent all content — stop should NOT repeat it
+        # Stop always sends full content for a complete summary
         msg_text = finish_msgs[0]["text"]
-        assert "Fixed the bug" not in msg_text, "Stop should not repeat content smartfocus already sent"
+        assert "Fixed the bug" in msg_text, "Stop should always include full response"
 
     def test_stop_clears_smartfocus(self):
         """Stop signal clears smartfocus state."""

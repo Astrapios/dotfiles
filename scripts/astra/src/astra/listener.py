@@ -404,8 +404,6 @@ def _listen_tick(s):
 
     signal_wid = signals.process_signals(
         focused_wids=focused_wids or None,
-        smartfocus_prev=s.smartfocus_prev_lines if smartfocus_state else None,
-        smartfocus_has_sent=s.smartfocus_has_sent if smartfocus_state else False,
         locally_viewed=locally_viewed or None,
         sessions=s.sessions,
     )

@@ -3295,8 +3295,8 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
         prev = ["Answer", "  line1", "  line2"]
-        astra.process_signals(smartfocus_prev=prev)
-        # Full content via _send_long_message (stop is a summary)
+        astra.process_signals()
+        # Full content via _send_long_message (stop always sends full response)
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
         self.assertIn("finished", header)
@@ -3314,9 +3314,8 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         """Stop signal with prev matching all content but never sent 👁 → full content."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
-        prev = ["Answer", "  line1"]
-        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
-        # Content was never delivered via 👁 → send full
+        astra.process_signals()
+        # Stop always sends full content
         mock_long.assert_called_once()
         body = mock_long.call_args[0][1]
         self.assertIn("line1", body)
@@ -6601,8 +6600,7 @@ class TestSmartfocusColdStart(unittest.TestCase):
         """Smartfocus stop with no prev_lines (very fast) sends full content."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
-        # smartfocus_prev is empty (no iterations captured), smartfocus_has_sent=False
-        astra.process_signals(smartfocus_prev=[], smartfocus_has_sent=False)
+        astra.process_signals()
         mock_long.assert_called_once()
         header = mock_long.call_args[0][0]
         self.assertIn("finished", header)
@@ -6620,10 +6618,8 @@ class TestSmartfocusColdStart(unittest.TestCase):
         """Smartfocus stop: prev matches all content, never sent 👁 → send full response."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
-        # prev_lines matches entire cleaned content — diff is empty
-        prev = ["Answer", "  line1"]
-        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=False)
-        # Full content should be sent via _send_long_message
+        astra.process_signals()
+        # Stop always sends full content
         mock_long.assert_called_once()
         body = mock_long.call_args[0][1]
         self.assertIn("line1", body)
@@ -6634,19 +6630,16 @@ class TestSmartfocusColdStart(unittest.TestCase):
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
     @patch("time.sleep")
-    def test_prev_matches_already_sent_sends_short(self, mock_sleep, mock_run, mock_proj,
+    def test_prev_matches_already_sent_sends_full(self, mock_sleep, mock_run, mock_proj,
                                                      mock_kb, mock_long, mock_send):
-        """Smartfocus stop: prev matches all content, already sent 👁 → short 'finished'."""
+        """Smartfocus stop always sends full content regardless of prev state."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
-        prev = ["Answer", "  line1"]
-        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
-        # Delta is empty — should NOT send full content via _send_long_message
-        mock_long.assert_not_called()
-        # Should send short "finished" via tg_send
-        mock_send.assert_called()
-        last_msg = mock_send.call_args[0][0]
-        self.assertIn("finished", last_msg)
+        astra.process_signals()
+        # Stop always sends full content
+        mock_long.assert_called_once()
+        body = mock_long.call_args[0][1]
+        self.assertIn("line1", body)
 
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
@@ -6660,9 +6653,7 @@ class TestSmartfocusColdStart(unittest.TestCase):
         """Smartfocus stop: prev is noise (old response), already sent 👁 → send full response."""
         astra.state._save_smartfocus_state("w4a", "%20", "proj")
         self._write_signal("stop")
-        # prev_lines is completely different noise (old response content)
-        prev = ["● Old response from previous task", "  completely unrelated content"]
-        astra.process_signals(smartfocus_prev=prev, smartfocus_has_sent=True)
+        astra.process_signals()
         # Content differs significantly — should send full response
         mock_long.assert_called_once()
         body = mock_long.call_args[0][1]

@@ -11,6 +11,8 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - **Fix remote detection with ttyd** — ttyd keeps a tmux client always attached, making all windows appear "locally viewed". Now tracks global Telegram activity timestamp; if the most recent interaction is via Telegram, local suppress is disabled for all windows.
 - **Reply keyboard persistence** — `/help` and `/unfocus` now re-send the reply keyboard to prevent it from disappearing.
 - **Fix incomplete smartfocus output** — tool output lines were dropped when `⎿  Running…` spinners replaced by actual output (1:1 replace missed by diff). Now filters `Running…` as noise so output appears as inserts. Also fixes `(ctrl+o to see all)` not being filtered.
+- **Stop hook always sends full response** — smartfocus stop no longer computes a delta against previous lines. Always sends the complete last response for a coherent summary.
+- **Noise filter improvements** — filter `⎿  Tip:` lines, bare `Shell` headers, `ctrl+b background` hints, and status bar lines with branch names (e.g. `──── branch-name ──`). Fix `_focus_capture_lines` stripping order to remove trailing chrome after prompt.
 
 ## 0.26.4
 

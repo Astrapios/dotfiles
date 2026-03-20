@@ -75,15 +75,10 @@ def _format_question_msg(tag: str, project: str, question: dict, cli: str = "") 
 
 
 def process_signals(focused_wids: set[str] | None = None,
-                     smartfocus_prev: list[str] | None = None,
-                     smartfocus_has_sent: bool = False,
                      locally_viewed: set[str] | None = None,
                      sessions: dict | None = None) -> str | None:
     """Process pending signal files. Returns last window index (e.g. '4') or None.
     If focused_wids is set, stop signals for those windows are suppressed.
-    smartfocus_prev: previous lines from smartfocus monitoring, used to send
-    only the tail (new content) when a smartfocus session stops.
-    smartfocus_has_sent: whether any 👁 update was sent during this smartfocus session.
     locally_viewed: set of window indices currently viewed in tmux — suppresses Telegram sends."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return None
@@ -210,22 +205,8 @@ def process_signals(focused_wids: set[str] | None = None,
                             cleaned = ""
                 _stop_silent = state._is_silent(_CAT_STOP)
                 if cleaned:
-                    cleaned_lines = cleaned.splitlines()
-                    # If smartfocus already sent updates, only send the delta
-                    if smartfocus_has_sent and smartfocus_prev:
-                        # Compare using focus format on both sides (apples to apples)
-                        stop_focus = content._focus_capture_lines(raw, pw, profile=profile)
-                        new = content._compute_new_lines(smartfocus_prev, stop_focus)
-                        if new:
-                            new = content._strip_dialog(new)
-                        if new:
-                            collapsed = "\n".join(content._collapse_tool_calls(
-                                new, profile=profile)).strip()
-                        else:
-                            collapsed = ""
-                    else:
-                        collapsed = "\n".join(content._collapse_tool_calls(
-                            cleaned_lines, profile=profile)).strip()
+                    collapsed = "\n".join(content._collapse_tool_calls(
+                        cleaned.splitlines(), profile=profile)).strip()
                     if collapsed:
                         header = f"✅{tag} (`{project}`) finished:\n\n"
                         _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
