@@ -107,6 +107,7 @@ class SimulationHarness:
 
         # Clear auto-local remote sessions state
         config._remote_sessions.clear()
+        config._last_tg_activity = 0.0
 
         # Start all patches
         for p in self._patches:
@@ -118,6 +119,7 @@ class SimulationHarness:
             p.stop()
         self._patches.clear()
         config._remote_sessions.clear()
+        config._last_tg_activity = 0.0
         # Clean up temp dir
         import shutil
         if self._tmpdir and os.path.isdir(self._tmpdir):

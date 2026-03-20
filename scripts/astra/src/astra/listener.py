@@ -257,15 +257,21 @@ def _listen_tick(s):
 
     locally_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
 
-    # --- Auto-local: subtract remote-overridden windows from locally_viewed ---
-    if locally_viewed and config._remote_sessions:
+    # --- Auto-local: suppress local detection when user is active on Telegram ---
+    if locally_viewed:
         client_activity = tmux._get_client_last_activity()
-        expired = [idx for idx, ts in config._remote_sessions.items()
-                   if client_activity > ts]
-        for idx in expired:
-            del config._remote_sessions[idx]
-        if config._remote_sessions:
-            locally_viewed = locally_viewed - set(config._remote_sessions.keys())
+        # If any Telegram interaction is more recent than local tmux activity,
+        # the user is remote — disable local suppress for ALL windows
+        if config._last_tg_activity and config._last_tg_activity > client_activity:
+            locally_viewed = set()
+        elif config._remote_sessions:
+            # Per-session override: subtract remote-marked windows
+            expired = [idx for idx, ts in config._remote_sessions.items()
+                       if client_activity > ts]
+            for idx in expired:
+                del config._remote_sessions[idx]
+            if config._remote_sessions:
+                locally_viewed = locally_viewed - set(config._remote_sessions.keys())
 
     # --- Interrupt detection (no hook fires on Esc interrupt) ---
     if time.time() - s.last_interrupt_check > 5:
@@ -563,6 +569,9 @@ def _listen_tick(s):
         return None
 
     for chat_msg in _merge_album_photos(telegram._extract_chat_messages(data)):
+        # Any incoming Telegram message means user is remote
+        config._last_tg_activity = time.time()
+
         callback = chat_msg.get("callback")
         if callback:
             cb_data = callback.get("data", "")

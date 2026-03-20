@@ -287,7 +287,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
             "*Photos:* send a photo to have the CLI read it. Add `wN` in caption to target.",
         ]
-        telegram.tg_send("\n".join(help_lines), reply_markup=tmux._sessions_keyboard(sessions))
+        telegram.tg_send("\n".join(help_lines), reply_markup=telegram._build_reply_keyboard())
         return None, sessions, last_win_idx
 
     # /status [wN|name] [lines]
@@ -430,7 +430,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         state._clear_focus_state()
         state._clear_deepfocus_state()
         state._clear_smartfocus_state()
-        telegram.tg_send("🔍 Focus stopped.")
+        telegram.tg_send("🔍 Focus stopped.", reply_markup=telegram._build_reply_keyboard())
         return None, sessions, last_win_idx
 
     # /autofocus [on|off|wN]
@@ -501,6 +501,22 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             telegram.tg_send("📍 Local suppression *on* — Telegram muted for locally viewed sessions.")
         elif arg == "off":
             state._set_local_suppress(False)
+            # Auto-attach smartfocus to a busy session if autofocus is on
+            if state._is_autofocus_enabled() and not state._load_smartfocus_state() \
+               and not state._load_focus_state() and not state._load_deepfocus_state():
+                busy_target = None
+                if last_win_idx and last_win_idx in sessions and state._is_busy(last_win_idx):
+                    busy_target = last_win_idx
+                else:
+                    for wid in sessions:
+                        if state._is_busy(wid):
+                            busy_target = wid
+                            break
+                if busy_target:
+                    pane, project = sessions[busy_target]
+                    state._save_smartfocus_state(busy_target, pane, project)
+                    telegram.tg_send(f"📍 Local suppression *off* — watching {state._wid_label(busy_target)} (`{project}`).")
+                    return None, sessions, last_win_idx
             telegram.tg_send("📍 Local suppression *off* — always notify via Telegram.")
         else:
             enabled = state._is_local_suppress_enabled()

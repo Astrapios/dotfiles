@@ -222,6 +222,9 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
             in_prompt = False
         if re.match(r'^[─━]{3,}$', s):
             continue
+        # Status bar: lines that are mostly ─/━ with optional text (e.g. "──── branch-name ──")
+        if re.match(r'^[─━]', s) and s.count('─') + s.count('━') > len(s) * 0.4:
+            continue
         if s.startswith(("⏵⏵ ", "⏸ ")):
             continue
         if s.startswith("Context left until auto-compact:"):
@@ -236,12 +239,24 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
             # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
             if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
                 continue
-            # Tool progress lines (e.g. "Reading 1 file… (ctrl+o to expand)")
-            if re.search(r'\(ctrl\+\w to \w+\)', s):
+            # Tool output spinner (e.g. "⎿  Running…")
+            if re.match(r'^⎿\s+Running(…|\.\.\.)', s):
+                continue
+            # Collapsed output: "… +N lines (ctrl+o to expand/see all)"
+            if re.match(r'^…\s+\+\d+', s):
+                continue
+            # Progress ending with ellipsis before ctrl hint: "verb… (ctrl+o to expand)"
+            if re.search(r'(?:…|\.\.\.)\s*\(ctrl\+\w to [\w ]+\)\s*$', s):
                 continue
         if re.match(r'^\+\d+ more lines \(', s):
             continue
-        if s.startswith('ctrl+') and 'background' in s:
+        if 'ctrl+' in s and 'background' in s:
+            continue
+        # Claude tips: "⎿  Tip: Use /btw to ..."
+        if re.match(r'^⎿\s+Tip:', s):
+            continue
+        # Bare section headers (e.g. "Shell" above a permission dialog)
+        if s in ("Shell",):
             continue
         filtered.append(line.rstrip())
     return filtered
@@ -384,12 +399,15 @@ def _focus_capture_lines(raw: str, pane_width: int = 0, profile=None) -> list[st
         from astra import profiles
         profile = profiles.CLAUDE
     prompt_char = profile.prompt_char
-    lines = _filter_noise(raw, profile=profile)
-    # Strip prompt lines at the end
-    for i in range(len(lines) - 1, -1, -1):
-        if lines[i].strip().startswith(prompt_char):
-            lines = lines[:i]
+    # Strip from the last prompt line to end on RAW lines first,
+    # before _filter_noise removes prompt chars (which would leave
+    # trailing status bar / chrome lines orphaned).
+    raw_lines = raw.splitlines()
+    for i in range(len(raw_lines) - 1, -1, -1):
+        if raw_lines[i].strip().startswith(prompt_char):
+            raw_lines = raw_lines[:i]
             break
+    lines = _filter_noise("\n".join(raw_lines), profile=profile)
     if pane_width:
         lines = tmux._join_wrapped_lines(lines, pane_width)
     return lines

@@ -131,14 +131,18 @@ def _log_msg(kind: str, text: str, **extra):
 
 
 _remote_sessions: dict[str, float] = {}  # bare win_idx -> tg_send_timestamp
+_last_tg_activity: float = 0.0  # timestamp of last Telegram interaction
 
 
 def _mark_remote(wid: str):
     """Mark a session as remotely active (TG interaction), disabling local suppress."""
     import re, time as _time
+    global _last_tg_activity
+    now = _time.time()
+    _last_tg_activity = now
     m = re.match(r'^w?(\d+)', wid)
     if m:
-        _remote_sessions[m.group(1)] = _time.time()
+        _remote_sessions[m.group(1)] = now
 
 
 _last_messages: dict[str, str] = {}  # wid -> last sent message

@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.27.0
+
+- **`/local off` auto-attaches smartfocus** — when autofocus is enabled and no focus is active, `/local off` automatically attaches smartfocus to a busy session (prefers last active window).
+- **Fix remote detection with ttyd** — ttyd keeps a tmux client always attached, making all windows appear "locally viewed". Now tracks global Telegram activity timestamp; if the most recent interaction is via Telegram, local suppress is disabled for all windows.
+- **Reply keyboard persistence** — `/help` and `/unfocus` now re-send the reply keyboard to prevent it from disappearing.
+- **Fix incomplete smartfocus output** — tool output lines were dropped when `⎿  Running…` spinners replaced by actual output (1:1 replace missed by diff). Now filters `Running…` as noise so output appears as inserts. Also fixes `(ctrl+o to see all)` not being filtered.
+
 ## 0.26.4
 
 - **rtk rewrite integration** — god mode now rewrites Bash commands via `rtk rewrite` for compact output (when rtk is installed). Hook output migrated to `hookSpecificOutput` format (replaces deprecated `{"decision":"approve"}`).
