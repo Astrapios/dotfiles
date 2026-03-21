@@ -13,6 +13,7 @@ Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 - **Fix incomplete smartfocus output** — tool output lines were dropped when `⎿  Running…` spinners replaced by actual output (1:1 replace missed by diff). Now filters `Running…` as noise so output appears as inserts. Also fixes `(ctrl+o to see all)` not being filtered.
 - **Stop hook always sends full response** — smartfocus stop no longer computes a delta against previous lines. Always sends the complete last response for a coherent summary.
 - **Noise filter improvements** — filter `⎿  Tip:` lines, bare `Shell` headers, `ctrl+b background` hints, and status bar lines with branch names (e.g. `──── branch-name ──`). Fix `_focus_capture_lines` stripping order to remove trailing chrome after prompt.
+- **Fix table data rows stripped** — spinner/timer filter (`[^\w\s] \w` + `\d+[hms]`) matched table data rows starting with `│` that contained meter values like `0m`, `5.0m`. Excluded box-drawing vertical chars (`│┃║`) from spinner patterns.
 
 ## 0.26.4
 

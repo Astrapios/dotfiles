@@ -234,10 +234,10 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
                 continue
             if re.match(r'^✻ \w+ for ', s):
                 continue
-            if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
+            if re.match(r'^[^\w\s│┃║] \w', s) and re.search(r'\d+[hms]', s):
                 continue
             # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
-            if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
+            if re.match(r'^[^\w\s●❯│┃║] \w+.*(…|\.\.\.)', s):
                 continue
             # Tool output spinner (e.g. "⎿  Running…")
             if re.match(r'^⎿\s+Running(…|\.\.\.)', s):
