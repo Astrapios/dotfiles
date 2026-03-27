@@ -61,12 +61,12 @@ def _is_ui_chrome(s: str, profile=None) -> bool:
         return True
     if s in ("⏳ Working...", "* Working..."):
         return True
-    if re.match(r'^✻ \w+ for ', s):
+    if 'esc for shortcuts' in s:
         return True
     if s.startswith('ctrl+') and 'background' in s:
         return True
     # Thinking/timing indicators: "* Percolating… (1m 14s …)"
-    if re.match(r'^[^\w\s] \w', s) and re.search(r'\d+[hms]', s):
+    if re.match(r'^[^\w\s●❯] \w', s) and re.search(r'\d+[hms]', s):
         return True
     # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
     if re.match(r'^[^\w\s●❯] \w+.*(…|\.\.\.)', s):
@@ -95,6 +95,12 @@ def _is_ui_chrome(s: str, profile=None) -> bool:
     # Gemini hint line: "Enter to submit · ↑/↓ for history · ..."
     if 'Enter to submit' in s:
         return True
+    # Shell management hint: "1 shell · ↓ to manage"
+    if re.match(r'^\d+ shells? ', s) and '↓' in s:
+        return True
+    # Status bar with text: ────text──── pattern (dashes on both sides)
+    if re.match(r'^[─━]{2,}.+[─━]{2,}$', s):
+        return True
     return False
 
 
@@ -112,9 +118,11 @@ def _profile_for_pane(pane: str):
 def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
     """Check if a pane is idle (has prompt). Returns (is_idle, typed_text).
 
-    Finds the last non-chrome line (skipping separators, hints, spinners)
-    and checks if it's a prompt. Old prompt lines from submitted commands
-    in earlier lines are correctly ignored.
+    Searches bottom-up for the prompt char, skipping recognized UI chrome
+    and tolerating up to MAX_UNKNOWN_BELOW unrecognized lines between the
+    bottom of the pane and the prompt.  This makes detection robust against
+    new/changed CLI UI elements below the prompt (status bars, hints, etc.).
+
     typed_text is any text on the same line after the prompt char (locally typed input).
     Uses cursor position to exclude grayed-out auto-suggestions.
     Also checks for busy indicator below the prompt — if present,
@@ -122,6 +130,7 @@ def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
     Checks for colored (non-grey) spinner symbols via ANSI capture
     as an additional busy signal.
     """
+    MAX_UNKNOWN_BELOW = 4  # tolerate up to 4 unrecognized lines below prompt
     if profile is None:
         profile = _profile_for_pane(pane)
     prompt_re = profile.prompt_re
@@ -130,12 +139,14 @@ def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
         raw = tmux._capture_pane(pane, 15)
     except Exception:
         return False, ""
-    saw_busy_indicator = False
+    # Pre-scan all lines for busy indicator (may be above or below prompt
+    # depending on CLI — Gemini shows it above the always-visible prompt)
+    raw_lines = raw.splitlines()
+    saw_busy_indicator = busy_ind and any(busy_ind in l for l in raw_lines)
     saw_potential_spinner = False
-    for line in reversed(raw.splitlines()):
+    unknown_count = 0
+    for line in reversed(raw_lines):
         s = line.strip()
-        if busy_ind and busy_ind in s:
-            saw_busy_indicator = True
         # Track potential active spinner (non-word symbol + word, no timing)
         if re.match(r'^[^\w\s●❯─━⏵⏸] \w', s) and not re.search(r'\d+[hms]', s):
             saw_potential_spinner = True
@@ -165,7 +176,17 @@ def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
             else:
                 typed = m.group(2).strip()
             return True, typed
-        return False, ""
+        # Content indicators (tool bullets, continuations) — definitely not
+        # below-prompt chrome, so this means we're in output territory and
+        # any prompt above is an old submitted command, not the active prompt.
+        stripped_leading = line.lstrip()
+        if stripped_leading.startswith(("●", "⎿", "✦")):
+            return False, ""
+        # Unrecognized line — tolerate a few below the prompt (new/changed
+        # UI elements like hints, status bars, shell info).
+        unknown_count += 1
+        if unknown_count > MAX_UNKNOWN_BELOW:
+            return False, ""
     return False, ""
 
 
@@ -189,11 +210,29 @@ def _get_session_statuses(sessions: dict[str, tuple[str, str]]) -> dict[str, str
     return statuses
 
 
-def route_to_pane(pane: str, win_idx: str, text: str) -> str:
+def _inject_while_busy(pane: str, wid: str, label: str, text: str) -> str:
+    """Inject an additional instruction into a busy session via Esc + type.
+
+    Sends Escape to open Claude Code's additional instruction input,
+    then types the message and presses Enter.
+    """
+    p = shlex.quote(pane)
+    clean_text = text.replace("\n", " ").replace("\r", " ")
+    cmd = (f"tmux send-keys -t {p} Escape && sleep 0.3 && "
+           f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && sleep 0.1 && "
+           f"tmux send-keys -t {p} Enter")
+    subprocess.run(["bash", "-c", cmd], timeout=10)
+    config._log("route", f"injected into {wid}: {text[:100]}")
+    return f"💉 Injected into {label}:\n`{text[:500]}`"
+
+
+def route_to_pane(pane: str, win_idx: str, text: str, force: bool = False) -> str:
     """Route a message to a tmux pane, handling active prompts.
 
     If there's an active prompt, translates the reply into arrow-key
     navigation + Enter. Otherwise sends raw text.
+    If force=True and the session is busy, inject via Esc + type instead
+    of queuing (adds an "additional instruction" mid-task).
     Returns a confirmation message for Telegram.
     """
     wid = f"w{win_idx}" if not win_idx.startswith("w") else win_idx
@@ -308,14 +347,20 @@ def route_to_pane(pane: str, win_idx: str, text: str) -> str:
             if is_idle2:
                 # Stop signal was missed (crash, newline issue, etc.) — self-heal
                 state._clear_busy(wid)
+            elif force:
+                return _inject_while_busy(pane, wid, label, text)
             else:
                 state._save_queued_msg(wid, text)
                 return f"💾 Saved for {label} (busy):\n`{text[:500]}`"
+        elif force:
+            return _inject_while_busy(pane, wid, label, text)
         else:
             state._save_queued_msg(wid, text)
             return f"💾 Saved for {label} (busy):\n`{text[:500]}`"
 
     if not is_idle:
+        if force:
+            return _inject_while_busy(pane, wid, label, text)
         # Claude is busy — queue the message
         state._save_queued_msg(wid, text)
         return f"💾 Saved for {label} (busy):\n`{text[:500]}`"

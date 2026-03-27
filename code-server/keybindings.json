@@ -101,6 +101,26 @@
         "when": "editorLangId == python"
     },
     {
+        "key": "] ]",
+        "command": "pythonREPL.goToNextCell",
+        "when": "editorLangId == python && vim.mode == 'Normal'"
+    },
+    {
+        "key": "[ [",
+        "command": "pythonREPL.goToPreviousCell",
+        "when": "editorLangId == python && vim.mode == 'Normal'"
+    },
+    {
+        "key": "] s",
+        "command": "pythonREPL.goToCellStart",
+        "when": "editorLangId == python && vim.mode == 'Normal'"
+    },
+    {
+        "key": "] e",
+        "command": "pythonREPL.goToCellEnd",
+        "when": "editorLangId == python && vim.mode == 'Normal'"
+    },
+    {
         "key": "enter",
         "command": "-renameFile",
         "when": "explorerViewletVisible && filesExplorerFocus"

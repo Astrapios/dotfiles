@@ -189,11 +189,15 @@ def process_signals(focused_wids: set[str] | None = None,
                 # Smartfocus session ended — send only new content since last update
                 time.sleep(1)
                 pw = tmux._get_pane_width(pane)
-                for num_lines in (30, 80, 200):
+                for num_lines in (30, 80, 200, 500):
                     raw = tmux._capture_pane(pane, num_lines)
                     if content._has_response_start(raw, profile=profile):
                         break
                 cleaned = content.clean_pane_content(raw, "stop", pw, profile=profile) if raw else ""
+                if config._is_debug_enabled():
+                    config._debug_log(f"[stop:{wid}] sf_stop capture={num_lines} cleaned={len(cleaned)} chars")
+                    if not cleaned:
+                        config._debug_log(f"[stop:{wid}] raw_tail: {raw.splitlines()[-10:] if raw else '(none)'}")
                 # Guard: if no prompt boundary in capture and pane is busy,
                 # the capture contains next-task content — discard it
                 if cleaned and raw:
@@ -219,13 +223,17 @@ def process_signals(focused_wids: set[str] | None = None,
                 if pane:
                     time.sleep(4)
                     pw = tmux._get_pane_width(pane)
-                    for num_lines in (30, 80, 200):
+                    for num_lines in (30, 80, 200, 500):
                         raw = tmux._capture_pane(pane, num_lines)
                         if content._has_response_start(raw, profile=profile):
                             break
                 else:
                     pw = 0
                 cleaned = content.clean_pane_content(raw, "stop", pw, profile=profile) if raw else "(could not capture pane)"
+                if config._is_debug_enabled():
+                    config._debug_log(f"[stop:{wid}] reg_stop capture={num_lines} cleaned={len(cleaned)} chars")
+                    if not cleaned:
+                        config._debug_log(f"[stop:{wid}] raw_tail: {raw.splitlines()[-10:] if raw else '(none)'}")
                 collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip() if cleaned else cleaned
                 header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
                 _stop_send_args = ("long", header, collapsed or cleaned, wid, stop_kb, state._is_silent(_CAT_STOP))

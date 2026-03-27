@@ -10,6 +10,16 @@ from astra import tmux
 _BOX_VERT = set("│║")
 _BOX_HORIZ_CORNER = set("┌┐└┘├┤┬┴┼─━╔╗╚╝╠╣╦╩╬")
 
+# Satisfaction survey bullet: looks like a response ● but is UI chrome.
+# Checked in bullet-search (clean_pane_content, _has_response_start) and
+# noise filtering (_filter_noise, _strip_dialog).
+_SURVEY_MARKER = 'How is Claude doing'
+
+
+def _is_survey_bullet(s: str) -> bool:
+    """Check if a stripped line is the satisfaction survey bullet."""
+    return _SURVEY_MARKER in s
+
 
 def _has_table(text: str) -> bool:
     """Check if text contains an ASCII/Unicode table.
@@ -234,7 +244,7 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
                 continue
             if re.match(r'^✻ \w+ for ', s):
                 continue
-            if re.match(r'^[^\w\s│┃║] \w', s) and re.search(r'\d+[hms]', s):
+            if re.match(r'^[^\w\s●❯│┃║] \w', s) and re.search(r'\d+[hms]', s):
                 continue
             # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
             if re.match(r'^[^\w\s●❯│┃║] \w+.*(…|\.\.\.)', s):
@@ -258,6 +268,11 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
         # Bare section headers (e.g. "Shell" above a permission dialog)
         if s in ("Shell",):
             continue
+        # Satisfaction survey and its rating options
+        if _is_survey_bullet(s):
+            continue
+        if re.match(r'^\d+:\s*(Bad|Fine|Good|Dismiss)', s):
+            continue
         filtered.append(line.rstrip())
     return filtered
 
@@ -272,7 +287,8 @@ def _strip_dialog(lines: list[str]) -> list[str]:
     _dialog_headers = re.compile(
         r'^(Bash command|Edit file|Create file|Replace file|Read file|'
         r'Do you want to proceed\?|This command requires approval|'
-        r'Esc to cancel|Enter to confirm|esc to interrupt)')
+        r'Esc to cancel|Enter to confirm|esc to interrupt|'
+        r'How is Claude doing)')
     # Search last 25 lines for the earliest dialog marker
     search_start = max(0, len(lines) - 25)
     cut = len(lines)
@@ -307,6 +323,8 @@ def _has_response_start(raw: str, profile=None) -> bool:
     for i in range(end - 1, -1, -1):
         s = lines[i].strip()
         if s.startswith(bullet) and not re.match(tool_re, s):
+            if _is_survey_bullet(s):
+                continue
             return True
     return False
 
@@ -372,16 +390,50 @@ def clean_pane_content(raw: str, event: str, pane_width: int = 0, profile=None) 
             if lines[i].strip().startswith(prompt_char):
                 end = i
                 break
+        # Find previous prompt (response boundary) to scope the search.
+        # This separates the current response from prior ones.
+        prev_prompt = -1
+        for i in range(end - 1, -1, -1):
+            s = lines[i].strip()
+            if s.startswith(prompt_char):
+                prev_prompt = i
+                break
+        # Find FIRST text bullet after previous prompt (captures full response
+        # including interleaved tool calls, not just the last text section).
+        # If no previous prompt found, fall back to LAST text bullet (old
+        # behavior) to avoid capturing content from prior responses.
         start = -1
         if bullet:
-            for i in range(end - 1, -1, -1):
-                s = lines[i].strip()
-                if s.startswith(bullet) and not re.match(tool_re, s):
-                    start = i
-                    break
+            if prev_prompt >= 0:
+                # Forward search from previous prompt
+                for i in range(prev_prompt + 1, end):
+                    s = lines[i].strip()
+                    if s.startswith(bullet) and not re.match(tool_re, s):
+                        if _is_survey_bullet(s):
+                            continue
+                        start = i
+                        break
+            else:
+                # No previous prompt — backward search for last text bullet
+                for i in range(end - 1, -1, -1):
+                    s = lines[i].strip()
+                    if s.startswith(bullet) and not re.match(tool_re, s):
+                        if _is_survey_bullet(s):
+                            continue
+                        start = i
+                        break
         if start < 0:
-            return ""  # No response boundary found
-        lines = lines[start:end]
+            # Check if tool bullets exist (response bullet pushed out of range)
+            has_tool = any(re.match(tool_re, l.strip()) for l in lines[:end]
+                          if l.strip().startswith(bullet)) if bullet else False
+            if end < len(lines) and has_tool:
+                # Prompt found, tool calls visible but text bullet out of
+                # range — fall back to last content lines before prompt
+                lines = lines[max(0, end - 30):end]
+            else:
+                return ""  # No meaningful boundary found
+        else:
+            lines = lines[start:end]
     filtered = _filter_noise("\n".join(lines), profile=profile)
     if pane_width:
         filtered = tmux._join_wrapped_lines(filtered, pane_width)

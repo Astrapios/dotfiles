@@ -15,6 +15,12 @@ antidote load
 # load zsh prompt
 autoload -Uz promptinit && promptinit && prompt pure
 
+# Ensure systemd user session env is available (not set by pam_systemd in non-login shells)
+if [[ -z "$XDG_RUNTIME_DIR" && -d "/run/user/$(id -u)" ]]; then
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+
 export EDITOR='vim'
 export VISUAL='vim'
 

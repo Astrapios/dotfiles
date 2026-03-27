@@ -225,6 +225,26 @@ class TestFilterNoise(unittest.TestCase):
         self.assertIn("❯ Read /tmp/photo.jpg — after compaction, before it should", result)
         self.assertIn("  have keywords such as compacting in the status line", result)
 
+    def test_response_bullet_with_timing_not_filtered(self):
+        """Response text with time references like (2m) should not be filtered."""
+        raw = "● PFA done. First window (2m) just finished sweeping."
+        result = astra._filter_noise(raw)
+        assert any("PFA done" in l for l in result)
+
+    def test_filters_satisfaction_survey(self):
+        """Satisfaction survey 'How is Claude doing this session?' is noise."""
+        raw = (
+            "● Here is the response.\n"
+            "How is Claude doing this session? (optional)\n"
+            "1: Bad  2: Fine  3: Good\n"
+            "0: Dismiss"
+        )
+        result = astra._filter_noise(raw)
+        assert "How is Claude" not in "\n".join(result)
+        assert "Bad" not in "\n".join(result)
+        assert "Dismiss" not in "\n".join(result)
+        assert "Here is the response." in "\n".join(result)
+
 
 class TestCleanPaneContent(unittest.TestCase):
     """Test clean_pane_content for stop events."""
@@ -244,6 +264,22 @@ class TestCleanPaneContent(unittest.TestCase):
         self.assertNotIn("next prompt", result)
         self.assertNotIn("previous tool call", result)
 
+    def test_stop_strips_satisfaction_survey(self):
+        """Satisfaction survey after response should not appear in stop output."""
+        raw = textwrap.dedent("""\
+            ● Here is the response.
+              All done with your task.
+            ● How is Claude doing this session? (optional)
+            1: Bad  2: Fine  3: Good
+            0: Dismiss
+            ❯ next prompt
+        """)
+        result = astra.clean_pane_content(raw, "stop")
+        assert "Here is the response" in result
+        assert "All done" in result
+        assert "How is Claude" not in result
+        assert "Bad" not in result
+
     def test_stop_skips_tool_bullets(self):
         """● Bash(...) should not be treated as a text bullet."""
         raw = textwrap.dedent("""\
@@ -255,6 +291,25 @@ class TestCleanPaneContent(unittest.TestCase):
         result = astra.clean_pane_content(raw, "stop")
         self.assertIn("The answer is 42", result)
         self.assertNotIn("Bash(echo", result)
+
+    def test_stop_captures_full_interleaved_response(self):
+        """Response with interleaved text and tool calls captures everything."""
+        raw = textwrap.dedent("""\
+            ❯ previous prompt
+            ● Here is the analysis.
+              First section of text.
+            ● Bash(generate_plot.py)
+              ⎿  plot saved
+            ● The results show improvement.
+              Final paragraph.
+            ❯ current prompt
+        """)
+        result = astra.clean_pane_content(raw, "stop")
+        assert "Here is the analysis" in result
+        assert "First section" in result
+        assert "results show improvement" in result
+        assert "Final paragraph" in result
+        assert "previous prompt" not in result
 
     def test_stop_no_text_bullet_returns_empty(self):
         """When no text ● is found, return empty to prevent garbage capture."""
@@ -268,6 +323,20 @@ class TestCleanPaneContent(unittest.TestCase):
         """)
         result = astra.clean_pane_content(raw, "stop")
         self.assertEqual(result, "")
+
+    def test_stop_fallback_when_text_bullet_out_of_range(self):
+        """When text bullet is out of capture range but tool bullets exist,
+        fall back to last content lines before prompt."""
+        raw = textwrap.dedent("""\
+            ● Edit(foo.py)
+              ⎿  Updated foo.py
+            ● Bash(echo done)
+              ⎿  done
+            Here is the summary of changes.
+            ❯ prompt
+        """)
+        result = astra.clean_pane_content(raw, "stop")
+        assert "summary of changes" in result
 
     def test_non_stop_event_returns_all(self):
         raw = "line 1\nline 2\nline 3"
@@ -599,6 +668,26 @@ class TestRouteToPane(unittest.TestCase):
         cmd = mock_run.call_args[0][0][-1]  # bash -c "..."
         self.assertNotIn("\\n", cmd)
         self.assertIn("line1 line2 line3", cmd)
+
+    @patch("subprocess.run")
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(False, ""))
+    def test_force_injects_when_busy(self, mock_idle, mock_run):
+        """force=True sends Esc + type + Enter instead of queuing."""
+        with patch.object(astra.state, "load_active_prompt", return_value=None):
+            result = astra.route_to_pane(self.pane, self.win_idx, "focus on API", force=True)
+        assert "Injected" in result
+        assert "focus on API" in result
+        cmd = mock_run.call_args[0][0][-1]  # bash -c "..."
+        assert "Escape" in cmd
+        assert "focus on API" in cmd
+
+    @patch("subprocess.run")
+    @patch.object(astra.routing, "_pane_idle_state", return_value=(True, ""))
+    def test_force_sends_normally_when_idle(self, mock_idle, mock_run):
+        """force=True on idle session sends normally (no Esc needed)."""
+        with patch.object(astra.state, "load_active_prompt", return_value=None):
+            result = astra.route_to_pane(self.pane, self.win_idx, "hello", force=True)
+        assert "Sent to" in result
 
 
 class TestProcessSignals(unittest.TestCase):
@@ -1714,7 +1803,7 @@ class TestHandleCommand(unittest.TestCase):
             "w4a hello", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", force=False)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -1741,7 +1830,29 @@ class TestHandleCommand(unittest.TestCase):
         action, _, last = astra._handle_command(
             "hello", self.sessions, "w5a")
         self.assertEqual(last, "w5a")
-        mock_route.assert_called_once_with("0:5.0", "w5a", "hello")
+        mock_route.assert_called_once_with("0:5.0", "w5a", "hello", force=False)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="💉 Injected")
+    def test_bang_prefix_forces(self, mock_route, mock_send):
+        """!wN prefix passes force=True to route_to_pane."""
+        astra._handle_command("!w4a focus on API", self.sessions, None)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "focus on API", force=True)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="💉 Injected")
+    def test_bang_bare_number(self, mock_route, mock_send):
+        """!N shorthand resolves to !wN."""
+        astra._handle_command("!4 do this", self.sessions, None)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "do this", force=True)
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.routing, "route_to_pane", return_value="💉 Injected")
+    def test_bang_no_prefix_single_session(self, mock_route, mock_send):
+        """! with single session routes to it with force=True."""
+        sessions = {"w4a": ("0:4.0", "myproj")}
+        astra._handle_command("!focus on API", sessions, None)
+        mock_route.assert_called_once_with("0:4.0", "w4a", "focus on API", force=True)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_no_sessions(self, mock_send):
@@ -3564,7 +3675,7 @@ class TestNamePrefixRouting(unittest.TestCase):
             "auth fix the bug", self.sessions, None)
         self.assertIsNone(action)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "fix the bug")
+        mock_route.assert_called_once_with("0:4.0", "w4a", "fix the bug", force=False)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unknown_word_falls_through(self, mock_send):
@@ -3581,7 +3692,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         action, _, last = astra._handle_command(
             "w4a hello", self.sessions, None)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", force=False)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -3590,7 +3701,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         action, _, last = astra._handle_command(
             "Auth fix it", self.sessions, None)
         self.assertEqual(last, "w4a")
-        mock_route.assert_called_once_with("0:4.0", "w4a", "fix it")
+        mock_route.assert_called_once_with("0:4.0", "w4a", "fix it", force=False)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -3600,7 +3711,7 @@ class TestNamePrefixRouting(unittest.TestCase):
         action, _, _ = astra._handle_command(
             "hello", sessions, None)
         # Should route to single session as no-prefix fallback
-        mock_route.assert_called_once_with("0:4.0", "w4a", "hello")
+        mock_route.assert_called_once_with("0:4.0", "w4a", "hello", force=False)
 
 
 class TestQueuedMessageState(unittest.TestCase):
@@ -3781,6 +3892,40 @@ class TestPaneIdleState(unittest.TestCase):
         self.assertFalse(is_idle)
 
     @patch.object(astra.tmux, "_capture_pane")
+    def test_idle_with_unrecognized_chrome_below(self, mock_capture):
+        """Unknown UI elements below prompt should not cause false busy."""
+        mock_capture.return_value = (
+            "❯ \n"
+            "──── some-branch-name ──\n"
+            "1 shell · ↓ to manage\n"
+            "some future UI element\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertTrue(is_idle)
+        self.assertEqual(typed, "")
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_busy_content_bullet_below_old_prompt(self, mock_capture):
+        """● content below a prompt means the prompt is old (submitted)."""
+        mock_capture.return_value = (
+            "❯ do something\n"
+            "● Working on the task\n"
+            "some future UI hint\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_busy_continuation_below_old_prompt(self, mock_capture):
+        """⎿ continuation below a prompt means the prompt is old."""
+        mock_capture.return_value = (
+            "❯ check files\n"
+            "  ⎿  reading file.py\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:4.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
     def test_all_empty_lines(self, mock_capture):
         mock_capture.return_value = "\n\n\n"
         is_idle, typed = astra._pane_idle_state("0:4.0")
@@ -3858,6 +4003,34 @@ class TestGeminiIdleState(unittest.TestCase):
         is_idle, typed = astra._pane_idle_state("%30")
         self.assertTrue(is_idle)
         self.assertEqual(typed, "fix the bug")
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_busy_indicator_above_prompt(self, mock_capture):
+        """Gemini busy: 'esc to cancel' above the always-visible prompt."""
+        mock_capture.return_value = (
+            "✦ I will read the file.\n"
+            "╭─ ✓  ReadFile src/main.py ─╮\n"
+            "╰────────────────────────────╯\n"
+            " ⠸ 💬 Examining Code (esc to cancel, 5s)\n"
+            "──────────────────────────\n"
+            " shift+tab to accept edits\n"
+            "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+            " >   Type your message or @path/to/file\n"
+            "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n"
+            " ~/.../proj  no sandbox  Auto (Gemini 3)\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        assert not is_idle
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_gemini_response_bullet_means_busy(self, mock_capture):
+        """Gemini ✦ response bullet below old prompt means busy."""
+        mock_capture.return_value = (
+            " >   previous prompt\n"
+            "✦ Here is the response.\n"
+        )
+        is_idle, typed = astra._pane_idle_state("%30")
+        assert not is_idle
 
     @patch.object(astra.tmux, "_capture_pane")
     def test_profile_for_pane_lookup(self, mock_capture):
@@ -4839,6 +5012,11 @@ class TestIsUiChrome(unittest.TestCase):
     def test_thinking_with_timing(self):
         self.assertTrue(astra._is_ui_chrome("* Percolating… (1m 14s · ↓ 1.8k tokens)"))
 
+    def test_response_bullet_with_timing_not_chrome(self):
+        """● response text containing time references (2m) is NOT chrome."""
+        assert not astra._is_ui_chrome(
+            "● PFA done. First window (2m) just finished sweeping.")
+
     def test_thinking_spinner(self):
         self.assertTrue(astra._is_ui_chrome("⠐ Thinking…"))
 
@@ -4891,6 +5069,18 @@ class TestIsUiChrome(unittest.TestCase):
     def test_response_bullet_not_filtered(self):
         """Regular response bullet should NOT be filtered."""
         self.assertFalse(astra._is_ui_chrome("● All 3 images received."))
+
+    def test_shell_management_hint(self):
+        """Shell management hint below prompt is UI chrome."""
+        self.assertTrue(astra._is_ui_chrome("1 shell · ↓ to manage"))
+        self.assertTrue(astra._is_ui_chrome("3 shells · ↓ to manage"))
+
+    def test_status_bar_with_text(self):
+        """Status bar with branch name is UI chrome."""
+        self.assertTrue(astra._is_ui_chrome("──── dof-height-estimation-margins-dense ──"))
+        self.assertTrue(astra._is_ui_chrome("───── main ─────────────────────"))
+        # Short separators are NOT chrome
+        self.assertFalse(astra._is_ui_chrome("──"))
 
 
 class TestFilterToolCalls(unittest.TestCase):

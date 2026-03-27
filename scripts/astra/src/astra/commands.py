@@ -89,6 +89,10 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
         if has_active_prompt:
             return text
         return _ALIASES[stripped]
+    # ! prefix pass-through: !N message → !wN message (bare number shorthand)
+    m = re.match(r"^!(\d+[a-z]?)\s+(.+)$", stripped, re.DOTALL)
+    if m:
+        return f"!w{m.group(1)} {m.group(2)}"
     # sw alias: sw4 cmd → w4 !cmd, s<name> cmd → <name> !cmd (shell in CLI)
     m = re.match(r"^sw(\d+[a-z]?)\s+(.+)$", stripped, re.DOTALL)
     if m:
@@ -284,7 +288,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`k` keys | `k5` keys w5 | `k5 shift+tab` keys w5 shift+tab",
             "`c` clear | `c4` clear w4 | `r4` restart w4",
             "",
-            "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session.",
+            "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session. `!wN msg` injects while busy (Esc + type).",
             "*Photos:* send a photo to have the CLI read it. Add `wN` in caption to target.",
         ]
         telegram.tg_send("\n".join(help_lines), reply_markup=telegram._build_reply_keyboard())
@@ -1013,6 +1017,12 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("No saved messages.")
         return None, sessions, last_win_idx
 
+    # ! prefix: inject into busy session (Esc + type) instead of queuing
+    force = False
+    if text.startswith("!"):
+        force = True
+        text = text[1:].lstrip()
+
     # Parse wN prefix
     m = re.match(r"^w(\d+[a-z]?)\s+(.*)", text, re.DOTALL)
     if m:
@@ -1022,7 +1032,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if resolved:
             pane, project = sessions[resolved]
             _clear_suggestion_keyboard(resolved)
-            confirm = routing.route_to_pane(pane, resolved, prompt)
+            confirm = routing.route_to_pane(pane, resolved, prompt, force=force)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(resolved, confirm[:100])
             _maybe_activate_smartfocus(resolved, pane, project, confirm)
@@ -1040,7 +1050,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if name_idx is not None:
             pane, project = sessions[name_idx]
             _clear_suggestion_keyboard(name_idx)
-            confirm = routing.route_to_pane(pane, name_idx, words[1].strip())
+            confirm = routing.route_to_pane(pane, name_idx, words[1].strip(), force=force)
             telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(name_idx, confirm[:100])
             _maybe_activate_smartfocus(name_idx, pane, project, confirm)
@@ -1056,7 +1066,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     if target_idx:
         pane, project = sessions[target_idx]
         _clear_suggestion_keyboard(target_idx)
-        confirm = routing.route_to_pane(pane, target_idx, text)
+        confirm = routing.route_to_pane(pane, target_idx, text, force=force)
         telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
         config._log(target_idx, confirm[:100])
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)

@@ -1272,6 +1272,7 @@ Aliases:
   c / c4 / r4          /clear / /clear w4 / /restart w4
 
 Routing: prefix with wN (e.g. 'w4 fix the bug').
+  !wN msg — inject while busy (Esc + type + Enter).
   Solo panes: w4 or w4a. Multi-pane: w1a, w1b.""")
 
 

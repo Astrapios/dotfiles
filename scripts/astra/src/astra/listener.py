@@ -157,6 +157,7 @@ class _ListenerState:
     focus_target_wid: str | None = None
     focus_pane_width: int = 0
     focus_prev_lines: list = field(default_factory=list)
+    focus_last_sent: str = ""
     deepfocus_target_wid: str | None = None
     deepfocus_pane_width: int = 0
     deepfocus_prev_lines: list = field(default_factory=list)
@@ -167,6 +168,7 @@ class _ListenerState:
     smartfocus_pane_width: int = 0
     smartfocus_prev_lines: list = field(default_factory=list)
     smartfocus_has_sent: bool = False
+    smartfocus_last_sent: str = ""
     compact_notified: set = field(default_factory=set)
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
@@ -420,6 +422,7 @@ def _listen_tick(s):
             s.focus_target_wid = fw
             s.focus_pane_width = tmux._get_pane_width(focus_state["pane"])
             s.focus_prev_lines = []
+            s.focus_last_sent = ""
         fp, fproj = focus_state["pane"], focus_state["project"]
         if fw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
@@ -441,10 +444,11 @@ def _listen_tick(s):
                 if new:
                     new = content._collapse_tool_calls(new, profile=_fprofile)
                     new_text = "\n".join(new).strip()
-                    if new_text:
+                    if new_text and new_text != s.focus_last_sent:
                         config._log("focus", f"sending {len(new)} new lines for {fw}")
                         header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
                         telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+                        s.focus_last_sent = new_text
             s.focus_prev_lines = cleaned_lines
     elif s.focus_target_wid:
         s.focus_target_wid = None
@@ -463,6 +467,7 @@ def _listen_tick(s):
                 s.smartfocus_pane_width = tmux._get_pane_width(smartfocus_state["pane"])
                 s.smartfocus_prev_lines = []
                 s.smartfocus_has_sent = False
+                s.smartfocus_last_sent = ""
             sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
             if sfw not in s.sessions:
                 s.sessions = tmux.scan_claude_sessions()
@@ -477,23 +482,40 @@ def _listen_tick(s):
                 _sfprofile = profiles.get_profile(_sfinfo.cli) if _sfinfo and hasattr(_sfinfo, 'cli') else None
                 raw = tmux._capture_pane(sfp, 200)
                 cleaned_lines = content._focus_capture_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
+                _sf_debug = config._is_debug_enabled()
+                if _sf_debug:
+                    config._debug_log(f"[sf:{sfw}] cleaned={len(cleaned_lines)} prev={len(s.smartfocus_prev_lines)}")
+                    config._debug_log(f"[sf:{sfw}] cleaned_tail: {cleaned_lines[-5:]}")
                 if s.smartfocus_prev_lines:
                     new = content._compute_new_lines(s.smartfocus_prev_lines, cleaned_lines)
+                    if _sf_debug:
+                        config._debug_log(f"[sf:{sfw}] delta={len(new) if new else 0} lines")
+                        if new:
+                            config._debug_log(f"[sf:{sfw}] delta: {new[:10]}")
                     if new:
                         new = content._strip_dialog(new)
                     if new:
                         new = content._collapse_tool_calls(new, profile=_sfprofile)
                         new_text = "\n".join(new).strip()
-                        if new_text:
+                        # Skip trivial deltas (just emoji/symbols, no real text)
+                        if new_text and not re.search(r'[a-zA-Z0-9]{2,}', new_text):
+                            if _sf_debug:
+                                config._debug_log(f"[sf:{sfw}] trivial skip: {new_text[:200]}")
+                            new_text = ""
+                        if new_text and new_text != s.smartfocus_last_sent:
                             config._log("smartfocus", f"sending {len(new)} new lines for {sfw}")
                             header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
                             telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                             s.smartfocus_has_sent = True
+                            s.smartfocus_last_sent = new_text
+                        elif _sf_debug and new_text:
+                            config._debug_log(f"[sf:{sfw}] dedup skip: {new_text[:200]}")
                 s.smartfocus_prev_lines = cleaned_lines
     elif s.smartfocus_target_wid:
         s.smartfocus_target_wid = None
         s.smartfocus_prev_lines = []
         s.smartfocus_has_sent = False
+        s.smartfocus_last_sent = ""
 
     # --- Deep focus monitoring (streams all output) ---
     if deepfocus_state:

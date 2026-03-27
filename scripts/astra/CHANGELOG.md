@@ -5,6 +5,24 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.28.0
+
+- **`!` prefix for injecting into busy sessions** — `!w0 focus on the API` sends Esc + types the instruction + Enter, adding an "additional instruction" mid-task instead of queuing. Works with `!wN`, `!N` shorthand, session names, and single-session fallback.
+- **Fix incomplete stop responses** — stop hook now captures the full response including interleaved text and tool calls. Previously only captured the last text section when a response had multiple `●` text bullets separated by tool calls.
+- **Fix response text falsely filtered as spinner** — `●` response bullets containing time references like `(2m)` were being stripped by the timing indicator filter (`\d+[hms]`). Now excludes `●` and `❯` from the spinner character class, consistent with the ellipsis spinner filter. Also adds debug logging to stop signal processing.
+- **Fix Gemini busy detection** — Gemini's `>` prompt is always visible (part of the fixed UI layout), so the busy indicator "esc to cancel" appears above it, not below. Now pre-scans all captured lines for the busy indicator instead of only checking lines below the prompt. Also adds `✦` (Gemini response bullet) to content indicators that signal a busy session.
+
+## 0.27.2
+
+- **Fix empty stop messages for long responses** — when tool call outputs push the text `●` bullet beyond the capture range, the stop hook now captures up to 500 lines (was 200) and falls back to showing the last 30 content lines before the prompt.
+- **Filter satisfaction survey from stop output** — "How is Claude doing this session?" survey and its rating options are stripped from both stop messages and focus/smartfocus content.
+- **Skip trivial smartfocus deltas** — single-emoji or symbol-only deltas (no alphanumeric content) are no longer sent as smartfocus messages.
+
+## 0.27.1
+
+- **Fix smartfocus duplicate sends** — when fast-scrolling output causes zero overlap between captures, the full content was returned as "new" every tick, producing repeated identical messages after tool-call collapse. Now deduplicates: skips sending if the collapsed text matches the previous send. Applies to both focus and smartfocus.
+- **Fix false-busy idle detection** — `_pane_idle_state` now tolerates up to 4 unrecognized UI lines below the prompt instead of failing on the first unknown line. Content indicators (`●`, `⎿`) still immediately signal busy (old prompt). Adds chrome patterns for shell hints (`1 shell · ↓ to manage`) and text status bars (`──── branch ──`). Removes fragile text-based `✻` pattern in favor of existing timing/color detection.
+
 ## 0.27.0
 
 - **`/local off` auto-attaches smartfocus** — when autofocus is enabled and no focus is active, `/local off` automatically attaches smartfocus to a busy session (prefers last active window).
