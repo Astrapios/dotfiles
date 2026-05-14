@@ -1,4 +1,13 @@
-"""Telegram API: send, poll, photos, keyboards."""
+"""Telegram API: send, poll, photos, keyboards.
+
+All HTTP traffic to api.telegram.org is funnelled through `TelegramClient`
+(a thin shim over `requests.Session`) so that the transport can be swapped
+later for capture/replay/REPL purposes (see `tg_mock.py`).
+
+Public free functions (`tg_send`, `tg_send_photo`, `_poll_updates`, …)
+are kept as the caller-facing API and delegate to a module-level
+`_default_client`.
+"""
 import mimetypes
 import os
 import re
@@ -16,6 +25,64 @@ def _fire_and_forget(fn, *args, **kwargs):
     threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
 
 
+class TelegramClient:
+    """Single chokepoint for api.telegram.org HTTP traffic.
+
+    The `transport` attribute must expose `requests`-style helpers:
+    ``.get(url, **kwargs)``, ``.post(url, **kwargs)``, and a generic
+    ``.request(method, url, **kwargs)``, each returning a
+    `requests.Response`-like object (`.status_code`, `.json()`,
+    `.raise_for_status()`, `.content`).
+
+    The default transport is the `requests` module itself, which preserves
+    backward-compatibility with tests that ``@patch("requests.get")`` /
+    ``@patch("requests.post")``. The mock layer (`tg_mock.py`, PR2) swaps
+    in an object with the same interface via `set_transport()`.
+
+    Tokens are resolved lazily at call time so updates to `config.BOT` /
+    `config.DOC_BOT` after import are picked up.
+    """
+
+    def __init__(self, transport=None):
+        self.transport = transport if transport is not None else requests
+
+    def set_transport(self, transport) -> None:
+        """Replace the transport (used by mock layer to flip live↔mock)."""
+        self.transport = transport
+
+    def api(self, method: str, endpoint: str, *, bot_token: str = "", **kwargs):
+        """Call an api.telegram.org endpoint via the current transport.
+
+        `endpoint` is the bare endpoint name (e.g. "sendMessage").
+        `bot_token` overrides the default (used for DOC_BOT in send_photo/doc).
+        Remaining kwargs (`json`, `data`, `files`, `params`, `timeout`, …)
+        pass through to the transport.
+
+        Dispatches to method-specific transport functions (`.get`/`.post`)
+        so that `@patch("requests.get")` / `@patch("requests.post")` style
+        test mocks continue to work without modification.
+        """
+        token = bot_token or config.BOT
+        url = f"https://api.telegram.org/bot{token}/{endpoint}"
+        m = method.upper()
+        if m == "GET":
+            return self.transport.get(url, **kwargs)
+        if m == "POST":
+            return self.transport.post(url, **kwargs)
+        return self.transport.request(method, url, **kwargs)
+
+    def file_download(self, file_path: str, *, bot_token: str = "", timeout: int = 60):
+        """GET a file at /file/bot{TOKEN}/{file_path} (different host prefix
+        than the api endpoints; used by `_download_tg_file`)."""
+        token = bot_token or config.BOT
+        url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        return self.transport.get(url, timeout=timeout)
+
+
+# Module-level singleton — every public function below delegates here.
+_default_client = TelegramClient()
+
+
 def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
             silent: bool = False) -> int:
     """Send a message to Telegram. Returns message_id."""
@@ -26,22 +93,14 @@ def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
         payload["reply_markup"] = reply_markup
     if silent:
         payload["disable_notification"] = True
-    r = requests.post(
-        f"https://api.telegram.org/bot{config.BOT}/sendMessage",
-        json=payload,
-        timeout=30,
-    )
+    r = _default_client.api("POST", "sendMessage", json=payload, timeout=30)
     if r.status_code == 400:
         payload_plain: dict = {"chat_id": chat_id, "text": text}
         if reply_markup is not None:
             payload_plain["reply_markup"] = reply_markup
         if silent:
             payload_plain["disable_notification"] = True
-        r = requests.post(
-            f"https://api.telegram.org/bot{config.BOT}/sendMessage",
-            json=payload_plain,
-            timeout=30,
-        )
+        r = _default_client.api("POST", "sendMessage", json=payload_plain, timeout=30)
     r.raise_for_status()
     msg_id = r.json()["result"]["message_id"]
     # Debug log
@@ -199,15 +258,15 @@ def tg_send_document(path: str, caption: str = "", chat_id: str = "",
                      bot_token: str = "") -> int:
     """Send a file as a document to Telegram. Returns message_id."""
     chat_id = chat_id or config.CHAT_ID
-    token = bot_token or config.BOT
     mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
     with open(path, "rb") as f:
         data: dict = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption[:1024]
             data["parse_mode"] = "Markdown"
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendDocument",
+        r = _default_client.api(
+            "POST", "sendDocument",
+            bot_token=bot_token,
             data=data,
             files={"document": (os.path.basename(path), f, mime_type)},
             timeout=60,
@@ -215,8 +274,9 @@ def tg_send_document(path: str, caption: str = "", chat_id: str = "",
         if r.status_code == 400 and caption:
             f.seek(0)
             data.pop("parse_mode", None)
-            r = requests.post(
-                f"https://api.telegram.org/bot{token}/sendDocument",
+            r = _default_client.api(
+                "POST", "sendDocument",
+                bot_token=bot_token,
                 data=data,
                 files={"document": (os.path.basename(path), f, mime_type)},
                 timeout=60,
@@ -235,15 +295,15 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "",
     if w > 1280 or h > 1280:
         return tg_send_document(path, caption, chat_id, bot_token=bot_token)
     chat_id = chat_id or config.CHAT_ID
-    token = bot_token or config.BOT
     mime_type = mimetypes.guess_type(path)[0] or "image/png"
     with open(path, "rb") as f:
         data: dict = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption[:1024]
             data["parse_mode"] = "Markdown"
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendPhoto",
+        r = _default_client.api(
+            "POST", "sendPhoto",
+            bot_token=bot_token,
             data=data,
             files={"photo": (os.path.basename(path), f, mime_type)},
             timeout=60,
@@ -251,8 +311,9 @@ def tg_send_photo(path: str, caption: str = "", chat_id: str = "",
         if r.status_code == 400 and caption:
             f.seek(0)
             data.pop("parse_mode", None)
-            r = requests.post(
-                f"https://api.telegram.org/bot{token}/sendPhoto",
+            r = _default_client.api(
+                "POST", "sendPhoto",
+                bot_token=bot_token,
                 data=data,
                 files={"photo": (os.path.basename(path), f, mime_type)},
                 timeout=60,
@@ -283,8 +344,8 @@ def _build_inline_keyboard(rows: list[list[tuple[str, str]]]) -> dict:
 def _answer_callback_query(callback_query_id: str, text: str = ""):
     """POST answerCallbackQuery to dismiss the button loading spinner."""
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{config.BOT}/answerCallbackQuery",
+        _default_client.api(
+            "POST", "answerCallbackQuery",
             json={"callback_query_id": callback_query_id, "text": text},
             timeout=10,
         )
@@ -296,8 +357,8 @@ def _remove_inline_keyboard(message_id: int, chat_id: str = ""):
     """POST editMessageReplyMarkup with empty keyboard to remove buttons."""
     chat_id = chat_id or config.CHAT_ID
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{config.BOT}/editMessageReplyMarkup",
+        _default_client.api(
+            "POST", "editMessageReplyMarkup",
             json={"chat_id": chat_id, "message_id": message_id,
                   "reply_markup": {"inline_keyboard": []}},
             timeout=10,
@@ -337,8 +398,8 @@ def _set_bot_commands():
         {"command": "quit", "description": "Shut down the listener"},
     ]
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{config.BOT}/setMyCommands",
+        _default_client.api(
+            "POST", "setMyCommands",
             json={"commands": commands},
             timeout=10,
         )
@@ -353,8 +414,8 @@ def tg_wait_reply(after_message_id: int, timeout: int = 300) -> str:
     deadline = time.time() + timeout if timeout > 0 else float("inf")
     while time.time() < deadline:
         try:
-            r = requests.get(
-                f"https://api.telegram.org/bot{config.BOT}/getUpdates",
+            r = _default_client.api(
+                "GET", "getUpdates",
                 params={"timeout": 10, "offset": offset},
                 timeout=30,
             )
@@ -383,8 +444,8 @@ def _poll_updates(offset: int, timeout: int = 1) -> tuple[dict | None, int]:
     """Poll Telegram getUpdates. Returns (response_data, new_offset).
     Returns (None, offset) on error. Lets KeyboardInterrupt propagate."""
     try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{config.BOT}/getUpdates",
+        r = _default_client.api(
+            "GET", "getUpdates",
             params={"timeout": timeout, "offset": offset},
             timeout=timeout + 10,
         )
@@ -402,8 +463,8 @@ def _poll_updates(offset: int, timeout: int = 1) -> tuple[dict | None, int]:
 def _download_tg_file(file_id: str, dest: str) -> str | None:
     """Download a Telegram file by file_id to dest path. Returns path or None."""
     try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{config.BOT}/getFile",
+        r = _default_client.api(
+            "GET", "getFile",
             params={"file_id": file_id},
             timeout=30,
         )
@@ -411,10 +472,7 @@ def _download_tg_file(file_id: str, dest: str) -> str | None:
         file_path = r.json().get("result", {}).get("file_path", "")
         if not file_path:
             return None
-        r2 = requests.get(
-            f"https://api.telegram.org/file/bot{config.BOT}/{file_path}",
-            timeout=60,
-        )
+        r2 = _default_client.file_download(file_path, timeout=60)
         r2.raise_for_status()
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:

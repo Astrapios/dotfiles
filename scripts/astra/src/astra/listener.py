@@ -7,8 +7,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-import requests
-
 from astra import config, telegram, tmux, tmux_send, state, content, commands, signals, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
@@ -861,8 +859,8 @@ def cmd_listen():
     # Consume existing updates to avoid replaying old messages
     offset = 0
     try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{config.BOT}/getUpdates",
+        r = telegram._default_client.api(
+            "GET", "getUpdates",
             params={"timeout": 0, "offset": -1},
             timeout=10,
         )
