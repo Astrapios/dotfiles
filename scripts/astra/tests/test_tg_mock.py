@@ -533,3 +533,157 @@ class TestApplyMockState:
             mt2 = tg_mock.apply_mock_state(client)
         assert mt1 is not mt2
         assert mt2.config.capture_path.endswith("b.jsonl")
+
+
+# --- PR5: replay transcript ---
+
+
+class TestReplayTranscript:
+    """Tests for the human-readable transcript produced by `astra mock replay`."""
+
+    def _run_replay(self, jsonl_path: str, capsys) -> str:
+        """Invoke cmd_mock with sys.argv = ['astra', 'mock', 'replay', path]."""
+        import astra.cli as cli
+        import sys as _sys
+        old_argv = _sys.argv
+        _sys.argv = ["astra", "mock", "replay", jsonl_path]
+        try:
+            cli.cmd_mock()
+        finally:
+            _sys.argv = old_argv
+        return capsys.readouterr().out
+
+    def test_replay_basic_message(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "ts": "2026-05-14T22:00:00.000",
+            "seq": 1,
+            "dir": "out",
+            "endpoint": "sendMessage",
+            "method": "POST",
+            "request": {"chat_id": "<CHAT_ID>", "text": "hello world"},
+            "status": 200,
+            "elapsed_ms": 100.0,
+        }) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "sendMessage" in out
+        assert "hello world" in out
+        assert "→" in out  # outbound arrow
+
+    def test_replay_get_updates_with_text(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "ts": "2026-05-14T22:00:00.000",
+            "seq": 1,
+            "dir": "in",
+            "endpoint": "getUpdates",
+            "method": "GET",
+            "request": {"timeout": 1, "offset": 0},
+            "response": {"ok": True, "result": [
+                {"update_id": 1, "message": {"text": "fix the bug", "chat": {"id": "<CHAT_ID>"}}}
+            ]},
+            "status": 200,
+        }) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "getUpdates" in out
+        assert "fix the bug" in out
+        assert "←" in out  # inbound arrow
+
+    def test_replay_callback_update(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "ts": "2026-05-14T22:00:00.000",
+            "seq": 1,
+            "dir": "in",
+            "endpoint": "getUpdates",
+            "method": "GET",
+            "request": {},
+            "response": {"ok": True, "result": [
+                {"update_id": 1, "callback_query": {"id": "cb1", "data": "perm_w0_1"}}
+            ]},
+            "status": 200,
+        }) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "callback: perm_w0_1" in out
+
+    def test_replay_empty_getupdates(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "ts": "2026-05-14T22:00:00.000",
+            "seq": 1,
+            "dir": "in",
+            "endpoint": "getUpdates",
+            "method": "GET",
+            "request": {"timeout": 1, "offset": 0},
+            "response": {"ok": True, "result": []},
+            "status": 200,
+        }) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "(empty)" in out
+
+    def test_replay_send_photo(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "ts": "2026-05-14T22:00:00.000",
+            "seq": 1,
+            "dir": "out",
+            "endpoint": "sendPhoto",
+            "method": "POST",
+            "request": {"chat_id": "<CHAT_ID>", "caption": "screenshot"},
+            "files": [{"field": "photo", "name": "x.png", "mime": "image/png"}],
+            "status": 200,
+        }) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "sendPhoto" in out
+        assert "screenshot" in out
+        assert "x.png" in out
+
+    def test_replay_inline_keyboard_summary(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "ts": "2026-05-14T22:00:00.000",
+            "seq": 1,
+            "dir": "out",
+            "endpoint": "sendMessage",
+            "method": "POST",
+            "request": {
+                "chat_id": "<CHAT_ID>",
+                "text": "Allow?",
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": "✅ Allow", "callback_data": "perm_w0_1"},
+                    {"text": "❌ Deny", "callback_data": "perm_w0_3"}
+                ]]},
+            },
+            "status": 200,
+        }) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "Allow?" in out
+        assert "kb:" in out
+        assert "Allow" in out
+        assert "Deny" in out
+
+    def test_replay_header_line(self, tmp_path, capsys):
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({"seq": 1, "dir": "out", "endpoint": "x"}) + "\n")
+        out = self._run_replay(str(path), capsys)
+        assert "Replay transcript:" in out
+        assert "Records: 1" in out
+
+    def test_replay_uses_latest_when_no_path(self, tmp_path, capsys):
+        """Without an explicit path, replay uses the latest capture."""
+        path = tmp_path / "cap.jsonl"
+        path.write_text(json.dumps({
+            "seq": 1, "dir": "out", "endpoint": "sendMessage",
+            "request": {"text": "hi"}, "status": 200,
+        }) + "\n")
+        import astra.cli as cli
+        import sys as _sys
+        old_argv = _sys.argv
+        _sys.argv = ["astra", "mock", "replay"]
+        try:
+            with patch.object(tg_mock, "_CAPTURE_DIR_DEFAULT", str(tmp_path)):
+                cli.cmd_mock()
+            out = capsys.readouterr().out
+        finally:
+            _sys.argv = old_argv
+        assert "hi" in out

@@ -1254,9 +1254,144 @@ def cmd_mock():
             print(json.dumps(r, indent=2))
         return
 
+    if sub == "replay":
+        path = sys.argv[3] if len(sys.argv) > 3 else None
+        if not path:
+            path = tg_mock.find_latest_capture()
+            if not path:
+                print("No captures found.", file=sys.stderr)
+                sys.exit(1)
+        records = tg_mock.read_records(path)
+        if not records:
+            print(f"No records in {path}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Replay transcript: {path}")
+        print(f"Records: {len(records)}")
+        print("=" * 78)
+        for r in records:
+            _print_transcript_line(r)
+        print("=" * 78)
+        return
+
     print(f"Unknown subcommand: mock {sub}", file=sys.stderr)
-    print("Usage: astra mock <recent [N]|dump [path]|status>", file=sys.stderr)
+    print("Usage: astra mock <on|off|status|recent [N]|dump [path]|replay [path]>",
+          file=sys.stderr)
     sys.exit(1)
+
+
+def _print_transcript_line(record: dict) -> None:
+    """Pretty-print a single JSONL record in human-readable transcript form."""
+    ts = record.get("ts", "")[:23]
+    seq = record.get("seq", "?")
+    direction = record.get("dir", "?")
+    arrow = "→" if direction == "out" else "←"
+    endpoint = record.get("endpoint", "?")
+    status = record.get("status", "?")
+    elapsed = record.get("elapsed_ms")
+    elapsed_str = f"{elapsed:.0f}ms" if isinstance(elapsed, (int, float)) else ""
+
+    header = f"[{ts}] #{seq:<4} {arrow} {endpoint:<22} {status}"
+    if elapsed_str:
+        header += f"  ({elapsed_str})"
+    print(header)
+
+    # Endpoint-specific summary lines
+    req = record.get("request", {}) or {}
+    resp = record.get("response", {}) or {}
+    files = record.get("files")
+
+    if endpoint == "sendMessage":
+        text = req.get("text", "")
+        # Truncate long text to keep transcript readable; show indented
+        for line in _wrap_for_transcript(text):
+            print(f"     {line}")
+        kb = req.get("reply_markup", {})
+        if isinstance(kb, dict):
+            inline = kb.get("inline_keyboard")
+            if inline:
+                labels = [btn.get("text", "?") for row in inline for btn in row]
+                print(f"     [kb: {' | '.join(labels[:6])}]")
+
+    elif endpoint == "sendPhoto" or endpoint == "sendDocument":
+        cap = req.get("caption", "")
+        if cap:
+            for line in _wrap_for_transcript(cap):
+                print(f"     caption: {line}")
+        if files:
+            for f in files:
+                print(f"     file: {f.get('name', '?')} ({f.get('field', '?')})")
+
+    elif endpoint == "getUpdates":
+        # Inbound — summarize each user message/callback in the response
+        if isinstance(resp, dict):
+            result = resp.get("result", []) or []
+            if not result:
+                print("     (empty)")
+            for upd in result:
+                _print_update_summary(upd)
+
+    elif endpoint == "answerCallbackQuery":
+        cb_id = req.get("callback_query_id", "?")
+        print(f"     ack callback: {cb_id}")
+
+    elif endpoint == "editMessageReplyMarkup":
+        mid = req.get("message_id", "?")
+        print(f"     remove kb on message {mid}")
+
+    elif endpoint.startswith("file:"):
+        # File download
+        size = (record.get("response") or {}).get("_size")  # not set today, but reserve
+        print(f"     file path: {endpoint[5:]}")
+
+    elif endpoint == "setMyCommands":
+        cmds = req.get("commands", [])
+        print(f"     registered {len(cmds)} commands")
+
+
+def _print_update_summary(upd: dict) -> None:
+    """Summarize a single getUpdates result entry for the transcript."""
+    if not isinstance(upd, dict):
+        print(f"     update: {upd}")
+        return
+    if "callback_query" in upd:
+        cb = upd["callback_query"]
+        data = cb.get("data", "?")
+        print(f"     callback: {data}")
+        return
+    msg = upd.get("message", {}) or {}
+    text = msg.get("text") or msg.get("caption") or ""
+    if msg.get("photo"):
+        print(f"     [photo]" + (f" caption: {text}" if text else ""))
+    elif msg.get("document"):
+        doc = msg["document"]
+        print(f"     [doc: {doc.get('file_name', '?')}]" + (f" caption: {text}" if text else ""))
+    elif text:
+        for line in _wrap_for_transcript(text):
+            print(f"     {line}")
+    else:
+        print(f"     (unknown update kind)")
+
+
+def _wrap_for_transcript(text: str, width: int = 70, max_lines: int = 6) -> list[str]:
+    """Soft-wrap text into transcript lines, capped at `max_lines`."""
+    if not text:
+        return [""]
+    # Split on existing newlines, then wrap each
+    out: list[str] = []
+    for raw in text.split("\n"):
+        if not raw:
+            out.append("")
+            continue
+        while raw:
+            out.append(raw[:width])
+            raw = raw[width:]
+            if len(out) >= max_lines:
+                break
+        if len(out) >= max_lines:
+            break
+    if len(out) >= max_lines and len(text) > sum(len(l) for l in out):
+        out.append(f"... ({len(text)} chars total)")
+    return out
 
 
 def _summarise_record_request(endpoint: str, req: dict) -> str:

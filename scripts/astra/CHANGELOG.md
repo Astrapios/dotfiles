@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.30.1
+
+- **Mock layer PR5 — `astra mock replay <jsonl>` transcript.** Renders a captured JSONL session as a human-readable transcript with timestamps, direction arrows, per-endpoint summaries, and inline-keyboard previews. Each `getUpdates` response is expanded to show user messages and callbacks; `sendMessage` shows wrapped text and keyboard labels; `sendPhoto`/`sendDocument` show captions and file names. Default path: the latest capture under `/tmp/astra_capture/`.
+- **`find_latest_capture` now reads the default directory lazily** so tests can monkey-patch it.
+- **Scope note**: per user decision, PR5 ships transcript-only. Code-execution replay (assert/playback/inject modes) and `FakeTelegram` harness migration are deferred — the JSONL captures + transcript alone solve the bug-sharing pain point.
+- **Safety tag**: `pre-mock-pr5`.
+
 ## 0.30.0
 
 - **Mock layer PR3 — `astra mock on/off` live toggle.** New CLI subcommands flip the Telegram mock transport in a running listener via a signal file (`/tmp/astra_signals/_mock_on.json`), no restart required. Mirrors the `astra debug on/off` signal-file pattern. The listener's `_listen_tick` syncs its transport each iteration; latency is ≤1s (bounded by the long-poll timeout).

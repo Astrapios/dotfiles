@@ -447,8 +447,13 @@ def activate_from_env() -> MockTransport | None:
     return attach(telegram._default_client, cfg)
 
 
-def find_latest_capture(directory: str = _CAPTURE_DIR_DEFAULT) -> str | None:
-    """Return the most recently modified *.jsonl in the capture dir."""
+def find_latest_capture(directory: str | None = None) -> str | None:
+    """Return the most recently modified *.jsonl in the capture dir.
+
+    Reads `_CAPTURE_DIR_DEFAULT` lazily so tests can monkey-patch it.
+    """
+    if directory is None:
+        directory = _CAPTURE_DIR_DEFAULT
     if not os.path.isdir(directory):
         return None
     candidates = [
