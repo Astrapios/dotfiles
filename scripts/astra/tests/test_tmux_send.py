@@ -192,6 +192,17 @@ class TestClearTyped:
 
 
 @patch.object(tmux_send.subprocess, "run")
+class TestTripleCtrlC:
+    def test_three_ctrl_c_with_sleeps(self, mock_run):
+        tmux_send.triple_ctrl_c("%30")
+        cmd = _captured_bash_cmd(mock_run)
+        # Three C-c, each separated by sleep 0.1
+        assert cmd.count("C-c") == 3
+        assert cmd.count("sleep 0.1") == 2
+        assert mock_run.call_count == 1
+
+
+@patch.object(tmux_send.subprocess, "run")
 class TestInterrupt:
     def test_escape_then_ctrl_u(self, mock_run):
         tmux_send.interrupt("%30")
@@ -207,5 +218,5 @@ def test_module_exposes_expected_api():
     """Sanity check that all planned API functions exist."""
     for name in ("type_text", "press_key", "press_keys", "select_option",
                  "submit_text", "inject_busy", "navigate_then_submit",
-                 "clear_typed", "interrupt"):
+                 "triple_ctrl_c", "clear_typed", "interrupt"):
         assert hasattr(tmux_send, name), f"tmux_send missing {name}"

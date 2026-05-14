@@ -3,15 +3,13 @@ import fcntl
 import os
 import pathlib
 import re
-import shlex
-import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 
 import requests
 
-from astra import config, telegram, tmux, state, content, commands, signals, routing, profiles
+from astra import config, telegram, tmux, tmux_send, state, content, commands, signals, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_PERMISSION = 1
@@ -692,19 +690,16 @@ def _listen_tick(s):
                         s.last_win_idx = target_wid
                         continue
 
-                    p = shlex.quote(pane)
-
                     # Save locally typed text before clearing
                     if typed_text:
                         state._save_queued_msg(target_wid, typed_text)
-                        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+                        tmux_send.clear_typed(pane)
                         time.sleep(0.2)
 
-                    # Delay before Enter — Claude Code needs time to
-                    # process image path previews (longer for albums)
-                    delay = "0.5" if len(paths) > 1 else "0.3"
-                    cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep {delay} && tmux send-keys -t {p} Enter"
-                    subprocess.run(["bash", "-c", cmd], timeout=10)
+                    # Longer settle for albums — Claude Code needs more
+                    # time to process multi-image path previews.
+                    settle = 0.5 if len(paths) > 1 else 0.3
+                    tmux_send.submit_text(pane, instruction, settle=settle)
                     state._mark_busy(target_wid)
                     confirm = f"📷 Photo sent to `{target_wid}` (`{project}`):\n`{paths_display}`"
                     telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
@@ -772,16 +767,13 @@ def _listen_tick(s):
                         s.last_win_idx = target_wid
                         continue
 
-                    p = shlex.quote(pane)
-
                     # Save locally typed text before clearing
                     if typed_text:
                         state._save_queued_msg(target_wid, typed_text)
-                        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+                        tmux_send.clear_typed(pane)
                         time.sleep(0.2)
 
-                    cmd = f"tmux send-keys -t {p} -l {shlex.quote(instruction)} && sleep 0.3 && tmux send-keys -t {p} Enter"
-                    subprocess.run(["bash", "-c", cmd], timeout=10)
+                    tmux_send.submit_text(pane, instruction)
                     state._mark_busy(target_wid)
                     confirm = f"📎 Document sent to `{target_wid}` (`{project}`):\n`{file_name}`"
                     telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))

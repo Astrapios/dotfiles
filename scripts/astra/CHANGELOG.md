@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.28.1
+
+- **Refactor: unified `tmux_send` API.** All `tmux send-keys` invocations (previously scattered across `routing.py`, `listener.py`, `commands.py`, `cli.py`) now route through a single `astra.tmux_send` module. Centralizes sleep schedule constants (`_AFTER_ESCAPE`, `_AFTER_TYPE`, `_AFTER_TYPE_INJECT`, `_BETWEEN_KEYS`) so timing changes no longer require touching multiple files. Behaviour-preserving. Adds 25 new unit tests; total 974 passing.
+
 ## 0.28.0
 
 - **`!` prefix for injecting into busy sessions** — `!w0 focus on the API` sends Esc + types the instruction + Enter, adding an "additional instruction" mid-task instead of queuing. Works with `!wN`, `!N` shorthand, session names, and single-session fallback.

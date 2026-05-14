@@ -72,9 +72,11 @@ class SimulationHarness:
             )
 
         # --- Patch subprocess.run in all modules that call it ---
-        # Note: astra.routing no longer calls subprocess directly — its
-        # tmux send-keys logic was extracted to astra.tmux_send.
-        for mod_path in ("astra.listener", "astra.commands", "astra.tmux_send"):
+        # Note: astra.routing and astra.listener no longer call subprocess
+        # directly — their tmux send-keys logic was extracted to
+        # astra.tmux_send. astra.commands still calls subprocess for tmux
+        # new-window (session creation).
+        for mod_path in ("astra.commands", "astra.tmux_send"):
             self._patches.append(
                 patch(f"{mod_path}.subprocess.run", side_effect=self._fake_subprocess_run)
             )

@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import time
 
-from astra import config, telegram, tmux, state, content, routing, profiles
+from astra import config, telegram, tmux, tmux_send, state, content, routing, profiles
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_ERROR = 4
@@ -143,18 +143,15 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
 def _auto_setup_session(pane_target: str):
     """Accept trust dialog and switch out of plan mode for new sessions."""
     try:
-        p = shlex.quote(pane_target)
         raw = tmux._capture_pane(pane_target, 30)
         # Accept workspace trust dialog if present
         if "trust" in raw.lower() and ("Yes" in raw or "1." in raw):
-            subprocess.run(["bash", "-c",
-                            f"tmux send-keys -t {p} Enter"], timeout=5)
+            tmux_send.press_key(pane_target, "Enter")
             time.sleep(3)
             raw = tmux._capture_pane(pane_target, 30)
         # Switch out of plan mode (Shift+Tab cycles: plan → auto → ...)
         if "plan mode on" in raw.lower():
-            subprocess.run(["bash", "-c",
-                            f"tmux send-keys -t {p} BTab"], timeout=5)
+            tmux_send.press_key(pane_target, "BTab")
     except Exception:
         pass
 
@@ -162,12 +159,9 @@ def _auto_setup_session(pane_target: str):
 def _interrupt_session(idx: str, sessions: dict):
     """Interrupt a CLI session: Escape, clear prompt, clear busy/prompt state."""
     pane, project = sessions[idx]
-    p = shlex.quote(pane)
     config._mark_remote(idx)
     # Escape interrupts current operation, Ctrl+U clears the prompt line
-    subprocess.run(["bash", "-c",
-                    f"tmux send-keys -t {p} Escape && sleep 0.1 && "
-                    f"tmux send-keys -t {p} C-u"], timeout=5)
+    tmux_send.interrupt(pane)
     state._clear_busy(idx)
     state.load_active_prompt(idx)  # load = consume and delete
     telegram.tg_send(f"⏹ Interrupted {state._wid_label(idx)} (`{project}`).")
@@ -175,7 +169,6 @@ def _interrupt_session(idx: str, sessions: dict):
 
 def _enable_accept_edits(pane: str):
     """Cycle Shift+Tab until 'accept edits on' mode is active."""
-    p = shlex.quote(pane)
     for _ in range(5):
         try:
             raw = tmux._capture_pane(pane, 5)
@@ -187,7 +180,7 @@ def _enable_accept_edits(pane: str):
                 if "accept edits on" in s.lower():
                     return
                 break
-        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} BTab"], timeout=5)
+        tmux_send.press_key(pane, "BTab")
         time.sleep(0.3)
 
 
@@ -793,13 +786,10 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
-            p = shlex.quote(pane)
             config._mark_remote(idx)
             tokens = key_str.split()
             tmux_keys = [_resolve_key(t) for t in tokens]
-            keys_arg = " ".join(tmux_keys)
-            subprocess.run(["bash", "-c",
-                            f"tmux send-keys -t {p} {keys_arg}"], timeout=5)
+            tmux_send.press_keys(pane, *tmux_keys)
             telegram.tg_send(f"⌨️ Sent `{key_str}` to {state._wid_label(idx)} (`{project}`).")
             return None, sessions, idx
         else:
@@ -824,15 +814,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         idx = state._resolve_name(raw_target)
         if idx:
             pane, project = sessions[idx]
-            p = shlex.quote(pane)
             config._mark_remote(idx)
-            subprocess.run(
-                ["bash", "-c",
-                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-                 f"tmux send-keys -t {p} C-c"],
-                timeout=10,
-            )
+            tmux_send.triple_ctrl_c(pane)
             time.sleep(2)
             sessions = tmux.scan_claude_sessions()
             if idx in sessions:
@@ -871,15 +854,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 restart_profile = profiles.CLAUDE
             # Save working directory before killing
             cwd = tmux._get_pane_cwd(pane)
-            p = shlex.quote(pane)
             # Kill with 3x Ctrl+C
-            subprocess.run(
-                ["bash", "-c",
-                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-                 f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-                 f"tmux send-keys -t {p} C-c"],
-                timeout=10,
-            )
+            tmux_send.triple_ctrl_c(pane)
             time.sleep(2)
             sessions = tmux.scan_claude_sessions()
             if idx in sessions:
@@ -905,12 +881,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 else:
                     source_cmd = ""
                 cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
-                subprocess.run(
-                    ["bash", "-c",
-                     f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + restart_cmd)} && "
-                     f"sleep 0.1 && tmux send-keys -t {p} Enter"],
-                    timeout=10,
-                )
+                tmux_send.submit_text(pane, source_cmd + cd_cmd + restart_cmd, settle=0.1)
             else:
                 # Pane closed — create a new window (same as /new)
                 work_dir = cwd or os.path.expanduser("~")
@@ -1164,9 +1135,7 @@ def _handle_callback(callback: dict, sessions: dict,
             if resolved:
                 config._mark_remote(resolved)
                 pane, project = sessions[resolved]
-                p = shlex.quote(pane)
-                subprocess.run(["bash", "-c",
-                                f"tmux send-keys -t {p} {tmux_key}"], timeout=5)
+                tmux_send.press_key(pane, tmux_key)
                 telegram.tg_send(f"⌨️ Sent `{label}` to {state._wid_label(resolved)} (`{project}`).")
                 last_win_idx = resolved
             else:

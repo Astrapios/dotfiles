@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from astra import config, telegram, state, tmux, listener
+from astra import config, telegram, state, tmux, tmux_send, listener
 
 
 def cmd_notify(message: str):
@@ -910,10 +910,7 @@ def cmd_interrupt():
         print(f"No session '{raw_target}'.", file=sys.stderr)
         sys.exit(1)
     pane, project = sessions[idx]
-    p = shlex.quote(pane)
-    subprocess.run(["bash", "-c",
-                    f"tmux send-keys -t {p} Escape && sleep 0.1 && "
-                    f"tmux send-keys -t {p} C-u"], timeout=5)
+    tmux_send.interrupt(pane)
     state._clear_busy(idx)
     state.load_active_prompt(idx)
     print(f"Interrupted {tmux._display_wid(idx, sessions)} ({project}).")
@@ -933,12 +930,9 @@ def cmd_keys():
         print(f"No session '{raw_target}'.", file=sys.stderr)
         sys.exit(1)
     pane, project = sessions[idx]
-    p = shlex.quote(pane)
     key_tokens = sys.argv[3:]
     tmux_keys = [_resolve_key(t) for t in key_tokens]
-    keys_arg = " ".join(tmux_keys)
-    subprocess.run(["bash", "-c",
-                    f"tmux send-keys -t {p} {keys_arg}"], timeout=5)
+    tmux_send.press_keys(pane, *tmux_keys)
     print(f"Sent {' '.join(key_tokens)} to {tmux._display_wid(idx, sessions)} ({project}).")
 
 
@@ -1067,14 +1061,12 @@ def _auto_setup_session(pane_target: str):
         raw = tmux._capture_pane(pane_target, 30)
         # Accept workspace trust dialog if present
         if "trust" in raw.lower() and ("Yes" in raw or "1." in raw):
-            subprocess.run(["bash", "-c",
-                            f"tmux send-keys -t {p} Enter"], timeout=5)
+            tmux_send.press_key(pane_target, "Enter")
             time.sleep(3)
             raw = tmux._capture_pane(pane_target, 30)
         # Switch out of plan mode (Shift+Tab cycles: plan → auto → ...)
         if "plan mode on" in raw.lower():
-            subprocess.run(["bash", "-c",
-                            f"tmux send-keys -t {p} BTab"], timeout=5)
+            tmux_send.press_key(pane_target, "BTab")
     except Exception:
         pass
 
@@ -1099,14 +1091,7 @@ def cmd_restart():
     else:
         restart_profile = profiles.CLAUDE
     cwd = tmux._get_pane_cwd(pane)
-    p = shlex.quote(pane)
-    subprocess.run(
-        ["bash", "-c",
-         f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-         f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-         f"tmux send-keys -t {p} C-c"],
-        timeout=10,
-    )
+    tmux_send.triple_ctrl_c(pane)
     time.sleep(2)
     sessions = tmux.scan_claude_sessions()
     if idx in sessions:
@@ -1129,12 +1114,7 @@ def cmd_restart():
         else:
             source_cmd = ""
         cd_cmd = f"cd {shlex.quote(cwd)} && " if cwd else ""
-        subprocess.run(
-            ["bash", "-c",
-             f"tmux send-keys -t {p} -l {shlex.quote(source_cmd + cd_cmd + restart_cmd)} && "
-             f"sleep 0.1 && tmux send-keys -t {p} Enter"],
-            timeout=10,
-        )
+        tmux_send.submit_text(pane, source_cmd + cd_cmd + restart_cmd, settle=0.1)
     else:
         work_dir = cwd or os.path.expanduser("~")
         subprocess.run(
@@ -1170,14 +1150,7 @@ def cmd_kill():
         print(f"No session '{raw_target}'.", file=sys.stderr)
         sys.exit(1)
     pane, project = sessions[idx]
-    p = shlex.quote(pane)
-    subprocess.run(
-        ["bash", "-c",
-         f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-         f"tmux send-keys -t {p} C-c && sleep 0.1 && "
-         f"tmux send-keys -t {p} C-c"],
-        timeout=10,
-    )
+    tmux_send.triple_ctrl_c(pane)
     time.sleep(2)
     sessions = tmux.scan_claude_sessions()
     if idx in sessions:

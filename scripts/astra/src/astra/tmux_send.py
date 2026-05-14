@@ -128,6 +128,15 @@ def navigate_then_submit(pane: str, down_count: int, text: str,
     _run(cmd)
 
 
+def triple_ctrl_c(pane: str) -> None:
+    """Send C-c three times with 0.1s gaps — used to forcibly kill a session."""
+    p = shlex.quote(pane)
+    cmd = (f"tmux send-keys -t {p} C-c && sleep {_BETWEEN_KEYS} && "
+           f"tmux send-keys -t {p} C-c && sleep {_BETWEEN_KEYS} && "
+           f"tmux send-keys -t {p} C-c")
+    _run(cmd)
+
+
 def clear_typed(pane: str) -> None:
     """Send a single Escape — used to clear locally-typed text before
     routing a different message into the same pane."""
