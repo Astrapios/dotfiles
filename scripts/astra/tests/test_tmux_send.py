@@ -157,6 +157,33 @@ class TestInjectBusy:
 
 
 @patch.object(tmux_send.subprocess, "run")
+class TestNavigateThenSubmit:
+    def test_basic(self, mock_run):
+        tmux_send.navigate_then_submit("%30", 2, "answer text")
+        cmd = _captured_bash_cmd(mock_run)
+        # Down Down → 0.2s settle → type → 0.1s → Enter, all in one call
+        assert "Down Down" in cmd
+        assert "sleep 0.2" in cmd
+        assert "-l 'answer text'" in cmd
+        assert "sleep 0.1" in cmd
+        assert cmd.rstrip().endswith("Enter")
+        assert mock_run.call_count == 1
+
+    def test_zero_downs_just_types(self, mock_run):
+        """down_count=0 means: just type + Enter (no navigation)."""
+        tmux_send.navigate_then_submit("%30", 0, "answer")
+        cmd = _captured_bash_cmd(mock_run)
+        assert "Down" not in cmd
+        assert "-l answer" in cmd
+        assert cmd.rstrip().endswith("Enter")
+
+    def test_newlines_stripped(self, mock_run):
+        tmux_send.navigate_then_submit("%30", 1, "a\nb")
+        cmd = _captured_bash_cmd(mock_run)
+        assert "'a b'" in cmd
+
+
+@patch.object(tmux_send.subprocess, "run")
 class TestClearTyped:
     def test_sends_escape(self, mock_run):
         tmux_send.clear_typed("%30")
@@ -179,5 +206,6 @@ class TestInterrupt:
 def test_module_exposes_expected_api():
     """Sanity check that all planned API functions exist."""
     for name in ("type_text", "press_key", "press_keys", "select_option",
-                 "submit_text", "inject_busy", "clear_typed", "interrupt"):
+                 "submit_text", "inject_busy", "navigate_then_submit",
+                 "clear_typed", "interrupt"):
         assert hasattr(tmux_send, name), f"tmux_send missing {name}"

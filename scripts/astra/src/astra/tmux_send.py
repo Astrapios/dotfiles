@@ -108,6 +108,26 @@ def inject_busy(pane: str, text: str) -> None:
     _run(cmd)
 
 
+def navigate_then_submit(pane: str, down_count: int, text: str,
+                         nav_settle: float = 0.2) -> None:
+    """Down*N → sleep → type → sleep → Enter, in one bash call.
+
+    Used for the free-text reply path: navigate down to a "Type something"
+    option in a Claude AskUserQuestion dialog, then submit text directly.
+    """
+    p = shlex.quote(pane)
+    clean = _strip_newlines(text)
+    if down_count > 0:
+        nav = " ".join(["Down"] * down_count)
+        cmd = (f"tmux send-keys -t {p} {nav} && sleep {nav_settle} && "
+               f"tmux send-keys -t {p} -l {shlex.quote(clean)} && "
+               f"sleep {_AFTER_TYPE_INJECT} && tmux send-keys -t {p} Enter")
+    else:
+        cmd = (f"tmux send-keys -t {p} -l {shlex.quote(clean)} && "
+               f"sleep {_AFTER_TYPE_INJECT} && tmux send-keys -t {p} Enter")
+    _run(cmd)
+
+
 def clear_typed(pane: str) -> None:
     """Send a single Escape — used to clear locally-typed text before
     routing a different message into the same pane."""

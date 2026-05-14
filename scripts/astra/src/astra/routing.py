@@ -2,23 +2,14 @@
 from __future__ import annotations
 
 import re
-import shlex
-import subprocess
 import time
 
-from astra import config, telegram, state, signals, tmux
+from astra import config, telegram, state, signals, tmux, tmux_send
 
 
 def _select_option(pane: str, n: int):
     """Navigate to option n (1-based) and press Enter in a tmux pane."""
-    p = shlex.quote(pane)
-    parts = []
-    if n > 1:
-        nav = " ".join(["Down"] * (n - 1))
-        parts.append(f"tmux send-keys -t {p} {nav}")
-        parts.append("sleep 0.1")
-    parts.append(f"tmux send-keys -t {p} Enter")
-    subprocess.run(["bash", "-c", " && ".join(parts)], timeout=10)
+    tmux_send.select_option(pane, n)
 
 
 _ANSI_STRIP_RE = re.compile(r'\033\[[0-9;]*m')
@@ -216,12 +207,7 @@ def _inject_while_busy(pane: str, wid: str, label: str, text: str) -> str:
     Sends Escape to open Claude Code's additional instruction input,
     then types the message and presses Enter.
     """
-    p = shlex.quote(pane)
-    clean_text = text.replace("\n", " ").replace("\r", " ")
-    cmd = (f"tmux send-keys -t {p} Escape && sleep 0.3 && "
-           f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && sleep 0.1 && "
-           f"tmux send-keys -t {p} Enter")
-    subprocess.run(["bash", "-c", cmd], timeout=10)
+    tmux_send.inject_busy(pane, text)
     config._log("route", f"injected into {wid}: {text[:100]}")
     return f"💉 Injected into {label}:\n`{text[:500]}`"
 
@@ -307,12 +293,7 @@ def route_to_pane(pane: str, win_idx: str, text: str, force: bool = False) -> st
 
         # Free text → navigate to "Type something.", type directly, Enter to submit
         if free_text_at is not None:
-            pp = shlex.quote(prompt_pane)
-            nav = " ".join(["Down"] * free_text_at)
-            cmd = (f"tmux send-keys -t {pp} {nav} && sleep 0.2 && "
-                   f"tmux send-keys -t {pp} -l {shlex.quote(reply)} && sleep 0.1 && "
-                   f"tmux send-keys -t {pp} Enter")
-            subprocess.run(["bash", "-c", cmd], timeout=10)
+            tmux_send.navigate_then_submit(prompt_pane, free_text_at, reply)
             _advance_question()
             return f"📨 Answered in {label}:\n`{reply[:500]}`"
 
@@ -365,20 +346,12 @@ def route_to_pane(pane: str, win_idx: str, text: str, force: bool = False) -> st
         state._save_queued_msg(wid, text)
         return f"💾 Saved for {label} (busy):\n`{text[:500]}`"
 
-    p = shlex.quote(pane)
-
     if typed_text:
         # Save locally typed text to queue and clear it before sending
         state._save_queued_msg(wid, typed_text)
-        subprocess.run(["bash", "-c", f"tmux send-keys -t {p} Escape"], timeout=5)
+        tmux_send.clear_typed(pane)
         time.sleep(0.2)
 
-    # Strip newlines — send-keys -l sends \n as LF which Claude Code
-    # doesn't treat as Enter (CR), causing the message to never submit.
-    clean_text = text.replace("\n", " ").replace("\r", " ")
-
-    # Normal message: type text + Enter (sleep lets Claude Code accept the input)
-    cmd = f"tmux send-keys -t {p} -l {shlex.quote(clean_text)} && sleep 0.3 && tmux send-keys -t {p} Enter"
-    subprocess.run(["bash", "-c", cmd], timeout=10)
+    tmux_send.submit_text(pane, text)
     state._mark_busy(wid)
     return f"📨 Sent to {label}:\n`{text[:500]}`"
