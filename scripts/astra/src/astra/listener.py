@@ -591,7 +591,6 @@ def _listen_tick(s):
         callback = chat_msg.get("callback")
         if callback:
             cb_data = callback.get("data", "")
-            config._debug_tg("CALLBACK", cb_data, "")
 
             # Handle pending file Skip / Cancel buttons
             if cb_data in ("file_skip", "file_cancel"):
@@ -618,8 +617,6 @@ def _listen_tick(s):
             continue
 
         text = chat_msg["text"]
-        if text:
-            config._debug_tg("RECV", text[:200], "")
         photo_id = chat_msg.get("photo")
 
         # Reply-to routing: use wid from the replied-to message
@@ -839,6 +836,15 @@ def cmd_listen():
         sys.exit(1)
     lock_fd.write(str(os.getpid()))
     lock_fd.flush()
+
+    # Activate Telegram mock layer if ASTRA_MOCK=1 in env (pass-through
+    # capture to /tmp/astra_capture/<iso>.jsonl). Deferred import avoids
+    # circulars and keeps the mock module out of the import path when
+    # not in use.
+    from astra import tg_mock
+    _mock_transport = tg_mock.activate_from_env()
+    if _mock_transport:
+        config._log("listen", f"Mock capture active: {_mock_transport.config.capture_path}")
 
     state._clear_signals()
     # Clear stale bash_cmd and busy files — stop signals that would clear busy

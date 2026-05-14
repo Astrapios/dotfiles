@@ -29,7 +29,7 @@ from . import cli
 # config
 from .config import (
     _load_env_file, BOT, CHAT_ID, TG_HOOKS_ENABLED, TG_MAX, SIGNAL_DIR,
-    DEBUG_LOG, _is_debug_enabled, _set_debug, _debug_tg, _debug_log,
+    DEBUG_LOG, _is_debug_enabled, _set_debug, _debug_log,
     _log, _remote_sessions, _mark_remote, _last_messages, _save_last_msg,
     _save_suggestion, _pop_suggestion,
 )

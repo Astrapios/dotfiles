@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.29.0
+
+- **Mock layer PR2 — `MockTransport` + JSONL capture (`astra listen --mock`).** New `astra.tg_mock` module with a `MockTransport` class that intercepts all Telegram I/O, forwards to real Telegram by default, and records every call to a JSONL file with bot tokens stripped and chat IDs replaced by `<CHAT_ID>`/`<DOC_CHAT_ID>`. Message text is kept verbatim. Default capture path: `/tmp/astra_capture/<iso8601>.jsonl`. Activate via `astra listen --mock` or `ASTRA_MOCK=1`.
+- **New CLI: `astra mock status|recent [N]|dump [path]`.** Inspect captured Telegram traffic — `status` shows the latest capture, `recent` prints a one-line-per-record summary, `dump` outputs the full JSONL (latest or a given path).
+- **Retire `_debug_tg`.** The Telegram I/O trace duty (SEND, RECV, CALLBACK, DOC, PHOTO, KB) is now handled by the JSONL capture above. `_debug_log` (internal listener observability — smartfocus diffs, stop-signal capture) is unchanged. `astra debug on/off` keeps working but now only toggles internal traces; for Telegram traffic logging use `astra listen --mock`.
+- **Safety tag**: `pre-mock-pr2`.
+
 ## 0.28.1
 
 - **Refactor: unified `tmux_send` API.** All `tmux send-keys` invocations (previously scattered across `routing.py`, `listener.py`, `commands.py`, `cli.py`) now route through a single `astra.tmux_send` module. Centralizes sleep schedule constants (`_AFTER_ESCAPE`, `_AFTER_TYPE`, `_AFTER_TYPE_INJECT`, `_BETWEEN_KEYS`) so timing changes no longer require touching multiple files. Behaviour-preserving. Adds 25 new unit tests; total 974 passing.

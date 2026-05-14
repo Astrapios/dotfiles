@@ -682,64 +682,10 @@ class TestCmdDebug:
             astra.cmd_debug()
 
 
-class TestDebugTg:
-    def test_writes_when_enabled(self, tmp_path, monkeypatch):
-        log = str(tmp_path / "debug.log")
-        monkeypatch.setattr(config, "DEBUG_LOG", log)
-        config._set_debug(True)
-        config._debug_tg("SEND", "silent=no kb=no", "hello world")
-        assert os.path.isfile(log)
-        content = open(log).read()
-        assert "SEND" in content
-        assert "hello world" in content
-
-    def test_skips_when_disabled(self, tmp_path, monkeypatch):
-        log = str(tmp_path / "debug.log")
-        monkeypatch.setattr(config, "DEBUG_LOG", log)
-        config._debug_tg("SEND", "silent=no kb=no", "hello world")
-        assert not os.path.exists(log)
-
-    def test_truncates_at_max(self, tmp_path, monkeypatch):
-        log = str(tmp_path / "debug.log")
-        monkeypatch.setattr(config, "DEBUG_LOG", log)
-        monkeypatch.setattr(config, "_DEBUG_MAX", 200)
-        config._set_debug(True)
-        for i in range(50):
-            config._debug_tg("SEND", "kb=no", f"message number {i} with padding " + "x" * 50)
-        assert os.path.getsize(log) <= 200
-
-    def test_tg_send_logs_when_debug(self, tmp_path, monkeypatch):
-        log = str(tmp_path / "debug.log")
-        monkeypatch.setattr(config, "DEBUG_LOG", log)
-        config._set_debug(True)
-        fake_resp = MagicMock()
-        fake_resp.status_code = 200
-        fake_resp.json.return_value = {"result": {"message_id": 42}}
-        fake_resp.raise_for_status = MagicMock()
-        with patch("requests.post", return_value=fake_resp):
-            from astra import telegram
-            telegram.tg_send("test message")
-        content = open(log).read()
-        assert "SEND" in content
-        assert "test message" in content
-
-    def test_tg_send_logs_kb_detail(self, tmp_path, monkeypatch):
-        log = str(tmp_path / "debug.log")
-        monkeypatch.setattr(config, "DEBUG_LOG", log)
-        config._set_debug(True)
-        fake_resp = MagicMock()
-        fake_resp.status_code = 200
-        fake_resp.json.return_value = {"result": {"message_id": 42}}
-        fake_resp.raise_for_status = MagicMock()
-        kb = {"inline_keyboard": [[{"text": "✅Allow", "callback_data": "perm_w4a_1"},
-                                    {"text": "❌Deny", "callback_data": "perm_w4a_3"}]]}
-        with patch("requests.post", return_value=fake_resp):
-            from astra import telegram
-            telegram.tg_send("test", reply_markup=kb)
-        content = open(log).read()
-        assert "KB" in content
-        assert "perm_w4a_1" in content
-        assert "perm_w4a_3" in content
+# NOTE: TestDebugTg was removed when `_debug_tg` was retired in PR2 of the
+# Telegram mock layer (Phase 1D). The Telegram I/O trace duty moved to
+# JSONL capture via `astra mock on` / `ASTRA_MOCK=1`. `_debug_log` (internal
+# listener observability) is unchanged.
 
 
 # --- debug state ---

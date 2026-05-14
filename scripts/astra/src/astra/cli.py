@@ -1159,6 +1159,79 @@ def cmd_kill():
         print(f"Killed {idx} ({project}).")
 
 
+def cmd_mock():
+    """astra mock <recent|dump|status>  — inspect captured Telegram traffic.
+
+    Captures live when astra was started with `astra listen --mock` (or
+    `ASTRA_MOCK=1`). Records land in /tmp/astra_capture/<iso8601>.jsonl
+    with bot tokens stripped and chat IDs replaced by symbolic names.
+    Message text is kept verbatim.
+    """
+    from astra import tg_mock
+    sub = sys.argv[2] if len(sys.argv) > 2 else "status"
+
+    if sub == "status":
+        latest = tg_mock.find_latest_capture()
+        if latest:
+            n = len(tg_mock.read_records(latest))
+            print(f"Latest capture: {latest}")
+            print(f"Records: {n}")
+        else:
+            print("No captures found.")
+            print(f"Default dir: {tg_mock._CAPTURE_DIR_DEFAULT}")
+            print("Run 'astra listen --mock' (or set ASTRA_MOCK=1) to start capturing.")
+        return
+
+    if sub == "recent":
+        limit = int(sys.argv[3]) if len(sys.argv) > 3 else 20
+        latest = tg_mock.find_latest_capture()
+        if not latest:
+            print("No captures found.")
+            return
+        records = tg_mock.read_records(latest, limit=limit)
+        for r in records:
+            arrow = "→" if r.get("dir") == "out" else "←"
+            ts = r.get("ts", "")[:19]
+            endpoint = r.get("endpoint", "?")
+            req = r.get("request", {})
+            summary = _summarise_record_request(endpoint, req)
+            status = r.get("status", "?")
+            print(f"[{ts}] #{r.get('seq', '?'):>4}  {arrow} {endpoint:<25} {status}  {summary}")
+        return
+
+    if sub == "dump":
+        path = sys.argv[3] if len(sys.argv) > 3 else None
+        if not path:
+            path = tg_mock.find_latest_capture()
+            if not path:
+                print("No captures found.")
+                sys.exit(1)
+        records = tg_mock.read_records(path)
+        for r in records:
+            print(json.dumps(r, indent=2))
+        return
+
+    print(f"Unknown subcommand: mock {sub}", file=sys.stderr)
+    print("Usage: astra mock <recent [N]|dump [path]|status>", file=sys.stderr)
+    sys.exit(1)
+
+
+def _summarise_record_request(endpoint: str, req: dict) -> str:
+    """One-line summary of a record's request payload for `mock recent`."""
+    if not isinstance(req, dict):
+        return str(req)[:80]
+    if endpoint == "sendMessage":
+        return f"text={req.get('text', '')[:60]!r}"
+    if endpoint in ("sendPhoto", "sendDocument"):
+        cap = req.get("caption", "")
+        return f"caption={cap[:40]!r}"
+    if endpoint == "getUpdates":
+        return f"offset={req.get('offset', '?')} timeout={req.get('timeout', '?')}"
+    if endpoint == "answerCallbackQuery":
+        return f"cb={req.get('callback_query_id', '?')}"
+    return str({k: v for k, v in req.items() if k != "chat_id"})[:80]
+
+
 def cmd_help():
     """Print CLI usage information."""
     print("""astra — Telegram bridge for Claude Code & Gemini CLI
@@ -1273,7 +1346,7 @@ def main():
         "focus": cmd_focus, "deepfocus": cmd_deepfocus, "unfocus": cmd_unfocus,
         "clear": cmd_clear, "interrupt": cmd_interrupt, "keys": cmd_keys,
         "name": cmd_name, "saved": cmd_saved, "log": cmd_log, "new": cmd_new,
-        "restart": cmd_restart, "kill": cmd_kill,
+        "restart": cmd_restart, "kill": cmd_kill, "mock": cmd_mock,
     }
     if command in _local_commands:
         _local_commands[command]()
@@ -1312,6 +1385,11 @@ def main():
         caption = args[1] if len(args) > 1 else ""
         cmd_send_doc(path, caption, use_main=use_main)
     elif command == "listen":
+        # --mock flag turns on JSONL capture (pass-through to real Telegram).
+        # Equivalent to ASTRA_MOCK=1 — the env var path is checked inside
+        # cmd_listen so this just sets it before invoking.
+        if "--mock" in sys.argv[2:]:
+            os.environ["ASTRA_MOCK"] = "1"
         listener.cmd_listen()
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
