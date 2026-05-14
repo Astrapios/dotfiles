@@ -312,6 +312,102 @@ def _default_capture_path() -> str:
     return os.path.join(_CAPTURE_DIR_DEFAULT, f"{ts}.jsonl")
 
 
+# --- signal-file state (PR3 — live toggle from CLI) ---
+#
+# A live listener reads `_mock_on.json` from SIGNAL_DIR at the start of each
+# tick. Presence/absence and the `started_at` field detect changes:
+#   - file appears or `started_at` changes → attach a new MockTransport
+#   - file is removed → detach the existing MockTransport
+# This mirrors the `_debug_on.json` pattern used by `astra debug on/off`.
+
+_MOCK_STATE_FILENAME = "_mock_on.json"
+
+
+def _mock_state_path() -> str:
+    return os.path.join(config.SIGNAL_DIR, _MOCK_STATE_FILENAME)
+
+
+def read_mock_state() -> dict | None:
+    """Load the live-toggle state file. Returns dict or None if absent/corrupt."""
+    path = _mock_state_path()
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_mock_state(*, capture_path: str | None = None,
+                     sink: str = "real", source: str = "real") -> dict:
+    """Atomically write the live-toggle state file. Returns the persisted dict."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    state = {
+        "sink": sink,
+        "source": source,
+        "capture_path": capture_path or _default_capture_path(),
+        "started_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="milliseconds"),
+    }
+    path = _mock_state_path()
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, path)
+    return state
+
+
+def clear_mock_state() -> bool:
+    """Remove the live-toggle state file. Returns True if it existed."""
+    try:
+        os.remove(_mock_state_path())
+        return True
+    except OSError:
+        return False
+
+
+def state_to_config(state: dict) -> MockConfig:
+    """Convert a parsed _mock_on.json dict into a MockConfig."""
+    return MockConfig(
+        sink=state.get("sink", "real"),
+        source=state.get("source", "real"),
+        capture_path=state.get("capture_path"),
+    )
+
+
+def apply_mock_state(client) -> MockTransport | None:
+    """Sync the TelegramClient's transport to whatever the state file says.
+
+    - State file present + no current mock → attach a new MockTransport
+    - State file present + current mock with different `started_at` →
+      detach old + attach new (handles capture-path rotation)
+    - State file absent + current mock → detach
+    - No-op otherwise.
+
+    Returns the active MockTransport (or None if no mock is active after sync).
+    Safe to call every tick — does nothing if state is unchanged.
+    """
+    state = read_mock_state()
+    current = client.transport if isinstance(client.transport, MockTransport) else None
+
+    if state is None:
+        if current is not None:
+            detach(client)
+        return None
+
+    # Mock should be on. Compare started_at to detect config changes.
+    started_at = state.get("started_at")
+    if current is not None and getattr(current, "_started_at", None) == started_at:
+        return current  # No change
+
+    if current is not None:
+        detach(client)
+    cfg = state_to_config(state)
+    transport = attach(client, cfg)
+    transport._started_at = started_at  # type: ignore[attr-defined]
+    return transport
+
+
 def attach(client, mock_config: MockConfig | None = None) -> MockTransport:
     """Attach a MockTransport to a TelegramClient. Returns the transport.
 

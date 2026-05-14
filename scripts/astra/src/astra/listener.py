@@ -198,6 +198,21 @@ def _listen_tick(s):
     except OSError:
         pass
 
+    # Live mock toggle: sync transport with _mock_on.json each tick.
+    # `apply_mock_state` is a no-op when state is unchanged, so this is cheap.
+    try:
+        from astra import tg_mock
+        prior = isinstance(telegram._default_client.transport, tg_mock.MockTransport)
+        active = tg_mock.apply_mock_state(telegram._default_client)
+        now_on = active is not None
+        if now_on != prior:
+            if now_on:
+                config._log("listen", f"Mock attached: {active.config.capture_path}")
+            else:
+                config._log("listen", "Mock detached")
+    except Exception as e:
+        config._log("listen", f"Mock toggle error: {e}")
+
     # --- Paused mode: only respond to /start, /help, /quit ---
     if s.paused:
         data, s.offset = telegram._poll_updates(s.offset, timeout=5)

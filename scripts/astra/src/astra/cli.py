@@ -1160,26 +1160,69 @@ def cmd_kill():
 
 
 def cmd_mock():
-    """astra mock <recent|dump|status>  — inspect captured Telegram traffic.
+    """astra mock <on|off|status|recent|dump>  — Telegram mock layer control.
 
     Captures live when astra was started with `astra listen --mock` (or
-    `ASTRA_MOCK=1`). Records land in /tmp/astra_capture/<iso8601>.jsonl
+    `ASTRA_MOCK=1`), or when `astra mock on` has been called against a
+    running listener. Records land in /tmp/astra_capture/<iso8601>.jsonl
     with bot tokens stripped and chat IDs replaced by symbolic names.
     Message text is kept verbatim.
+
+    Subcommands:
+      on [--capture PATH]   — toggle mock ON in the running listener
+      off                   — toggle mock OFF in the running listener
+      status                — show signal-file state + latest capture
+      recent [N]            — print last N records from latest capture
+      dump [path]           — print full JSONL (latest or given path)
     """
     from astra import tg_mock
     sub = sys.argv[2] if len(sys.argv) > 2 else "status"
 
+    if sub == "on":
+        # Optional --capture PATH flag
+        capture_path = None
+        args = sys.argv[3:]
+        if "--capture" in args:
+            i = args.index("--capture")
+            if i + 1 < len(args):
+                capture_path = args[i + 1]
+            else:
+                print("Usage: astra mock on [--capture PATH]", file=sys.stderr)
+                sys.exit(1)
+        state = tg_mock.write_mock_state(capture_path=capture_path)
+        print(f"Mock ON. Capture: {state['capture_path']}")
+        print("(Listener picks up the change within ~1s.)")
+        return
+
+    if sub == "off":
+        existed = tg_mock.clear_mock_state()
+        if existed:
+            print("Mock OFF. (Listener detaches within ~1s.)")
+        else:
+            print("Mock was not on.")
+        return
+
     if sub == "status":
+        state = tg_mock.read_mock_state()
+        if state:
+            print(f"Mock state: ON (since {state.get('started_at', '?')})")
+            print(f"  sink:         {state.get('sink', '?')}")
+            print(f"  source:       {state.get('source', '?')}")
+            print(f"  capture_path: {state.get('capture_path', '?')}")
+            cp = state.get("capture_path")
+            if cp and os.path.exists(cp):
+                n = len(tg_mock.read_records(cp))
+                print(f"  records:      {n}")
+        else:
+            print("Mock state: OFF")
         latest = tg_mock.find_latest_capture()
         if latest:
             n = len(tg_mock.read_records(latest))
-            print(f"Latest capture: {latest}")
-            print(f"Records: {n}")
+            print(f"Latest capture: {latest} ({n} records)")
         else:
-            print("No captures found.")
-            print(f"Default dir: {tg_mock._CAPTURE_DIR_DEFAULT}")
-            print("Run 'astra listen --mock' (or set ASTRA_MOCK=1) to start capturing.")
+            print(f"No captures yet. Default dir: {tg_mock._CAPTURE_DIR_DEFAULT}")
+            if not state:
+                print("Run 'astra mock on' (against a running listener) or 'astra listen --mock'.")
         return
 
     if sub == "recent":

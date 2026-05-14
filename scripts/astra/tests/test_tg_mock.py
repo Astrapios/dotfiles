@@ -421,3 +421,115 @@ class TestFindLatestCapture:
 
     def test_nonexistent_dir_returns_none(self):
         assert find_latest_capture("/nonexistent") is None
+
+
+# --- PR3: live toggle via signal file ---
+
+
+class TestMockStateFile:
+    def test_write_creates_signal_file(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            state = tg_mock.write_mock_state(capture_path=str(tmp_path / "cap.jsonl"))
+        assert state["capture_path"].endswith("cap.jsonl")
+        assert state["sink"] == "real"
+        assert state["source"] == "real"
+        assert "started_at" in state
+        assert os.path.exists(str(tmp_path / "_mock_on.json"))
+
+    def test_write_uses_default_capture_path(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)), \
+             patch.object(tg_mock, "_CAPTURE_DIR_DEFAULT", str(tmp_path / "captures")):
+            state = tg_mock.write_mock_state()
+        assert state["capture_path"].startswith(str(tmp_path / "captures"))
+        assert state["capture_path"].endswith(".jsonl")
+
+    def test_read_after_write(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path="/tmp/x.jsonl")
+            loaded = tg_mock.read_mock_state()
+        assert loaded is not None
+        assert loaded["capture_path"] == "/tmp/x.jsonl"
+
+    def test_read_missing_returns_none(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            assert tg_mock.read_mock_state() is None
+
+    def test_read_corrupt_returns_none(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            (tmp_path / "_mock_on.json").write_text("not-json{{{")
+            assert tg_mock.read_mock_state() is None
+
+    def test_clear_removes_file(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path="/tmp/x.jsonl")
+            assert tg_mock.clear_mock_state() is True
+            assert tg_mock.read_mock_state() is None
+
+    def test_clear_returns_false_when_absent(self, tmp_path):
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            assert tg_mock.clear_mock_state() is False
+
+    def test_write_is_atomic(self, tmp_path):
+        """A partial write should never leave the .json file in a broken state."""
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path="/tmp/x.jsonl")
+            # The .tmp file should not linger after a successful write
+            assert not os.path.exists(str(tmp_path / "_mock_on.json.tmp"))
+            assert os.path.exists(str(tmp_path / "_mock_on.json"))
+
+
+class TestApplyMockState:
+    def _new_client(self):
+        return telegram.TelegramClient()
+
+    def test_attaches_when_state_present(self, tmp_path):
+        client = self._new_client()
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path=str(tmp_path / "cap.jsonl"))
+            result = tg_mock.apply_mock_state(client)
+        assert isinstance(client.transport, tg_mock.MockTransport)
+        assert result is client.transport
+
+    def test_no_state_returns_none_no_attach(self, tmp_path):
+        client = self._new_client()
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            result = tg_mock.apply_mock_state(client)
+        assert result is None
+        assert not isinstance(client.transport, tg_mock.MockTransport)
+
+    def test_detaches_when_state_removed(self, tmp_path):
+        client = self._new_client()
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path=str(tmp_path / "cap.jsonl"))
+            tg_mock.apply_mock_state(client)
+            assert isinstance(client.transport, tg_mock.MockTransport)
+            tg_mock.clear_mock_state()
+            result = tg_mock.apply_mock_state(client)
+        assert result is None
+        assert not isinstance(client.transport, tg_mock.MockTransport)
+
+    def test_no_op_when_unchanged(self, tmp_path):
+        """Repeated apply with same state should not re-attach a new transport."""
+        client = self._new_client()
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path=str(tmp_path / "cap.jsonl"))
+            mt1 = tg_mock.apply_mock_state(client)
+            mt2 = tg_mock.apply_mock_state(client)
+        assert mt1 is mt2  # same instance — no re-attach
+
+    def test_re_attaches_on_started_at_change(self, tmp_path):
+        """If started_at changes (user toggled off + on), re-attach with fresh transport."""
+        import time as _time
+        client = self._new_client()
+        with patch.object(astra.config, "SIGNAL_DIR", str(tmp_path)):
+            tg_mock.write_mock_state(capture_path=str(tmp_path / "a.jsonl"))
+            mt1 = tg_mock.apply_mock_state(client)
+            # Simulate user toggling off + on. Sleep enough to guarantee a
+            # distinct millisecond-resolution `started_at` — real CLI
+            # toggles are seconds apart in practice.
+            tg_mock.clear_mock_state()
+            _time.sleep(0.01)
+            tg_mock.write_mock_state(capture_path=str(tmp_path / "b.jsonl"))
+            mt2 = tg_mock.apply_mock_state(client)
+        assert mt1 is not mt2
+        assert mt2.config.capture_path.endswith("b.jsonl")

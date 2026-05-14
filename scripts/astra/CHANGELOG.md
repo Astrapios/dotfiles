@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.30.0
+
+- **Mock layer PR3 — `astra mock on/off` live toggle.** New CLI subcommands flip the Telegram mock transport in a running listener via a signal file (`/tmp/astra_signals/_mock_on.json`), no restart required. Mirrors the `astra debug on/off` signal-file pattern. The listener's `_listen_tick` syncs its transport each iteration; latency is ≤1s (bounded by the long-poll timeout).
+- **`astra mock on [--capture PATH]`** writes the signal file with an optional capture path override.
+- **`astra mock status`** now reports both the signal-file state and the latest capture path with record counts.
+- **Safety tag**: `pre-mock-pr3`. End-to-end verified against live systemd-managed listener (attach/detach log lines confirmed in journalctl).
+
 ## 0.29.0
 
 - **Mock layer PR2 — `MockTransport` + JSONL capture (`astra listen --mock`).** New `astra.tg_mock` module with a `MockTransport` class that intercepts all Telegram I/O, forwards to real Telegram by default, and records every call to a JSONL file with bot tokens stripped and chat IDs replaced by `<CHAT_ID>`/`<DOC_CHAT_ID>`. Message text is kept verbatim. Default capture path: `/tmp/astra_capture/<iso8601>.jsonl`. Activate via `astra listen --mock` or `ASTRA_MOCK=1`.
