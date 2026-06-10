@@ -15,6 +15,18 @@ def _select_option(pane: str, n: int):
 _ANSI_STRIP_RE = re.compile(r'\033\[[0-9;]*m')
 _ANSI_256_COLOR_RE = re.compile(r'\033\[38;5;(\d+)m')
 
+# Character ranges used as animated busy-indicator spinners by Claude
+# Code and Gemini CLI. Whitelisted to avoid false positives on chrome
+# lines like '? for shortcuts', '※ recap:', '- bullet item' — those
+# start with a non-word symbol too, but aren't actually spinners.
+#
+#   U+2800-28FF  Braille Patterns       (⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏ ⠐ …)
+#   U+2700-27BE  Dingbats (excl. ❯)     (✻ ✶ ✦ ✧ ✩ ✺ ✢ ✣ ✤ …)
+#   U+25D0-25FF  Geometric Shapes tail  (◐ ◑ ◒ ◓ ◴ ◵ ◶ ◷ — excludes ●)
+_SPINNER_HEAD_RE = re.compile(
+    r'^[⠀-⣿✀-❮❰-➾◐-◿] \w'
+)
+
 
 def _has_colored_spinner(ansi_raw: str) -> bool:
     """Detect active Claude Code spinner via non-grey ANSI color codes.
@@ -27,8 +39,8 @@ def _has_colored_spinner(ansi_raw: str) -> bool:
         stripped = _ANSI_STRIP_RE.sub('', line).strip()
         if not stripped:
             continue
-        # Match spinner pattern: non-word symbol + space + word
-        if not re.match(r'^[^\w\s●❯─━⏵⏸] \w', stripped):
+        # Match spinner pattern: spinner glyph + space + word
+        if not _SPINNER_HEAD_RE.match(stripped):
             continue
         # Check for non-grey 256-color codes on this line
         for m in _ANSI_256_COLOR_RE.finditer(line):
@@ -138,8 +150,10 @@ def _pane_idle_state(pane: str, profile=None) -> tuple[bool, str]:
     unknown_count = 0
     for line in reversed(raw_lines):
         s = line.strip()
-        # Track potential active spinner (non-word symbol + word, no timing)
-        if re.match(r'^[^\w\s●❯─━⏵⏸] \w', s) and not re.search(r'\d+[hms]', s):
+        # Track potential active spinner (known spinner glyph + word, no
+        # timing). Whitelisted glyph set — generic [^\w\s] false-matched
+        # chrome lines like '? for shortcuts', '※ recap:', '- bullet'.
+        if _SPINNER_HEAD_RE.match(s) and not re.search(r'\d+[hms]', s):
             saw_potential_spinner = True
         if _is_ui_chrome(s, profile=profile):
             continue

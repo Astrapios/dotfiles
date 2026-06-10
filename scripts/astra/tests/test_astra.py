@@ -6567,6 +6567,54 @@ class TestColoredSpinnerDetection(unittest.TestCase):
         ansi = "\033[38;5;114m●\033[0m Result text\n"
         self.assertFalse(astra._has_colored_spinner(ansi))
 
+    def test_recap_marker_not_detected(self):
+        """※ recap line (Claude Code summary marker) is NOT a spinner.
+
+        Regression for false-positive 'BUSY' detection: '※' (U+203B,
+        General Punctuation block) starts with a non-word char so the
+        old broad pattern [^\\w\\s] matched. The whitelist now excludes
+        characters outside known spinner-glyph ranges (Braille /
+        Dingbats / Geometric-Shapes-tail), so '※ recap:' no longer
+        passes.
+        """
+        ansi = "\033[38;5;245m※\033[0m \033[38;5;249mrecap: Goal: …\033[0m\n"
+        self.assertFalse(astra._has_colored_spinner(ansi))
+
+    def test_question_mark_hint_not_detected(self):
+        """'? for shortcuts' chrome line is NOT a spinner."""
+        ansi = "\033[38;5;249m?\033[0m \033[38;5;249mfor shortcuts\033[0m\n"
+        self.assertFalse(astra._has_colored_spinner(ansi))
+
+    def test_dash_bullet_not_detected(self):
+        """'- bullet item' list line is NOT a spinner."""
+        ansi = "  \033[38;5;245m-\033[0m \033[38;5;249mlist item\033[0m\n"
+        self.assertFalse(astra._has_colored_spinner(ansi))
+
+
+class TestPaneIdleWithRecapMarker(unittest.TestCase):
+    """Regression for the live-reported bug: w2 showed BUSY when idle
+    because the pane contained Claude Code's '※ recap:' summary line
+    above the ❯ prompt. The old loose spinner pre-scan matched '※ '
+    and `_has_colored_spinner` confirmed (line was colored), so the
+    prompt was overridden as busy."""
+
+    @patch.object(astra.tmux, "_capture_pane_ansi")
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_recap_above_prompt_still_idle(self, mock_capture, mock_ansi):
+        mock_capture.return_value = (
+            "● Some completed response.\n"
+            "\n"
+            "※ recap: Goal: implement feature X. Done. Next: ship.\n"
+            "─────── implement-feature-x ──\n"
+            "❯ \n"
+            "──────────────────────────────\n"
+            "  ? for shortcuts · ← for agents\n"
+        )
+        mock_ansi.return_value = mock_capture.return_value
+        is_idle, typed = astra._pane_idle_state("0:2.1")
+        assert is_idle, "pane with '※ recap' above ❯ prompt should be idle"
+        assert typed == ""
+
     def test_greyscale_ramp_colors(self):
         """All greyscale ramp colors (232-255) are treated as grey."""
         for n in (232, 240, 246, 250, 255):

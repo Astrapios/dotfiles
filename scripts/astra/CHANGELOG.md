@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.30.3
+
+- **Fix: idle session shown as BUSY when pane has Claude's `※ recap:` line.** User-reported: w2 showed busy in `/status` when actually idle. Root cause: the spinner pre-scan in `_pane_idle_state` used a too-loose character class `[^\w\s●❯─━⏵⏸]` that matched `※` (U+203B, General Punctuation) — and the recap line is colored, so `_has_colored_spinner` confirmed "active spinner" → pane reported busy. Other affected false positives: `? for shortcuts`, `- bullet item`.
+- **Fix**: replaced the loose pattern with a whitelist regex `^[⠀-⣿✀-❮❰-➾◐-◿] \w` covering Braille Patterns + Dingbats (excluding `❯`) + the Geometric-Shapes tail (excluding `●`). Applied to both `_has_colored_spinner` and `_pane_idle_state`.
+- **4 new regression tests** in `TestColoredSpinnerDetection` and `TestPaneIdleWithRecapMarker`.
+
 ## 0.30.2
 
 - **Fix: god mode auto-selecting Q1 of AskUserQuestion.** Confirmed via live capture against a real Claude Code v2.1.170 AskUserQuestion: the user-reported "first question auto-selected" bug. Claude Code fires a generic `permission_prompt` notification ("Claude needs your permission") with no `tool_name` in the payload for AskUserQuestion. Without a fix, the listener wrote a permission signal which god mode auto-approved by sending Enter to the pane, selecting Q1's first option (e.g. Color=Red) before the user could choose.
