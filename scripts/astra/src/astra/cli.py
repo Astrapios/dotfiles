@@ -157,6 +157,18 @@ def cmd_hook():
             if "needs your attention" in msg:
                 return
             wid = tmux.get_window_id() or "unknown"
+            # AskUserQuestion ALSO fires a generic permission_prompt
+            # notification with the same "Claude needs your permission"
+            # message and no tool_name in the payload. Observed orderings
+            # differ: PreToolUse usually fires FIRST and writes a question
+            # signal + active_prompt, then the notification fires ~5s
+            # later. Detect this by checking for an active question prompt
+            # (signature: `free_text_at` is set). Skip the permission
+            # write in that case — otherwise god mode would auto-approve
+            # by sending Enter to the pane, selecting Q1's first option.
+            if _is_active_question_prompt(wid):
+                config._log("hook", f"skip permission notification — active AskUserQuestion prompt")
+                return
             bash_cmd = ""
             cmd_file = os.path.join(config.SIGNAL_DIR, f"_bash_cmd_{wid}.json")
             try:
@@ -170,7 +182,81 @@ def cmd_hook():
         if internal_tool == "plan":
             state.write_signal("plan", data, cli=cli_name)
         elif internal_tool == "question":
+            # AskUserQuestion's permission_prompt notification fires ~50ms
+            # earlier with no tool_name — it would otherwise be auto-approved
+            # by god mode and select Q1's first option. Retract it now,
+            # before the listener processes signals.
+            _retract_recent_permission_signal()
             state.write_signal("question", data, questions=data.get("tool_input", {}).get("questions", []), cli=cli_name)
+
+
+def _retract_recent_permission_signal():
+    """Remove any permission signal file written in the last 2 seconds.
+
+    AskUserQuestion's permission_prompt notification CAN fire just
+    before its PreToolUse hook (observed ordering varies). In that case
+    PreToolUse runs the retraction. The mirror case — notification
+    arrives AFTER PreToolUse — is handled in the notification path by
+    `_is_active_question_prompt`.
+    """
+    if not os.path.isdir(config.SIGNAL_DIR):
+        return
+    now = time.time()
+    for fname in os.listdir(config.SIGNAL_DIR):
+        if fname.startswith("_") or not fname.endswith(".json"):
+            continue
+        path = os.path.join(config.SIGNAL_DIR, fname)
+        try:
+            with open(path) as f:
+                sig = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if sig.get("event") != "permission":
+            continue
+        try:
+            ts = float(fname.split("_", 1)[0])
+        except (ValueError, IndexError):
+            continue
+        if now - ts > 2.0:
+            continue
+        try:
+            os.remove(path)
+            config._log("hook", f"retracted recent permission signal: {fname}")
+        except OSError:
+            pass
+
+
+def _is_active_question_prompt(wid: str) -> bool:
+    """Check whether an active AskUserQuestion prompt exists for wid.
+
+    Question prompts have `free_text_at` set (because they always offer
+    a "Type something." fallback option). Regular tool-permission prompts
+    don't.
+
+    Matches both bare (`w5`) and pane-suffixed (`w5a`, `w5b`) forms —
+    the hook subprocess uses the bare wid from `tmux.get_window_id()`,
+    but the listener resolves it to the suffixed form before saving the
+    active prompt. So a check for `_active_prompt_w5.json` would miss
+    a prompt saved as `_active_prompt_w5a.json`.
+    """
+    if not wid or not os.path.isdir(config.SIGNAL_DIR):
+        return False
+    m = re.match(r"^w(\d+)", wid)
+    if not m:
+        return False
+    win_idx = m.group(1)
+    prefix = f"_active_prompt_w{win_idx}"
+    for fname in os.listdir(config.SIGNAL_DIR):
+        if not fname.startswith(prefix) or not fname.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(config.SIGNAL_DIR, fname)) as f:
+                ap = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if ap.get("free_text_at") is not None:
+            return True
+    return False
 
 
 def cmd_god():

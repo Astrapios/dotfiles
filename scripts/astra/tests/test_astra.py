@@ -886,6 +886,164 @@ class TestCmdHook(unittest.TestCase):
         assert signal["cmd"] == "echo hello"
 
 
+class TestCmdHookAskUserQuestionNotification(unittest.TestCase):
+    """Regression: AskUserQuestion fires a permission_prompt notification,
+    but we must NOT write a permission signal for it — otherwise god mode
+    would auto-approve it (send Enter) and select Q1's first option.
+    """
+
+    def setUp(self):
+        self.signal_dir = "/tmp/astra_test_signals_aq"
+        os.makedirs(self.signal_dir, exist_ok=True)
+        self._orig_signal_dir = astra.config.SIGNAL_DIR
+        self._orig_god_mode_path = astra.config.GOD_MODE_PATH
+        astra.config.SIGNAL_DIR = self.signal_dir
+        astra.config.GOD_MODE_PATH = os.path.join(self.signal_dir, "_god_mode.json")
+        self._orig_enabled = astra.config.TG_HOOKS_ENABLED
+        astra.config.TG_HOOKS_ENABLED = True
+
+    def tearDown(self):
+        astra.config.SIGNAL_DIR = self._orig_signal_dir
+        astra.config.GOD_MODE_PATH = self._orig_god_mode_path
+        astra.config.TG_HOOKS_ENABLED = self._orig_enabled
+        import shutil
+        shutil.rmtree(self.signal_dir, ignore_errors=True)
+
+    @patch.object(astra.tmux, "get_window_id", return_value="w4")
+    @patch("sys.stdin")
+    def test_notification_suppressed_when_active_question_prompt(self, mock_stdin, mock_wid):
+        """The real-world observed order: PreToolUse for AskUserQuestion
+        fires FIRST, the listener sets an active_prompt with
+        `free_text_at`. The Notification fires ~5s LATER. The notification
+        handler must detect the active question prompt and skip writing
+        a permission signal.
+
+        Note: hook uses bare `w4` from tmux.get_window_id(), but the
+        listener saves the prompt as `_active_prompt_w4a.json` (resolved
+        to the actual session key). The check must match across the gap.
+        """
+        os.environ["TMUX_PANE"] = "%20"
+
+        # Listener saves active_prompt with suffixed wid form
+        astra.state.save_active_prompt(
+            "w4a", "%20", total=4, free_text_at=2,
+            remaining_qs=[{"question": "Q2", "options": []}],
+            project="myproj",
+        )
+
+        # Notification fires from hook context (bare wid, no tool_name)
+        notif_data = {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "Claude needs your permission",
+            "cwd": "/tmp/test",
+        }
+        mock_stdin.read.return_value = json.dumps(notif_data)
+        astra.cmd_hook()
+
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        assert not signals, (
+            f"BUG 1: notification for active AskUserQuestion should not "
+            f"write a permission signal even when wid suffixes mismatch "
+            f"(hook: w4, prompt: w4a). Found: {signals}"
+        )
+
+    @patch.object(astra.tmux, "get_window_id", return_value="w4a")
+    @patch("sys.stdin")
+    def test_askuserquestion_pretool_retracts_recent_permission(self, mock_stdin, mock_wid):
+        """The real-world bug: Claude Code's permission_prompt notification
+        for AskUserQuestion has NO tool_name in the payload — it looks
+        identical to a regular tool permission. The notification handler
+        writes a permission signal. Then PreToolUse for AskUserQuestion
+        fires immediately after — it must retract the permission signal
+        before the listener processes it.
+
+        Without retraction: god mode auto-approves the 'permission' by
+        sending Enter to the pane, which selects Q1's first option.
+        Confirmed via live capture against a real AskUserQuestion call.
+        """
+        os.environ["TMUX_PANE"] = "%20"
+
+        # Step 1: notification fires WITHOUT tool_name (real Claude Code shape)
+        notif_data = {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "Claude needs your permission",
+            "cwd": "/tmp/test",
+        }
+        mock_stdin.read.return_value = json.dumps(notif_data)
+        astra.cmd_hook()
+
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        assert len(signals) == 1, (
+            f"After notification, exactly 1 permission signal expected. "
+            f"Got: {signals}"
+        )
+
+        # Step 2: PreToolUse for AskUserQuestion fires shortly after
+        pretool_data = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [
+                {"question": "Color?", "options": [{"label": "Red"}]},
+            ]},
+            "cwd": "/tmp/test",
+        }
+        mock_stdin.read.return_value = json.dumps(pretool_data)
+        astra.cmd_hook()
+
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        # Should have exactly one signal: the question signal. The
+        # permission signal must have been retracted.
+        assert len(signals) == 1, (
+            f"BUG 1: After PreToolUse for AskUserQuestion, the recent "
+            f"permission signal should be retracted. Got: {signals}"
+        )
+        with open(os.path.join(self.signal_dir, signals[0])) as f:
+            sig = json.load(f)
+        assert sig.get("event") == "question", (
+            f"Remaining signal should be 'question'. Got event={sig.get('event')}"
+        )
+
+    @patch.object(astra.tmux, "get_window_id", return_value="w4a")
+    @patch("sys.stdin")
+    def test_regular_tool_permission_still_writes_signal(self, mock_stdin, mock_wid):
+        """Regression guard: regular tool permissions (Bash etc.) must still
+        write a permission signal."""
+        data = {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "tool_name": "Bash",
+            "message": "Claude needs your permission to run Bash",
+            "cwd": "/tmp/test",
+        }
+        mock_stdin.read.return_value = json.dumps(data)
+        os.environ["TMUX_PANE"] = "%20"
+
+        astra.cmd_hook()
+
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        assert signals, "Regular tool permission should still write a signal"
+
+    @patch.object(astra.tmux, "get_window_id", return_value="w4a")
+    @patch("sys.stdin")
+    def test_attention_message_still_suppressed(self, mock_stdin, mock_wid):
+        """Regression guard: the 'needs your attention' filter still works."""
+        data = {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "Claude Code needs your attention",
+            "cwd": "/tmp/test",
+        }
+        mock_stdin.read.return_value = json.dumps(data)
+        os.environ["TMUX_PANE"] = "%20"
+
+        astra.cmd_hook()
+
+        signals = [f for f in os.listdir(self.signal_dir) if not f.startswith("_")]
+        assert not signals
+
+
 class TestCmdHookPlanMode(unittest.TestCase):
     """Test that EnterPlanMode PreToolUse writes a plan signal."""
 

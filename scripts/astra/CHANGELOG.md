@@ -5,6 +5,15 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.30.2
+
+- **Fix: god mode auto-selecting Q1 of AskUserQuestion.** Confirmed via live capture against a real Claude Code v2.1.170 AskUserQuestion: the user-reported "first question auto-selected" bug. Claude Code fires a generic `permission_prompt` notification ("Claude needs your permission") with no `tool_name` in the payload for AskUserQuestion. Without a fix, the listener wrote a permission signal which god mode auto-approved by sending Enter to the pane, selecting Q1's first option (e.g. Color=Red) before the user could choose.
+- **Two-pronged fix in `cli.py` hook** (handles both observed orderings):
+  - Notification arrives AFTER PreToolUse (the common case, ~5s later): `_is_active_question_prompt(wid)` checks for an existing active prompt with `free_text_at` set and skips writing the permission signal. Matches both bare (`w5`) and pane-suffixed (`w5a`) wid forms.
+  - Notification arrives BEFORE PreToolUse: `_retract_recent_permission_signal()` removes the permission signal file from the last 2s before writing the question signal.
+- **3 new tests** in `TestCmdHookAskUserQuestionNotification` cover both orderings + the regression guard for regular tool permissions.
+- **Safety tag**: `pre-fix-askquestion-godmode`. End-to-end re-tested live: 3-question AskUserQuestion now shows `☐ Color  ☐ Drink  ☐ Animal` (all unanswered) instead of `☒ Color  ☐ Drink  ☐ Animal`.
+
 ## 0.30.1
 
 - **Mock layer PR5 — `astra mock replay <jsonl>` transcript.** Renders a captured JSONL session as a human-readable transcript with timestamps, direction arrows, per-endpoint summaries, and inline-keyboard previews. Each `getUpdates` response is expanded to show user messages and callbacks; `sendMessage` shows wrapped text and keyboard labels; `sendPhoto`/`sendDocument` show captions and file names. Default path: the latest capture under `/tmp/astra_capture/`.
