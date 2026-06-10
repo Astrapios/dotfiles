@@ -115,6 +115,8 @@ astra ask <question>      Send a question, wait for reply, print to stdout
 astra send-photo [--main] <path> [caption]  Send a photo to Telegram
 astra send-doc [--main] <path> [caption]    Send a file as a document
 astra keys <wN> <key...>  Send keys to a session (e.g. shift+tab, ctrl+c)
+astra service <action>    Manage the listener daemon: start|stop|restart|status|log [N]
+                          (systemd on Linux, launchd on macOS, manual fallback)
 astra debug [on|off|clear|N]  Debug log for outbound Telegram messages
 astra debug state [wN]        Dump internal state (sessions, prompts, flags)
 astra debug inject <event> <wid>  Inject fake signal (stop, perm, question)

@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.32.0
+
+- **New `astra service <start|stop|restart|status|log [N]>` command.** Manages the listener daemon across three backends: **systemd** (Linux — with `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` auto-filled, fixing the recurring "Failed to connect to bus"/"No medium found" errors in non-login shells), **launchd** (macOS — `io.astra.listener` LaunchAgent), and **manual** (direct process management via the lock file + `nohup` when no service manager is usable, e.g. after the user systemd instance is OOM-killed). `restart` also removes stale lock files from dead listeners.
+- **macOS support.** New `service.generate_launchd_plist()` emits a LaunchAgent plist (RunAtLoad, KeepAlive, logs to `~/Library/Logs/astra.log`). `install.zsh` branches on `uname`: Darwin installs the launchd agent; Linux installs systemd (now templated — previously hardcoded `/home/ubuntu` paths) and enables lingering so the service starts at boot. `/log` (CLI + Telegram) falls back to file-based logs when `journalctl` is unavailable. `_get_system_memory` gains a macOS branch (`sysctl hw.memsize` + `vm_stat`).
+- 23 new tests in `tests/test_service.py`; `TestCmdLog` updated for the new delegation.
+
 ## 0.31.0
 
 - **New `/kb` command (alias `/keyboard`).** Telegram clients sometimes drop the persistent reply keyboard after long sessions; `/kb` restores it instantly without restarting the listener. (Previously only `/help`, `/unfocus`, and `/start` re-attached it as a side effect.) Registered in the bot's `/` command picker.

@@ -1078,19 +1078,34 @@ def cmd_saved():
 
 
 def cmd_log():
-    """Show listener journal lines."""
+    """Show listener log lines (journalctl on Linux, file on macOS/manual)."""
+    from astra import service
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 30
     n = min(n, 200)
-    try:
-        result = subprocess.run(
-            ["journalctl", "--user", "-u", "astra", "-n", str(n), "--no-pager"],
-            capture_output=True, text=True, timeout=10,
-        )
-        output = result.stdout.strip()
-        print(output if output else "No journal entries found for astra.")
-    except Exception as e:
-        print(f"Failed to read journalctl: {e}", file=sys.stderr)
-        sys.exit(1)
+    sys.exit(service.logs(n))
+
+
+def cmd_service():
+    """astra service <start|stop|restart|status|log [N]> — manage the
+    listener daemon across systemd (Linux), launchd (macOS), or direct
+    process management (fallback)."""
+    from astra import service
+    action = sys.argv[2] if len(sys.argv) > 2 else "status"
+    if action == "status":
+        sys.exit(service.status())
+    if action == "start":
+        sys.exit(service.start())
+    if action == "stop":
+        sys.exit(service.stop())
+    if action == "restart":
+        sys.exit(service.restart())
+    if action == "log":
+        n = int(sys.argv[3]) if len(sys.argv) > 3 else 30
+        sys.exit(service.logs(min(n, 200)))
+    print(f"Unknown action: service {action}", file=sys.stderr)
+    print("Usage: astra service <start|stop|restart|status|log [N]>",
+          file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_new():
@@ -1532,10 +1547,14 @@ Session management (no Telegram credentials needed):
   clear [wN]                   Reset transient state
   name [wN] [label]            Set/clear session name
   saved [wN]                   Show queued messages
-  log [N]                      Show last N journal lines (default 30)
+  log [N]                      Show last N log lines (default 30)
   new [claude|gemini] [dir]    Start new session
   restart <wN>                 Kill and relaunch session
   kill <wN>                    Kill a session (Ctrl+C x3)
+  service <action>             Manage the listener daemon:
+                               start|stop|restart|status|log [N]
+                               (systemd on Linux, launchd on macOS,
+                               direct process management as fallback)
 
 Setup:
   1. Create a Telegram bot via @BotFather, get the token
@@ -1612,6 +1631,7 @@ def main():
         "clear": cmd_clear, "interrupt": cmd_interrupt, "keys": cmd_keys,
         "name": cmd_name, "saved": cmd_saved, "log": cmd_log, "new": cmd_new,
         "restart": cmd_restart, "kill": cmd_kill, "mock": cmd_mock,
+        "service": cmd_service,
     }
     if command in _local_commands:
         _local_commands[command]()

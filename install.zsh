@@ -54,13 +54,36 @@ exec pixi run -m $SCRIPT_PATH/scripts/astra/pixi.toml astra "\$@"
 WRAPPER
 chmod +x ~/bin/astra
 
-# Systemd user service for astra listener
-echo "  installing astra systemd service..."
-mkdir -p ~/.config/systemd/user
-cp $SCRIPT_PATH/scripts/astra/astra.service ~/.config/systemd/user/astra.service
-systemctl --user daemon-reload
-systemctl --user enable astra
-echo "  astra service enabled (start with: systemctl --user start astra)"
+# Service for astra listener — systemd (Linux) or launchd (macOS)
+if [[ "$(uname)" == "Darwin" ]]; then
+    echo "  installing astra launchd agent..."
+    mkdir -p ~/Library/LaunchAgents ~/Library/Logs
+    pixi run -m $SCRIPT_PATH/scripts/astra/pixi.toml python -c "
+from astra.service import generate_launchd_plist, LAUNCHD_PLIST
+import os
+plist = generate_launchd_plist('$SCRIPT_PATH')
+with open(LAUNCHD_PLIST, 'w') as f:
+    f.write(plist)
+print(f'  wrote {LAUNCHD_PLIST}')
+"
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.astra.listener.plist 2>/dev/null || \
+        launchctl kickstart -k gui/$(id -u)/io.astra.listener 2>/dev/null || true
+    echo "  astra launchd agent installed (manage with: astra service <start|stop|restart|status>)"
+else
+    echo "  installing astra systemd service..."
+    mkdir -p ~/.config/systemd/user
+    # Template the unit file — repo copy hardcodes /home/ubuntu paths
+    sed -e "s|/home/ubuntu/.pixi/bin/pixi|$(command -v pixi || echo $HOME/.pixi/bin/pixi)|" \
+        -e "s|/home/ubuntu/.dotfiles|$SCRIPT_PATH|" \
+        $SCRIPT_PATH/scripts/astra/astra.service > ~/.config/systemd/user/astra.service
+    systemctl --user daemon-reload
+    systemctl --user enable astra
+    # Keep the user session alive after logout/reboot (without this the
+    # service never starts at boot — bit us after an OOM kill once)
+    sudo loginctl enable-linger $USER 2>/dev/null || \
+        echo "  (run 'sudo loginctl enable-linger $USER' to start astra at boot)"
+    echo "  astra service enabled (manage with: astra service <start|stop|restart|status>)"
+fi
 
 # rtk (Rust Token Killer) — reduces LLM token consumption on CLI output
 if command -v rtk &> /dev/null && rtk gain &> /dev/null; then

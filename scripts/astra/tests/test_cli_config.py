@@ -435,34 +435,43 @@ class TestCmdSaved:
 # --- log ---
 
 class TestCmdLog:
+    # cmd_log now delegates to service.read_logs (journalctl with
+    # file-based fallback for macOS/manual mode) and exits with a code.
+
     def test_log_default(self, capsys, monkeypatch):
+        from astra import service
         monkeypatch.setattr(sys, "argv", ["astra", "log"])
-        mock_result = MagicMock()
-        mock_result.stdout = "some log output"
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
-            astra.cmd_log()
+        with patch.object(service, "read_logs",
+                          return_value="some log output\n") as mock_read:
+            with pytest.raises(SystemExit) as exc:
+                astra.cmd_log()
+        assert exc.value.code == 0
         assert "some log output" in capsys.readouterr().out
-        call_args = mock_run.call_args[0][0]
-        assert "-n" in call_args
-        assert "30" in call_args
+        mock_read.assert_called_once_with(30)
 
     def test_log_custom_lines(self, capsys, monkeypatch):
+        from astra import service
         monkeypatch.setattr(sys, "argv", ["astra", "log", "50"])
-        mock_result = MagicMock()
-        mock_result.stdout = "log lines"
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
-            astra.cmd_log()
-        call_args = mock_run.call_args[0][0]
-        assert "50" in call_args
+        with patch.object(service, "read_logs", return_value="x\n") as mock_read:
+            with pytest.raises(SystemExit):
+                astra.cmd_log()
+        mock_read.assert_called_once_with(50)
 
     def test_log_caps_at_200(self, capsys, monkeypatch):
+        from astra import service
         monkeypatch.setattr(sys, "argv", ["astra", "log", "999"])
-        mock_result = MagicMock()
-        mock_result.stdout = "log lines"
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
-            astra.cmd_log()
-        call_args = mock_run.call_args[0][0]
-        assert "200" in call_args
+        with patch.object(service, "read_logs", return_value="x\n") as mock_read:
+            with pytest.raises(SystemExit):
+                astra.cmd_log()
+        mock_read.assert_called_once_with(200)
+
+    def test_log_exits_1_when_no_logs(self, capsys, monkeypatch):
+        from astra import service
+        monkeypatch.setattr(sys, "argv", ["astra", "log"])
+        with patch.object(service, "read_logs", return_value=None):
+            with pytest.raises(SystemExit) as exc:
+                astra.cmd_log()
+        assert exc.value.code == 1
 
 
 # --- kill ---

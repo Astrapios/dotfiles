@@ -572,20 +572,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
     # /log [N]
     log_m = re.match(r"^/log(?:\s+(\d+))?$", text.lower())
     if log_m:
+        from astra import service
         n = int(log_m.group(1)) if log_m.group(1) else 30
         n = min(n, 100)
-        try:
-            result = subprocess.run(
-                ["journalctl", "--user", "-u", "astra", "-n", str(n), "--no-pager"],
-                capture_output=True, text=True, timeout=10,
-            )
-            output = result.stdout.strip()
-            if output:
-                telegram.tg_send(f"📋 Last {n} log lines:\n```\n{output[-3500:]}\n```")
-            else:
-                telegram.tg_send("⚠️ No journal entries found for astra.")
-        except Exception:
-            telegram.tg_send("⚠️ Failed to read journalctl.")
+        output = service.read_logs(n)
+        if output and output.strip():
+            telegram.tg_send(f"📋 Last {n} log lines:\n```\n{output.strip()[-3500:]}\n```")
+        else:
+            telegram.tg_send("⚠️ No listener logs found.")
         return None, sessions, last_win_idx
 
     # /god [w4|all|off|off w4]

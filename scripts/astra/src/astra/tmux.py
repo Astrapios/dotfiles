@@ -411,7 +411,8 @@ def _format_resources(cpu: float, rss_kb: int) -> str:
 
 
 def _get_system_memory() -> tuple[int, int]:
-    """Return (used_kb, total_kb) of system memory."""
+    """Return (used_kb, total_kb) of system memory. Linux + macOS."""
+    # Linux: /proc/meminfo
     try:
         with open("/proc/meminfo") as f:
             info = {}
@@ -422,6 +423,28 @@ def _get_system_memory() -> tuple[int, int]:
         total = info.get("MemTotal", 0)
         avail = info.get("MemAvailable", 0)
         return total - avail, total
+    except Exception:
+        pass
+    # macOS: sysctl total + vm_stat free/inactive pages
+    try:
+        total_b = int(subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, timeout=5).stdout.strip())
+        vm = subprocess.run(["vm_stat"], capture_output=True, text=True,
+                            timeout=5).stdout
+        page_size = 4096
+        m = re.search(r"page size of (\d+)", vm)
+        if m:
+            page_size = int(m.group(1))
+        pages = {}
+        for line in vm.splitlines():
+            pm = re.match(r"Pages (\w[\w ]*):\s+(\d+)\.", line)
+            if pm:
+                pages[pm.group(1)] = int(pm.group(2))
+        free = (pages.get("free", 0) + pages.get("inactive", 0)) * page_size
+        total_kb = total_b // 1024
+        used_kb = (total_b - free) // 1024
+        return used_kb, total_kb
     except Exception:
         return 0, 0
 
