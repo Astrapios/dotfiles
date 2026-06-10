@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.31.0
+
+- **New `/kb` command (alias `/keyboard`).** Telegram clients sometimes drop the persistent reply keyboard after long sessions; `/kb` restores it instantly without restarting the listener. (Previously only `/help`, `/unfocus`, and `/start` re-attached it as a side effect.) Registered in the bot's `/` command picker.
+
 ## 0.30.3
 
 - **Fix: idle session shown as BUSY when pane has Claude's `※ recap:` line.** User-reported: w2 showed busy in `/status` when actually idle. Root cause: the spinner pre-scan in `_pane_idle_state` used a too-loose character class `[^\w\s●❯─━⏵⏸]` that matched `※` (U+203B, General Punctuation) — and the recap line is colored, so `_has_colored_spinner` confirmed "active spinner" → pane reported busy. Other affected false positives: `? for shortcuts`, `- bullet item`.

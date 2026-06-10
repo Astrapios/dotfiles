@@ -1567,6 +1567,7 @@ Telegram commands (inside listener):
   /restart wN          Kill and relaunch session
   /kill wN             Exit a session
   /clear [wN]          Reset transient state
+  /kb                  Restore the persistent reply keyboard
   /log [N]             Show last N journal lines (default 30)
   /stop / /start       Pause / resume listener
   /quit                Shut down listener

@@ -269,6 +269,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/keys [wN] [key...]` — send keys or pick from combos",
             "`/kill wN` — exit a session (Ctrl+C x3)",
             "`/clear [wN]` — reset transient state",
+            "`/kb` — restore the reply keyboard if it disappears",
             "`/log [N]` — show last N journal lines (default 30)",
             "`/stop` / `/quit` — pause / shut down listener",
             "",
@@ -285,6 +286,15 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Photos:* send a photo to have the CLI read it. Add `wN` in caption to target.",
         ]
         telegram.tg_send("\n".join(help_lines), reply_markup=telegram._build_reply_keyboard())
+        return None, sessions, last_win_idx
+
+    # /kb — re-send the persistent reply keyboard (Telegram clients
+    # sometimes drop it after long sessions; this restores it without
+    # restarting the listener)
+    if text.lower() in ("/kb", "/keyboard"):
+        telegram.tg_send("⌨️ Keyboard restored.",
+                         reply_markup=telegram._build_reply_keyboard(),
+                         silent=True)
         return None, sessions, last_win_idx
 
     # /status [wN|name] [lines]

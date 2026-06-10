@@ -1792,6 +1792,24 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("/interrupt", msg)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_kb_command_resends_reply_keyboard(self, mock_send):
+        """/kb restores the persistent reply keyboard without a restart."""
+        action, _, _ = astra._handle_command("/kb", self.sessions, "4")
+        self.assertIsNone(action)
+        kwargs = mock_send.call_args[1]
+        kb = kwargs.get("reply_markup")
+        assert kb and kb.get("keyboard"), "reply keyboard missing from /kb response"
+        assert kb.get("is_persistent") is True
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    def test_keyboard_alias(self, mock_send):
+        """/keyboard works as a long-form alias for /kb."""
+        action, _, _ = astra._handle_command("/keyboard", self.sessions, "4")
+        self.assertIsNone(action)
+        kb = mock_send.call_args[1].get("reply_markup")
+        assert kb and kb.get("keyboard")
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_stop_command(self, mock_send):
         action, _, _ = astra._handle_command(
             "/stop", self.sessions, "4")
@@ -2795,7 +2813,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("restart", names)
         self.assertIn("local", names)
         self.assertIn("keys", names)
-        self.assertEqual(len(commands), 22)
+        self.assertIn("kb", names)
+        self.assertEqual(len(commands), 23)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):

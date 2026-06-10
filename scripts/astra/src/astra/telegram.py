@@ -368,6 +368,7 @@ def _set_bot_commands():
         {"command": "kill", "description": "Exit a Claude session (Ctrl+C)"},
         {"command": "clear", "description": "Reset transient state (prompts, busy, focus)"},
         # Admin
+        {"command": "kb", "description": "Restore the reply keyboard"},
         {"command": "log", "description": "Show recent listener journal lines"},
         {"command": "help", "description": "Show available commands"},
         {"command": "stop", "description": "Pause the listener"},
