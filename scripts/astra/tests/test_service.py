@@ -152,6 +152,28 @@ class TestGenerateLaunchdPlist:
             plist = service.generate_launchd_plist("/home/x/.dotfiles")
         ET.fromstring(plist)  # should parse without error
 
+    def test_path_includes_tmux_and_pixi_dirs(self):
+        """The plist must set a PATH covering Homebrew so the launchd agent —
+        which otherwise gets a minimal /usr/bin:/bin PATH — can find `tmux`
+        (else session detection silently finds nothing)."""
+        def which(cmd):
+            return {"tmux": "/opt/homebrew/bin/tmux",
+                    "pixi": "/Users/me/.pixi/bin/pixi"}.get(cmd)
+        with patch.object(service.shutil, "which", side_effect=which):
+            xml = service.generate_launchd_plist("/Users/me/.dotfiles")
+        assert "<key>PATH</key>" in xml
+        path_line = [l for l in xml.splitlines() if "/opt/homebrew/bin" in l]
+        assert path_line, "PATH must include /opt/homebrew/bin"
+        assert "/Users/me/.pixi/bin" in path_line[0]
+
+    def test_path_present_even_when_tools_not_found(self):
+        """Falls back to standard Homebrew dirs when which() resolves nothing."""
+        with patch.object(service.shutil, "which", return_value=None):
+            xml = service.generate_launchd_plist("/Users/me/.dotfiles")
+        path_line = [l for l in xml.splitlines() if "<string>" in l
+                     and "/opt/homebrew/bin" in l]
+        assert path_line
+
 
 class TestRestartFlow:
     def test_systemd_restart_invokes_systemctl(self):

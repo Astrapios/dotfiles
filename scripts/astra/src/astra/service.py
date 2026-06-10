@@ -263,6 +263,21 @@ def generate_launchd_plist(repo_root: str) -> str:
     """
     pixi = shutil.which("pixi") or os.path.expanduser("~/.pixi/bin/pixi")
     manifest = os.path.join(repo_root, "scripts/astra/pixi.toml")
+
+    # launchd starts agents with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin)
+    # that excludes Homebrew, so bare `tmux`/`pixi` invocations fail with
+    # "command not found" and the daemon detects zero sessions.  Build a PATH
+    # that includes the dirs holding the tools we actually shell out to.
+    path_dirs: list[str] = []
+    for tool in ("tmux", "pixi"):
+        found = shutil.which(tool)
+        if found:
+            path_dirs.append(os.path.dirname(found))
+    path_dirs += ["/opt/homebrew/bin", "/usr/local/bin",
+                  "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    seen: set[str] = set()
+    daemon_path = ":".join(d for d in path_dirs if d and not (d in seen or seen.add(d)))
+
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -294,6 +309,8 @@ def generate_launchd_plist(repo_root: str) -> str:
     <dict>
         <key>PYTHONUNBUFFERED</key>
         <string>1</string>
+        <key>PATH</key>
+        <string>{daemon_path}</string>
     </dict>
 </dict>
 </plist>

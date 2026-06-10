@@ -5,6 +5,11 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.32.1
+
+- **Fix session detection for Claude Code >=2.1.x.** Recent Claude versions set their process title to the version string, so tmux's `#{pane_current_command}` reads e.g. `2.1.170` instead of `claude`, and the pane title is the task summary rather than `Claude Code` — so `scan_cli_sessions()` matched neither and detected no sessions at all (windows simply went missing from the listener's session list). Detection now falls back to walking the pane's process subtree (`_build_process_tree` + `_identify_by_process_tree`) when the command/start-command/title checks fail, matching the real `claude` binary. The fallback issues at most one `ps` call per scan and is skipped entirely for plain shell panes. 4 new tests in `tests/test_session_detection.py`.
+- **Fix launchd agent PATH (macOS).** launchd starts LaunchAgents with a minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) that excludes Homebrew, so the listener's bare `tmux` calls failed with "command not found" and it detected **zero** sessions (and `/status` reported no active sessions) while still being able to send outbound Telegram messages. `generate_launchd_plist()` now emits a `PATH` env var covering the dirs holding `tmux`/`pixi` plus `/opt/homebrew/bin` and `/usr/local/bin`. Existing installs need the plist rewritten and the agent reloaded (`launchctl bootout` + `bootstrap`); a plain `astra service restart` reuses the already-loaded plist and is not enough. 2 new tests in `tests/test_service.py`.
+
 ## 0.32.0
 
 - **New `astra service <start|stop|restart|status|log [N]>` command.** Manages the listener daemon across three backends: **systemd** (Linux — with `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` auto-filled, fixing the recurring "Failed to connect to bus"/"No medium found" errors in non-login shells), **launchd** (macOS — `io.astra.listener` LaunchAgent), and **manual** (direct process management via the lock file + `nohup` when no service manager is usable, e.g. after the user systemd instance is OOM-killed). `restart` also removes stale lock files from dead listeners.

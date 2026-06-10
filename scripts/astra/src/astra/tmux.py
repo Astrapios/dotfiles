@@ -294,6 +294,61 @@ class SessionInfo:
         return iter((self.pane_target, self.project))
 
 
+# Pane commands that are never a CLI we track — skip the (costly) process-tree
+# fallback for these so plain shell panes don't trigger a `ps` call per scan.
+_PLAIN_SHELLS = {"zsh", "bash", "sh", "fish", "-zsh", "-bash", "-sh", "tmux"}
+
+
+def _build_process_tree() -> dict[str, tuple[str, str]]:
+    """Return {pid: (ppid, comm)} for all processes via one `ps` call."""
+    tree: dict[str, tuple[str, str]] = {}
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,comm="],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3:
+                pid, ppid, comm = parts
+                # macOS `comm` is the full executable path — keep the basename.
+                tree[pid] = (ppid, comm.rsplit("/", 1)[-1])
+    except Exception:
+        pass
+    return tree
+
+
+def _identify_by_process_tree(pane_pid: str, tree: dict[str, tuple[str, str]],
+                              _max_depth: int = 12):
+    """Identify a CLI by scanning a pane's process subtree.
+
+    Walks ``pane_pid`` and its descendants, matching each process's command
+    against registered CLI profiles.  Used as a fallback when
+    #{pane_current_command} is unreliable (e.g. Claude Code sets its process
+    title to its version string).
+    """
+    from astra import profiles
+
+    children: dict[str, list[str]] = {}
+    for pid, (ppid, _comm) in tree.items():
+        children.setdefault(ppid, []).append(pid)
+
+    seen: set[str] = set()
+    queue: list[tuple[str, int]] = [(pane_pid, 0)]
+    while queue:
+        pid, depth = queue.pop(0)
+        if pid in seen or depth > _max_depth:
+            continue
+        seen.add(pid)
+        comm = tree.get(pid, ("", ""))[1]
+        if comm:
+            profile = profiles.identify_cli(comm)
+            if profile:
+                return profile
+        queue.extend((c, depth + 1) for c in children.get(pid, []))
+    return None
+
+
 def scan_cli_sessions() -> dict[str, SessionInfo]:
     """Scan tmux for panes running any registered CLI.
 
@@ -305,32 +360,38 @@ def scan_cli_sessions() -> dict[str, SessionInfo]:
     """
     from astra import profiles
 
-    raw_panes: list[tuple[str, str, str, str, str, str, str]] = []
+    raw_panes: list[tuple[str, ...]] = []
     try:
         result = subprocess.run(
             ["tmux", "list-panes", "-a", "-F",
              "#{window_index}\t#{session_name}:#{window_index}.#{pane_index}"
              "\t#{pane_current_command}\t#{pane_current_path}"
-             "\t#{pane_start_command}\t#{pane_title}\t#{pane_id}"],
+             "\t#{pane_start_command}\t#{pane_title}\t#{pane_id}"
+             "\t#{pane_pid}"],
             capture_output=True, text=True, timeout=5,
         )
         for line in result.stdout.strip().splitlines():
             parts = line.split("\t")
-            if len(parts) >= 7:
-                raw_panes.append(tuple(parts[:7]))
-            elif len(parts) >= 6:
-                raw_panes.append((*parts[:6], ""))
-            elif len(parts) >= 4:
-                raw_panes.append((parts[0], parts[1], parts[2], parts[3],
-                                  parts[4] if len(parts) > 4 else "",
-                                  parts[5] if len(parts) > 5 else "", ""))
+            if len(parts) >= 4:
+                # Pad missing trailing fields (start_cmd, title, pane_id, pane_pid)
+                raw_panes.append(tuple((parts + ["", "", "", ""])[:8]))
     except Exception:
         pass
 
-    # Group matched panes by window index
+    # Identify the CLI in each pane.  Primary detection uses the pane's
+    # current/start command and title; when that fails we fall back to walking
+    # the pane's process subtree.  The fallback is needed because Claude Code
+    # >=2.1.x sets its process title to the version string, so
+    # #{pane_current_command} reads e.g. "2.1.170" (not "claude") and the pane
+    # title is the task summary rather than "Claude Code".
     by_window: dict[str, list[tuple[str, str, str, str]]] = {}  # win_idx → [(target, project, cli, pane_id)]
-    for win_idx, target, cmd, cwd, start_cmd, title, pane_id in raw_panes:
+    tree: dict[str, tuple[str, str]] | None = None  # lazily built process tree
+    for win_idx, target, cmd, cwd, start_cmd, title, pane_id, pane_pid in raw_panes:
         profile = profiles.identify_cli(cmd, start_cmd, title)
+        if profile is None and cmd not in _PLAIN_SHELLS and pane_pid.strip().isdigit():
+            if tree is None:
+                tree = _build_process_tree()
+            profile = _identify_by_process_tree(pane_pid.strip(), tree)
         if profile:
             project = cwd.rstrip("/").rsplit("/", 1)[-1] if cwd else "?"
             by_window.setdefault(win_idx, []).append((target, project, profile.name, pane_id))
