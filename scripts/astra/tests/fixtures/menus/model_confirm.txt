@@ -1,0 +1,74 @@
+ ▐▛███▜▌   Claude Code v2.1.177
+▝▜█████▛▘  Sonnet 4.6 (1M context) with high effort · Claude Team
+  ▘▘ ▝▝    /tmp
+
+
+❯ /model
+  ⎿  Set model to Sonnet 4.6 (1M context) and saved as your default for new sessions · Draws from usage credits
+
+❯ say hi in one word
+
+● Hi!
+
+✻ Sautéed for 1s
+
+❯ /model
+  ⎿  Set model to Sonnet 4.6 (1M context) and saved as your default for new sessions · Draws from usage credits
+
+❯ /model
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Switch model?
+  Your next response will be slower and use more tokens
+
+  This conversation is cached for the current model. Switching to Opus 4.8 (1M context) (default) means the full history gets re-read on your next
+  message.
+
+  ❯ 1. Yes, switch to Opus 4.8 (1M context) (default)
+    2. No, go back
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

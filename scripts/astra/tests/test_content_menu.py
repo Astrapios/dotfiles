@@ -32,6 +32,17 @@ class TestDetectInteractiveMenu:
         assert any(o.startswith("Haiku") for o in options)
         assert free_text is None  # /model has no text-input affordance
 
+    def test_model_confirm_footerless_parsed(self):
+        """Real /model 'Switch model?' confirmation has NO footer — detect it
+        via the ❯ selection cursor on option 1. (This was the stuck step.)"""
+        result = content._detect_interactive_menu(_load("model_confirm.txt"))
+        assert result is not None, "footer-less confirmation must be detected"
+        title, options, free_text = result
+        assert title == "Switch model?"
+        assert len(options) == 2
+        assert options[0].startswith("Yes")
+        assert options[1].startswith("No")
+
     def test_idle_frame_returns_none(self):
         """Idle pane ('? for shortcuts · ← for agents') is not a menu."""
         assert content._detect_interactive_menu(_load("idle.txt")) is None

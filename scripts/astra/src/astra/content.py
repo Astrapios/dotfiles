@@ -222,67 +222,81 @@ _MENU_TEXT_AFFORDANCE_RE = re.compile(
 # menus (e.g. /model) span well beyond the last 10 lines.
 _MENU_OPTION_RE = re.compile(r'^\s*[❯>●○✔\s]*(\d+)\.\s+(.+)')
 
+# The selection cursor on a numbered option (e.g. "  ❯ 1. Yes…"). This is
+# the strongest menu signal: every interactive Claude Code menu renders it,
+# and ordinary prose numbered lists never do. Some menus (the /model "Switch
+# model?" confirmation) have NO footer at all, so we can't rely on the
+# footer alone.
+_MENU_POINTER_RE = re.compile(r'^\s*[❯>›]\s+\d+\.\s')
+
+# Claude's working indicator — never appears in a real menu; a hard guard
+# against treating a mid-work frame as a menu.
+_WORKING_RE = re.compile(r'(?i)esc to interr')
+
 
 def _detect_interactive_menu(raw: str):
     """Detect a tap-to-selectable Claude Code slash-command menu.
 
     Returns ``(title, options, free_text_index | None)`` or ``None``.
 
-    Unlike permission/AskUserQuestion dialogs, slash-command menus fire no
-    hooks, so they must be recognized from pane content alone. The
-    signature is a menu-nav footer (``_MENU_FOOTER_RE``) plus a numbered
-    option list above it. The footer's presence also distinguishes a menu
-    from the "Claude is working" spinner state (which shows no such
-    footer), so no ANSI/spinner check is needed here.
+    Slash-command menus fire no hooks (unlike permission/AskUserQuestion
+    dialogs), so they're recognized from pane content alone. A menu is a
+    numbered option list (≥2) whose top is bounded by a ``────`` separator,
+    confirmed by EITHER:
+      * the ❯ selection cursor on one of the options (``_MENU_POINTER_RE``)
+        — present on every interactive menu, including footer-less ones
+        like the /model "Switch model?" confirmation; or
+      * a menu-nav footer (``_MENU_FOOTER_RE``).
+    Ordinary prose numbered lists have neither, so they return ``None``.
 
     Numbered / ❯-pointer lists only. Tabbed panels and fuzzy pickers
-    (e.g. /agents, /resume) match the footer but expose no numbered
-    options, so they return ``None`` (drive manually with /keys).
+    (e.g. /agents, /resume) have no numbered options, so they return
+    ``None`` (drive manually with /keys).
     """
     lines = raw.splitlines()
     while lines and not lines[-1].strip():
         lines.pop()
     if not lines:
         return None
-
-    # 1. Find the menu footer (search the bottom handful of lines).
-    footer_idx = None
-    for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
-        if _MENU_FOOTER_RE.search(lines[i]):
-            footer_idx = i
-            break
-    if footer_idx is None:
+    # Working frame — never a menu.
+    if any(_WORKING_RE.search(l) for l in lines):
         return None
 
-    # 2. Scan upward from the footer collecting numbered options, stopping
-    #    at a full-width separator (the top border of the menu region).
-    #    First label wins per number; wrapped continuation lines (no
-    #    leading number) are skipped.
+    # Scan upward from the last content line collecting numbered options,
+    # stopping at the menu's top separator. First label wins per number;
+    # wrapped continuation lines (no leading number) are skipped. Track
+    # whether any option carries the ❯ selection cursor.
     options: dict[int, str] = {}
     free_text_index: int | None = None
+    pointer_seen = False
     top_idx = 0
-    for i in range(footer_idx - 1, -1, -1):
+    for i in range(len(lines) - 1, -1, -1):
         s = lines[i].strip()
         if re.match(r'^[─━]{3,}', s):
             top_idx = i
             break
-        if _MENU_TEXT_AFFORDANCE_RE.search(s):
-            m_aff = _MENU_OPTION_RE.match(lines[i])
-            if m_aff:
-                free_text_index = int(m_aff.group(1))
         m = _MENU_OPTION_RE.match(lines[i])
         if m:
             num = int(m.group(1))
             if num not in options:
                 options[num] = m.group(2).strip()
+            if _MENU_POINTER_RE.match(lines[i]):
+                pointer_seen = True
+            if _MENU_TEXT_AFFORDANCE_RE.search(s):
+                free_text_index = num
 
     if len(options) < 2:
         return None
 
-    # 3. Title: first non-empty, non-separator, non-option line below the
-    #    separator (e.g. "Select model").
+    footer_present = any(_MENU_FOOTER_RE.search(l)
+                         for l in lines[max(0, len(lines) - 4):])
+    if not (pointer_seen or footer_present):
+        return None
+
+    # Title: first non-empty, non-separator, non-option line below the
+    # separator (e.g. "Select model" / "Switch model?").
     title = ""
-    for i in range(top_idx + 1, footer_idx):
+    for i in range(top_idx + 1, len(lines)):
         s = lines[i].strip()
         if not s or re.match(r'^[─━]{3,}', s):
             continue

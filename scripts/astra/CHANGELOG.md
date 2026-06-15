@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.33.2
+
+- **Fix footer-less menus (the `/model` "Switch model?" confirmation).** The confirmation step renders no nav footer at all — just the title and numbered options — so the footer-required detector returned `None` and the step was never offered (the user stayed stuck even after 0.33.1). `_detect_interactive_menu` now recognizes a menu by EITHER the `❯` selection cursor on a numbered option (`_MENU_POINTER_RE` — present on every interactive Claude Code menu, absent from prose) OR a nav footer, with a hard guard against the working state (`esc to interrupt`). Verified end-to-end live: list → select → footer-less confirmation offered → tap Yes → model switched. New fixture `tests/fixtures/menus/model_confirm.txt` + detector test.
+
 ## 0.33.1
 
 - **Fix multi-step slash menus (e.g. `/model`'s confirmation step).** `/model` is a two-step flow: pick a model → "Switch model? Yes/No" confirmation. After the first selection astra was stuck — the listener marked the session "menu already offered" with a boolean and never offered the second step. The listener now tracks the *signature* of the last-offered menu per session and re-offers when the menu content changes; `menu_offered` is only reset when the pane returns to idle (not while a selection is pending), so a single-step menu isn't re-offered on a post-tap lag frame. New sim test `test_second_step_menu_is_offered`.
