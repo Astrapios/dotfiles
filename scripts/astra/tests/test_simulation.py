@@ -1772,6 +1772,39 @@ class TestSlashMenu(SimTestBase):
         self.h.run_ticks(s, 5)
         assert not self.h.tg.find_sent("menu")
 
+    CONFIRM = (
+        "❯ /model\n"
+        "\n"
+        "────────────────────────────────────────────────────────────\n"
+        "  Switch model?\n"
+        "  This conversation is cached for the current model.\n"
+        "\n"
+        "  ❯ 1. Yes, switch to Sonnet 4.6\n"
+        "    2. No, go back\n"
+        "\n"
+        "  Enter to confirm · Esc to cancel\n"
+    )
+
+    def test_second_step_menu_is_offered(self):
+        """Multi-step menu (/model: list → 'Switch model?' confirm) must
+        offer the SECOND menu after the first selection. Regression: a
+        boolean 'already offered' flag left the user stuck at step 2."""
+        s = self._add(self.MENU)
+        self.h.run_ticks(s, 4)
+        assert self.h.tg.find_sent("Select model")
+        # User taps option 1 → first prompt consumed; pane now shows confirm
+        self.h.tg.inject_callback("perm_w4a_1", message_id=1)
+        self.h.tick(s)
+        assert not state.has_active_prompt("w4a")
+        self.h.tmux.panes["4"].content = self.CONFIRM
+        # New menu has a different signature → offered after stability
+        self.h.run_ticks(s, 4)
+        msgs = self.h.tg.find_sent("Switch model")
+        assert msgs, f"step-2 menu not offered: {[m['text'][:50] for m in self.h.tg.sent_messages]}"
+        cbs = [b["callback_data"] for row in msgs[0]["reply_markup"]["inline_keyboard"]
+               for b in row]
+        assert "perm_w4a_1" in cbs and "perm_w4a_2" in cbs
+
     def test_dismiss_sends_escape_and_clears_prompt(self):
         s = self._add(self.MENU)
         self.h.run_ticks(s, 4)

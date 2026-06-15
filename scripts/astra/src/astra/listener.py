@@ -170,7 +170,7 @@ class _ListenerState:
     interrupted_notified: set = field(default_factory=set)
     dialog_notified: set = field(default_factory=set)
     dialog_first_seen: dict = field(default_factory=dict)  # wid → timestamp
-    menu_notified: set = field(default_factory=set)        # slash-menu offers sent
+    menu_offered: dict = field(default_factory=dict)       # wid → last-offered menu sig
     menu_seen: dict = field(default_factory=dict)          # wid → (sig, first_ts)
     god_wids: list = field(default_factory=list)
 
@@ -421,11 +421,16 @@ def _listen_tick(s):
     now = time.time()
     for wid, (pane, project) in s.sessions.items():
         idle, _ = routing._pane_idle_state(pane)
-        if idle or state.has_active_prompt(wid):
-            s.menu_notified.discard(wid)
+        if idle:
+            # Menu fully closed — reset tracking for this session.
+            s.menu_offered.pop(wid, None)
             s.menu_seen.pop(wid, None)
             continue
-        if wid in s.menu_notified:
+        if state.has_active_prompt(wid):
+            # An offer is pending (this menu, or a hook dialog). Don't
+            # re-offer — but keep menu_offered so that after the user taps
+            # (which consumes the prompt) we don't re-offer the SAME menu
+            # on a lag frame; a genuinely different next step has a new sig.
             continue
         try:
             raw = tmux._capture_pane(pane, 40)  # menus span >15 lines
@@ -437,6 +442,12 @@ def _listen_tick(s):
             continue
         title, options, free_text_index = result
         sig = tuple(options)
+        # Track by signature, not a boolean: multi-step menus (e.g. /model's
+        # model-list → "Switch model?" confirmation) change content between
+        # steps, and each new step must be offered. Skip only if we already
+        # offered THIS exact menu.
+        if s.menu_offered.get(wid) == sig:
+            continue
         seen = s.menu_seen.get(wid)
         if not seen or seen[0] != sig:
             s.menu_seen[wid] = (sig, now)  # first sighting — wait for stability
@@ -474,10 +485,11 @@ def _listen_tick(s):
                                      project=project)
         else:
             config._log("local", f"suppressed menu for {wid} ({project})")
-        s.menu_notified.add(wid)
+        s.menu_offered[wid] = sig
         s.menu_seen.pop(wid, None)
     # Clear for gone sessions
-    s.menu_notified -= s.menu_notified - set(s.sessions)
+    for gone in set(s.menu_offered) - set(s.sessions):
+        s.menu_offered.pop(gone, None)
     for gone in set(s.menu_seen) - set(s.sessions):
         s.menu_seen.pop(gone, None)
 

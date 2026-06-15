@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.33.1
+
+- **Fix multi-step slash menus (e.g. `/model`'s confirmation step).** `/model` is a two-step flow: pick a model → "Switch model? Yes/No" confirmation. After the first selection astra was stuck — the listener marked the session "menu already offered" with a boolean and never offered the second step. The listener now tracks the *signature* of the last-offered menu per session and re-offers when the menu content changes; `menu_offered` is only reset when the pane returns to idle (not while a selection is pending), so a single-step menu isn't re-offered on a post-tap lag frame. New sim test `test_second_step_menu_is_offered`.
+
 ## 0.33.0
 
 - **Interact with Claude Code slash-command menus over Telegram.** Invoking a slash command like `/model` from Telegram opened the menu but the *selection* step was broken — astra reported the session busy and queued ("Saved (busy)") your reply, because slash menus fire no hooks (unlike permission/AskUserQuestion dialogs) so no active prompt was ever created. astra now auto-detects an open menu from pane content and offers tap-to-select option buttons, reusing the permission-dialog machinery (`perm_{wid}_{n}` → `_select_option` = Down×(n-1)+Enter).
