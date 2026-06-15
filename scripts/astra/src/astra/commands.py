@@ -1081,6 +1081,23 @@ def _handle_callback(callback: dict, sessions: dict,
         telegram.tg_send("Cancelled.")
         return sessions, last_win_idx, None
 
+    # Menu dismiss callback: menudismiss_{wid} — send Escape, clear prompt
+    m = re.match(r"^menudismiss_(w\d+[a-z]?)$", cb_data)
+    if m:
+        wid = m.group(1)
+        config._mark_remote(wid)
+        prompt = state.load_active_prompt(wid)  # consume
+        pane = prompt.get("pane", "") if prompt else ""
+        if not pane:
+            resolved = tmux.resolve_session_id(wid, sessions)
+            if resolved:
+                pane = sessions[resolved][0]
+        if pane:
+            tmux_send.press_key(pane, "Escape")
+        telegram.tg_send(f"✖️ Dismissed menu in {state._wid_label(wid)}",
+                         silent=state._is_silent(_CAT_CONFIRM))
+        return sessions, last_win_idx, None
+
     # Permission callback: perm_{wid}_{n}
     m = re.match(r"^perm_(w\d+[a-z]?)_(\d+)$", cb_data)
     if m:

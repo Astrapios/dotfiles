@@ -5,6 +5,15 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.33.0
+
+- **Interact with Claude Code slash-command menus over Telegram.** Invoking a slash command like `/model` from Telegram opened the menu but the *selection* step was broken — astra reported the session busy and queued ("Saved (busy)") your reply, because slash menus fire no hooks (unlike permission/AskUserQuestion dialogs) so no active prompt was ever created. astra now auto-detects an open menu from pane content and offers tap-to-select option buttons, reusing the permission-dialog machinery (`perm_{wid}_{n}` → `_select_option` = Down×(n-1)+Enter).
+  - New `content._detect_interactive_menu(raw)` (PR1): recognizes a menu by its nav footer (`Enter to set/select/confirm`, `Esc to cancel/close`, `↑/↓ to navigate`) plus a numbered option list scanned **upward from the footer** — fixing a real bug where `/model`'s option 1 sits ~13 lines above the footer, beyond `_detect_numbered_dialog`'s 10-line window. Footer presence also distinguishes a menu from the working-spinner state, so genuinely-busy sessions are excluded.
+  - Listener offers within ~1-2s (a dedicated per-tick block, not the 5s detection gate), with a 1s stability debounce so the hook path still wins for real permission/question dialogs. Runs even while the session is flagged busy and under god mode (slash menus aren't permissions).
+  - A menu with a text-input affordance ("Type something / to search") sets `free_text_at`, so a typed reply is sent as text. An `✖️ Esc` button (`menudismiss_{wid}`) cancels the menu.
+  - **Scope/caveats**: numbered / `❯`-pointer lists only. Tabbed panels and fuzzy pickers (`/agents`, `/resume`, `/config`) match the footer but expose no numbered options → not offered; drive them with `/keys wN` (now incl. Down). Tap-to-select assumes the menu cursor starts at option 1 (true on fresh open). Slash commands whose names collide with astra's own (`/clear`, `/status`, `/kb`) are intercepted by astra when sent from Telegram — invoke those locally.
+  - Real `tmux capture-pane` fixtures under `tests/fixtures/menus/` (model/idle/agents); 9 detector unit tests + 6 end-to-end simulation tests.
+
 ## 0.32.1
 
 - **Fix session detection for Claude Code >=2.1.x.** Recent Claude versions set their process title to the version string, so tmux's `#{pane_current_command}` reads e.g. `2.1.170` instead of `claude`, and the pane title is the task summary rather than `Claude Code` — so `scan_cli_sessions()` matched neither and detected no sessions at all (windows simply went missing from the listener's session list). Detection now falls back to walking the pane's process subtree (`_build_process_tree` + `_identify_by_process_tree`) when the command/start-command/title checks fail, matching the real `claude` binary. The fallback issues at most one `ps` call per scan and is skipped entirely for plain shell panes. 4 new tests in `tests/test_session_detection.py`.

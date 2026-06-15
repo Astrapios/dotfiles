@@ -1698,5 +1698,93 @@ class TestSuggestionAfterStop(SimTestBase):
         assert config._pop_suggestion("w4a") is None
 
 
+class TestSlashMenu(SimTestBase):
+    """Auto-detect + offer for Claude Code slash-command menus."""
+
+    # A /model-style numbered menu (mirrors tests/fixtures/menus/model_menu.txt
+    # in shape: title, ❯-pointer numbered options, nav footer).
+    MENU = (
+        "❯ /model\n"
+        "\n"
+        "────────────────────────────────────────────────────────────\n"
+        "  Select model\n"
+        "  Switch between Claude models.\n"
+        "\n"
+        "  ❯ 1. Default (recommended)  Opus 4.8\n"
+        "    2. Sonnet                 Sonnet 4.6\n"
+        "    3. Haiku                  Haiku 4.5\n"
+        "\n"
+        "  Enter to set as default · s to use this session only · Esc to cancel\n"
+    )
+    WORKING = (
+        "● Working on it\n"
+        "\n"
+        "✶ Crunching… (8s · esc to interrupt)\n"
+    )
+
+    def _add(self, content):
+        # busy flag set, as it would be right after sending "/model" from TG
+        self.h.tmux.add_session("4", "%20", "myproject", content=content)
+        state._mark_busy("w4a")
+        return self.h.make_listener_state()
+
+    def test_menu_offered_with_option_buttons(self):
+        s = self._add(self.MENU)
+        # stability debounce ~1s; default 0.5s advance → offered by tick 3
+        self.h.run_ticks(s, 4)
+        msgs = self.h.tg.find_sent("Select model")
+        assert msgs, f"menu not offered: {[m['text'][:60] for m in self.h.tg.sent_messages]}"
+        kb = msgs[0].get("reply_markup", {})
+        cbs = [b["callback_data"] for row in kb.get("inline_keyboard", []) for b in row]
+        assert "perm_w4a_1" in cbs and "perm_w4a_3" in cbs, cbs
+        assert "menudismiss_w4a" in cbs, "dismiss button missing"
+        # active prompt saved so a reply routes as a selection
+        assert state.has_active_prompt("w4a")
+
+    def test_tap_option_navigates_down_then_enter(self):
+        s = self._add(self.MENU)
+        self.h.run_ticks(s, 4)
+        assert state.has_active_prompt("w4a")
+        # Tapping option 2 → _select_option(pane, 2) = Down + Enter
+        self.h.subprocess_calls.clear()
+        self.h.tg.inject_callback("perm_w4a_2", message_id=1)
+        self.h.tick(s)
+        bash = [c["args"][2] for c in self.h.subprocess_calls
+                if isinstance(c["args"], list) and len(c["args"]) >= 3
+                and c["args"][0] == "bash"]
+        combined = " ".join(bash)
+        assert "%20" in combined and "Down" in combined and "Enter" in combined, bash
+
+    def test_not_offered_twice(self):
+        s = self._add(self.MENU)
+        self.h.run_ticks(s, 5)
+        assert len(self.h.tg.find_sent("Select model")) == 1
+
+    def test_working_session_not_offered(self):
+        s = self._add(self.WORKING)
+        self.h.run_ticks(s, 5)
+        assert not self.h.tg.find_sent("menu"), "working session should not get a menu offer"
+        assert not self.h.tg.find_sent("Select model")
+
+    def test_idle_session_not_offered(self):
+        self.h.tmux.add_session("4", "%20", "myproject", content="❯ \n  ? for shortcuts · ← for agents\n")
+        s = self.h.make_listener_state()
+        self.h.run_ticks(s, 5)
+        assert not self.h.tg.find_sent("menu")
+
+    def test_dismiss_sends_escape_and_clears_prompt(self):
+        s = self._add(self.MENU)
+        self.h.run_ticks(s, 4)
+        assert state.has_active_prompt("w4a")
+        self.h.subprocess_calls.clear()
+        self.h.tg.inject_callback("menudismiss_w4a", message_id=1)
+        self.h.tick(s)
+        bash = [c["args"][2] for c in self.h.subprocess_calls
+                if isinstance(c["args"], list) and len(c["args"]) >= 3
+                and c["args"][0] == "bash"]
+        assert any("Escape" in b and "%20" in b for b in bash), bash
+        assert not state.has_active_prompt("w4a")
+
+
 if __name__ == "__main__":
     unittest.main()

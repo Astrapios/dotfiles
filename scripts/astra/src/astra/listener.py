@@ -170,6 +170,8 @@ class _ListenerState:
     interrupted_notified: set = field(default_factory=set)
     dialog_notified: set = field(default_factory=set)
     dialog_first_seen: dict = field(default_factory=dict)  # wid → timestamp
+    menu_notified: set = field(default_factory=set)        # slash-menu offers sent
+    menu_seen: dict = field(default_factory=dict)          # wid → (sig, first_ts)
     god_wids: list = field(default_factory=list)
 
 
@@ -405,6 +407,79 @@ def _listen_tick(s):
         s.dialog_notified -= s.dialog_notified - set(s.sessions)
         for gone in set(s.dialog_first_seen) - set(s.sessions):
             s.dialog_first_seen.pop(gone, None)
+
+    # --- Slash-command menu detection (runs every tick, not gated by the
+    # 5s block above — menus must be offered within ~1-2s of opening).
+    # Claude Code slash menus (/model etc.) fire no hooks, so they get no
+    # active prompt; without this they'd be queued as "Saved (busy)".
+    # Unlike the startup-dialog block we do NOT skip on _is_busy (sending
+    # the command set busy) or god mode (slash menus aren't permissions).
+    # _detect_interactive_menu returns None for the working-spinner state
+    # (no menu footer), so genuinely-busy sessions are still excluded.
+    _MENU_DEBOUNCE = 1.0  # require the same menu stable this long (lets the
+                          # hook path win for real permission/question dialogs)
+    now = time.time()
+    for wid, (pane, project) in s.sessions.items():
+        idle, _ = routing._pane_idle_state(pane)
+        if idle or state.has_active_prompt(wid):
+            s.menu_notified.discard(wid)
+            s.menu_seen.pop(wid, None)
+            continue
+        if wid in s.menu_notified:
+            continue
+        try:
+            raw = tmux._capture_pane(pane, 40)  # menus span >15 lines
+        except Exception:
+            continue
+        result = content._detect_interactive_menu(raw)
+        if not result:
+            s.menu_seen.pop(wid, None)
+            continue
+        title, options, free_text_index = result
+        sig = tuple(options)
+        seen = s.menu_seen.get(wid)
+        if not seen or seen[0] != sig:
+            s.menu_seen[wid] = (sig, now)  # first sighting — wait for stability
+            continue
+        if now - seen[1] < _MENU_DEBOUNCE:
+            continue
+        win_idx = re.match(r'^w?(\d+)', wid).group(1)
+        if win_idx not in locally_viewed:
+            label = state._wid_label(wid)
+            n = len(options)
+            opts_text = "\n".join(f"  {i}. {opt}" for i, opt in enumerate(options, 1))
+            header = f"📋 {label} (`{project}`) menu"
+            if title:
+                header += f" — {title}"
+            msg = f"{header}:\n{opts_text}"
+            if free_text_index:
+                msg += "\n\n_Or reply with text._"
+            buttons = [(opt[:20], f"perm_{wid}_{i}") for i, opt in enumerate(options, 1)]
+            rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+            rows.append([("✖️ Esc", f"menudismiss_{wid}")])
+            kb = telegram._build_inline_keyboard(rows)
+            kb_id = telegram.tg_send(msg, reply_markup=kb,
+                                     silent=state._is_silent(_CAT_PERMISSION))
+            config._save_keyboard_msg(wid, kb_id)
+            config._save_last_msg(wid, msg)
+            shortcuts = {str(i): i for i in range(1, n + 1)}
+            labels = {str(i): opt for i, opt in enumerate(options, 1)}
+            # free_text_index is the 1-based option number of the text field;
+            # navigate_then_submit needs the number of Downs from option 1.
+            free_text_at = (free_text_index - 1) if free_text_index else None
+            state.save_active_prompt(wid, pane, total=n,
+                                     shortcuts=shortcuts,
+                                     labels=labels,
+                                     free_text_at=free_text_at,
+                                     project=project)
+        else:
+            config._log("local", f"suppressed menu for {wid} ({project})")
+        s.menu_notified.add(wid)
+        s.menu_seen.pop(wid, None)
+    # Clear for gone sessions
+    s.menu_notified -= s.menu_notified - set(s.sessions)
+    for gone in set(s.menu_seen) - set(s.sessions):
+        s.menu_seen.pop(gone, None)
 
     focus_state = state._load_focus_state()
     deepfocus_state = state._load_deepfocus_state()
