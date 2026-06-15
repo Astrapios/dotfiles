@@ -201,6 +201,100 @@ def _detect_numbered_dialog(raw: str) -> tuple[str, list[str]] | None:
     return (question, options)
 
 
+# Footer hints that mark an interactive selection menu awaiting input.
+# Distinct from the working indicator ("esc to interrupt"/"esc to interr")
+# and from the idle footer ("? for shortcuts · ← for agents").
+_MENU_FOOTER_RE = re.compile(
+    r'(?i)('
+    r'enter to (set|select|confirm|use)'   # /model: "Enter to set as default"
+    r'|esc to (cancel|close)'              # most menus
+    r'|↑/↓ to navigate|to navigate'        # /agents-style nav line
+    r')'
+)
+
+# A line offering free-text / search input inside a menu.
+_MENU_TEXT_AFFORDANCE_RE = re.compile(
+    r'(?i)(type (something|here|your|to)|to search|search\.\.\.|/ to search)'
+)
+
+# Option line: optional ❯/●/○ pointer + "N. label". Reused shape from
+# _detect_numbered_dialog, but scanned over a larger window because real
+# menus (e.g. /model) span well beyond the last 10 lines.
+_MENU_OPTION_RE = re.compile(r'^\s*[❯>●○✔\s]*(\d+)\.\s+(.+)')
+
+
+def _detect_interactive_menu(raw: str):
+    """Detect a tap-to-selectable Claude Code slash-command menu.
+
+    Returns ``(title, options, free_text_index | None)`` or ``None``.
+
+    Unlike permission/AskUserQuestion dialogs, slash-command menus fire no
+    hooks, so they must be recognized from pane content alone. The
+    signature is a menu-nav footer (``_MENU_FOOTER_RE``) plus a numbered
+    option list above it. The footer's presence also distinguishes a menu
+    from the "Claude is working" spinner state (which shows no such
+    footer), so no ANSI/spinner check is needed here.
+
+    Numbered / ❯-pointer lists only. Tabbed panels and fuzzy pickers
+    (e.g. /agents, /resume) match the footer but expose no numbered
+    options, so they return ``None`` (drive manually with /keys).
+    """
+    lines = raw.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return None
+
+    # 1. Find the menu footer (search the bottom handful of lines).
+    footer_idx = None
+    for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
+        if _MENU_FOOTER_RE.search(lines[i]):
+            footer_idx = i
+            break
+    if footer_idx is None:
+        return None
+
+    # 2. Scan upward from the footer collecting numbered options, stopping
+    #    at a full-width separator (the top border of the menu region).
+    #    First label wins per number; wrapped continuation lines (no
+    #    leading number) are skipped.
+    options: dict[int, str] = {}
+    free_text_index: int | None = None
+    top_idx = 0
+    for i in range(footer_idx - 1, -1, -1):
+        s = lines[i].strip()
+        if re.match(r'^[─━]{3,}', s):
+            top_idx = i
+            break
+        if _MENU_TEXT_AFFORDANCE_RE.search(s):
+            m_aff = _MENU_OPTION_RE.match(lines[i])
+            if m_aff:
+                free_text_index = int(m_aff.group(1))
+        m = _MENU_OPTION_RE.match(lines[i])
+        if m:
+            num = int(m.group(1))
+            if num not in options:
+                options[num] = m.group(2).strip()
+
+    if len(options) < 2:
+        return None
+
+    # 3. Title: first non-empty, non-separator, non-option line below the
+    #    separator (e.g. "Select model").
+    title = ""
+    for i in range(top_idx + 1, footer_idx):
+        s = lines[i].strip()
+        if not s or re.match(r'^[─━]{3,}', s):
+            continue
+        if _MENU_OPTION_RE.match(lines[i]):
+            break
+        title = s
+        break
+
+    ordered = [options[k] for k in sorted(options)]
+    return (title, ordered, free_text_index)
+
+
 def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str]:
     """Filter common UI noise from captured pane content.
     If keep_status=True, preserves thinking/spinner status lines.

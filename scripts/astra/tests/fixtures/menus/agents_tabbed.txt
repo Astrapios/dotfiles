@@ -1,0 +1,24 @@
+  ⎿  Kept model as Opus 4.8 (1M context) (default)
+
+❯ /agents
+  ⎿  Agents dialog dismissed
+
+❯ /model
+  ⎿  Kept model as Opus 4.8 (1M context) (default)
+
+❯ /agents
+
+────────────────────────────────────────────────────────────────────────────────
+  Agents  Running   Library
+
+  No subagents are currently running.
+
+  ←/→ to switch · ↑/↓ to navigate · Enter to select · Esc to close
+
+
+
+
+
+
+
+

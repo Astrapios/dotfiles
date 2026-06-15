@@ -1,0 +1,24 @@
+❯ /agents
+  ⎿  Agents dialog dismissed
+
+❯ /model
+
+────────────────────────────────────────────────────────────────────────────────
+  Select model
+  Switch between Claude models. Your pick becomes the default for new
+  sessions. For other/previous model names, specify with --model.
+
+  ❯ 1. Default (recommended) ✔  Opus 4.8 with 1M context · Best for everyday,
+                                complex tasks
+    2. Sonnet                   Sonnet 4.6 · Efficient for routine tasks
+    3. Sonnet (1M context)      Sonnet 4.6 with 1M context · Draws from usage
+                                credits · $3/$15 per Mtok
+    4. Haiku                    Haiku 4.5 · Fastest for quick answers
+    5. Fable (disabled)         Claude Fable 5 is currently unavailable. Learn
+                                more: https://www.anthropic.com/news/fable-my
+                                thos-access
+
+  ● High effort (default) ←/→ to adjust
+
+  Enter to set as default · s to use this session only · Esc to cancel
+
