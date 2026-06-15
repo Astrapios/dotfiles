@@ -33,14 +33,18 @@ _KEYS_MAP: dict[str, str] = {
 for _i in range(1, 13):
     _KEYS_MAP[f"f{_i}"] = f"F{_i}"
 
-# Quick-pick combos for bare /keys (label, short_id, tmux_key)
+# Quick-pick combos for bare /keys (label, short_id, tmux_key).
+# Up/Down/Enter/Esc/Tab let you drive any TUI menu (e.g. fuzzy pickers
+# like /resume or tabbed /config that aren't offered as tap-to-select).
 _QUICK_KEYS: list[tuple[str, str, str]] = [
+    ("\u2191 Up", "up", "Up"),
+    ("\u2193 Down", "down", "Down"),
+    ("Enter", "enter", "Enter"),
+    ("Escape", "esc", "Escape"),
+    ("Tab", "tab", "Tab"),
     ("Shift+Tab", "btab", "BTab"),
     ("Ctrl+C", "ctrlc", "C-c"),
-    ("Escape", "esc", "Escape"),
     ("Ctrl+O", "ctrlo", "C-o"),
-    ("Enter", "enter", "Enter"),
-    ("\u2191 Up", "up", "Up"),
 ]
 
 
@@ -284,6 +288,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "",
             "*Routing:* prefix with `wN` (e.g. `w4 fix the bug`) or send without prefix for single/last-used session. `!wN msg` injects while busy (Esc + type).",
             "*Photos:* send a photo to have the CLI read it. Add `wN` in caption to target.",
+            "*Slash menus:* open one with e.g. `w4 /model`; astra offers tap-to-select buttons. For fuzzy/tabbed menus use the `/keys wN` nav keypad (↑ ↓ Enter Esc).",
         ]
         telegram.tg_send("\n".join(help_lines), reply_markup=telegram._build_reply_keyboard())
         return None, sessions, last_win_idx

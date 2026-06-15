@@ -8347,11 +8347,14 @@ class TestKeysCommand(unittest.TestCase):
         assert "Send key to" in msg
         kb = mock_send.call_args[1].get("reply_markup") or mock_send.call_args[0][1] if len(mock_send.call_args[0]) > 1 else mock_send.call_args[1].get("reply_markup")
         assert kb is not None
-        # Should have 2 rows of 3 buttons
-        assert len(kb["inline_keyboard"]) == 2
+        # 8 quick keys → 3 rows (3,3,2)
+        assert len(kb["inline_keyboard"]) == 3
         assert len(kb["inline_keyboard"][0]) == 3
-        # First button should be Shift+Tab
-        assert kb["inline_keyboard"][0][0]["callback_data"] == "keys_w5_btab"
+        # First button is now ↑ Up (nav keys lead, for driving menus)
+        assert kb["inline_keyboard"][0][0]["callback_data"] == "keys_w5_up"
+        # Down must be present (the key that was missing for menus)
+        all_cbs = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
+        assert "keys_w5_down" in all_cbs
 
     @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.telegram, "tg_send", return_value=1)
@@ -8379,7 +8382,7 @@ class TestKeysCommand(unittest.TestCase):
         assert "Send key to" in msg
         kb = mock_send.call_args[1].get("reply_markup")
         assert kb is not None
-        assert len(kb["inline_keyboard"]) == 2
+        assert len(kb["inline_keyboard"]) == 3
 
     @patch("subprocess.run")
     @patch.object(astra.telegram, "tg_send", return_value=1)

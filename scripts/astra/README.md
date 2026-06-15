@@ -140,7 +140,7 @@ Once the listener is running, send these from Telegram:
 | `/local [on\|off]` | Suppress Telegram when viewing locally in tmux |
 | `/name wN label` | Name a session for easier routing |
 | `/interrupt wN` | Interrupt current task (Esc) |
-| `/keys wN key...` | Send keys (e.g. `/keys w4 shift+tab`) |
+| `/keys wN key...` | Send keys (e.g. `/keys w4 down`, `/keys w4 shift+tab`); bare `/keys wN` shows a nav keypad (↑ ↓ Enter Esc Tab …) |
 | `/new [dir]` | Start a new Claude session |
 | `/saved [wN]` | Review queued messages |
 | `/last [wN]` | Re-send last Telegram message |
@@ -177,6 +177,20 @@ Once the listener is running, send these from Telegram:
 - **`fix the bug`** — sends to the only session, or the last-used one
 - **Named sessions** — after `/name w4 auth`, send `auth fix the bug`
 - **Photos** — send a photo with optional `w4` caption to have Claude read it
+
+### Slash-command menus
+
+Send a slash command like `w4 /model` to open it in the session. When the
+selection menu appears, astra auto-detects it and replies with tap-to-select
+buttons (plus an ✖️ Esc to cancel) — no need to be at the terminal. Menus
+with a search/text field also accept a typed reply.
+
+- Works for numbered / `❯`-pointer menus (e.g. `/model`).
+- Tabbed panels and fuzzy pickers (`/agents`, `/resume`, `/config`) aren't
+  parsed into buttons — drive them with the `/keys wN` nav keypad
+  (↑ ↓ Enter Esc Tab).
+- Slash commands whose names collide with astra's own (`/clear`, `/status`,
+  `/kb`) are handled by astra, not Claude — invoke those at the terminal.
 
 ## God mode
 

@@ -1570,7 +1570,7 @@ Setup:
 Telegram commands (inside listener):
   /status [wN] [lines] List sessions or show output
   /interrupt [wN]      Interrupt current task (Esc)
-  /keys wN key...      Send keys (e.g. /keys w4 shift+tab)
+  /keys wN key...      Send keys (e.g. /keys w4 down); bare /keys wN = nav keypad
   /god [wN|all|off]    Auto-accept permissions (god mode)
   /god quiet|loud      Suppress/enable god mode receipts
   /focus wN            Watch completed responses
