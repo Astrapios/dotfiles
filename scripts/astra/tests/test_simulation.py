@@ -1839,6 +1839,67 @@ class TestSlashMenu(SimTestBase):
                for b in row]
         assert "perm_w4a_1" in cbs and "perm_w4a_2" in cbs
 
+    # A tool-permission dialog (no hook fires for self-settings edits)
+    PERM = (
+        "● Update(settings.json)\n"
+        "────────────────────────────────────────────────────────────\n"
+        " Edit file\n"
+        " Do you want to make this edit to settings.json?\n"
+        " ❯ 1. Yes\n"
+        "   2. Yes, and allow Claude to edit its own settings for this session\n"
+        "   3. No\n"
+        " Esc to cancel · Tab to amend\n"
+    )
+
+    def test_god_auto_accepts_permission_dialog(self):
+        """god mode auto-selects the approve option for a hook-less
+        permission dialog (option 1 = Enter)."""
+        from unittest.mock import patch as _patch
+        s = self._add(self.PERM)
+        # Harness force-patches _is_god_mode_for→False; override it here.
+        with _patch.object(state, "_is_god_mode_for", side_effect=lambda w: w == "w4a"):
+            self.h.subprocess_calls.clear()
+            self.h.run_ticks(s, 4)
+        bash = [c["args"][2] for c in self.h.subprocess_calls
+                if isinstance(c["args"], list) and len(c["args"]) >= 3
+                and c["args"][0] == "bash"]
+        combined = " ".join(bash)
+        assert "%20" in combined and "Enter" in combined, bash
+        # receipt sent, not option-buttons
+        assert self.h.tg.find_sent("Auto-allowed")
+        assert not self.h.tg.find_sent("menu —")
+
+    def test_non_god_offers_buttons_not_autoaccept(self):
+        """Without god mode (harness default), the SAME permission dialog
+        is offered as buttons (not auto-accepted)."""
+        s = self._add(self.PERM)
+        self.h.subprocess_calls.clear()
+        self.h.run_ticks(s, 4)
+        assert self.h.tg.find_sent("menu"), "should offer buttons when not god"
+        assert not self.h.tg.find_sent("Auto-allowed")
+
+    def test_god_does_not_autoaccept_model_confirm(self):
+        """CRITICAL: god mode must NOT auto-accept a /model 'Switch model?'
+        confirmation — it's a user choice, not a permission."""
+        from unittest.mock import patch as _patch
+        confirm = (
+            "❯ /model\n"
+            "────────────────────────────────────────────────────────────\n"
+            "  Switch model?\n"
+            "  This conversation is cached for the current model.\n"
+            "  ❯ 1. Yes, switch to Opus 4.8\n"
+            "    2. No, go back\n"
+            "  Enter to confirm · Esc to cancel\n"
+        )
+        s = self._add(confirm)
+        with _patch.object(state, "_is_god_mode_for", side_effect=lambda w: w == "w4a"):
+            self.h.subprocess_calls.clear()
+            self.h.run_ticks(s, 4)
+        assert not self.h.tg.find_sent("Auto-allowed"), \
+            "god wrongly auto-accepted a /model confirmation"
+        # it's still offered as buttons (a user choice)
+        assert self.h.tg.find_sent("Switch model")
+
     def test_dismiss_sends_escape_and_clears_prompt(self):
         s = self._add(self.MENU)
         self.h.run_ticks(s, 4)

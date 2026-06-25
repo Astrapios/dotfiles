@@ -309,6 +309,50 @@ def _detect_interactive_menu(raw: str):
     return (title, ordered, free_text_index)
 
 
+# Markers that identify a TOOL-PERMISSION / approval dialog specifically —
+# as opposed to a slash-command menu (/model) or an AskUserQuestion. Used
+# by god mode to auto-accept hook-less permission prompts (e.g. editing
+# Claude's own settings.json, which fires no PreToolUse/Notification hook).
+_PERMISSION_MARKER_RE = re.compile(
+    r'(?i)('
+    r'do you want to (proceed|make this|run|create|edit)'
+    r'|wants to (run|edit|create|read|write|fetch|use)'
+    r'|make this edit'
+    r'|this command requires approval'
+    r'|\bBash command\b|\bEdit file\b|\bCreate file\b'
+    r'|\bWrite file\b|\bRead file\b|\bReplace file\b'
+    r'|allow Claude to edit its own settings'
+    r')'
+)
+
+# The approve option of a permission dialog is affirmative ("1. Yes" /
+# "Allow ...").
+_PERMISSION_AFFIRMATIVE_RE = re.compile(r'(?i)^(yes|allow)\b')
+
+
+def _detect_permission_dialog(raw: str):
+    """Detect a tool-permission/approval dialog awaiting a decision.
+
+    Returns ``(approve_option_number, description)`` or ``None``.
+
+    A permission dialog is a numbered selection menu (per
+    ``_detect_interactive_menu``) that ALSO carries a permission marker
+    (``_PERMISSION_MARKER_RE``) and whose first option is affirmative
+    ("Yes"/"Allow"). This deliberately excludes ``/model`` menus and
+    AskUserQuestion prompts, which are user choices — not approvals — and
+    must never be auto-accepted by god mode.
+    """
+    menu = _detect_interactive_menu(raw)
+    if not menu:
+        return None
+    title, options, _free_text = menu
+    if not options or not _PERMISSION_AFFIRMATIVE_RE.match(options[0]):
+        return None
+    if not _PERMISSION_MARKER_RE.search(raw):
+        return None
+    return (1, title or options[0])
+
+
 def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str]:
     """Filter common UI noise from captured pane content.
     If keep_status=True, preserves thinking/spinner status lines.

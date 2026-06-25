@@ -1,0 +1,22 @@
+● Update(~/.claude/settings.json)
+
+────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ ../../../.claude/settings.json
+ This will modify /home/ubuntu/.dotfiles/scripts/claude_settings.json (outside working directory) via a symlink
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 135    },
+ 136    "effortLevel": "high",
+ 137    "skipDangerousModePermissionPrompt": true,
+ 138 -  "tui": "fullscreen"
+ 138 +  "tui": "fullscreen",
+ 139 +  "teammateMode": "in-process"
+ 140  }
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to settings.json?
+ ❯ 1. Yes
+   2. Yes, and allow Claude to edit its own settings for this session
+   3. No
+
+ Esc to cancel · Tab to amend

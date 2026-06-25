@@ -455,6 +455,27 @@ def _listen_tick(s):
         if now - seen[1] < _MENU_DEBOUNCE:
             continue
         win_idx = re.match(r'^w?(\d+)', wid).group(1)
+
+        # god mode: auto-accept tool-permission dialogs that fired no hook
+        # (e.g. editing Claude's own settings.json — a built-in gate that
+        # bypasses PreToolUse/Notification). The classifier excludes /model
+        # menus and AskUserQuestion, so only genuine approvals are accepted.
+        # Normal in-cwd tool perms are already approved by the PreToolUse
+        # hook before this 1s-stable point, so this is the hook-less fallback.
+        if state._is_god_mode_for(wid):
+            perm = content._detect_permission_dialog(raw)
+            if perm:
+                approve_n, desc = perm
+                tmux_send.select_option(pane, approve_n)
+                config._log("god", f"Auto-allowed (content) {wid} ({project}): {desc}")
+                if win_idx not in locally_viewed and not state._is_god_quiet():
+                    telegram.tg_send(
+                        f"⚡ {state._wid_label(wid)} Auto-allowed (`{project}`): `{desc[:120]}`",
+                        silent=state._is_silent(_CAT_CONFIRM))
+                s.menu_offered[wid] = sig   # handled — don't also offer buttons
+                s.menu_seen.pop(wid, None)
+                continue
+
         if win_idx not in locally_viewed:
             label = state._wid_label(wid)
             n = len(options)

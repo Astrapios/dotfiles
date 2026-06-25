@@ -110,3 +110,55 @@ class TestDetectInteractiveMenu:
     def test_empty_input(self):
         assert content._detect_interactive_menu("") is None
         assert content._detect_interactive_menu("\n\n\n") is None
+
+
+class TestDetectPermissionDialog:
+    """god mode auto-accept relies on classifying a prompt as a tool
+    permission — and NOT misclassifying menus/questions as permissions."""
+
+    def test_settings_edit_is_permission(self):
+        """Real settings.json self-edit dialog → approve option 1."""
+        result = content._detect_permission_dialog(_load("permission_edit.txt"))
+        assert result is not None
+        approve_n, desc = result
+        assert approve_n == 1
+
+    def test_bash_permission_is_permission(self):
+        raw = (
+            "● Bash(rm -rf build/)\n"
+            "────────────────────────────────────────\n"
+            " Bash command\n"
+            " rm -rf build/\n"
+            " Do you want to proceed?\n"
+            " ❯ 1. Yes\n"
+            "   2. Yes, and don't ask again\n"
+            "   3. No\n"
+            " Esc to cancel\n"
+        )
+        result = content._detect_permission_dialog(raw)
+        assert result is not None
+        assert result[0] == 1
+
+    def test_model_menu_is_not_permission(self):
+        """/model list is a user choice, never auto-accept."""
+        assert content._detect_permission_dialog(_load("model_menu.txt")) is None
+
+    def test_model_confirm_is_not_permission(self):
+        """CRITICAL: '/model Switch model?' option 1 starts with 'Yes' but
+        is NOT a permission — god mode must not force a model switch."""
+        assert content._detect_permission_dialog(_load("model_confirm.txt")) is None
+
+    def test_idle_is_not_permission(self):
+        assert content._detect_permission_dialog(_load("idle.txt")) is None
+
+    def test_askuserquestion_is_not_permission(self):
+        """A genuine question (no permission marker, non-Yes options)."""
+        raw = (
+            "────────────────────────────────────────\n"
+            "  What is your favorite color?\n"
+            "  ❯ 1. Red\n"
+            "    2. Blue\n"
+            "    3. Type something.\n"
+            "  Enter to select · Esc to cancel\n"
+        )
+        assert content._detect_permission_dialog(raw) is None

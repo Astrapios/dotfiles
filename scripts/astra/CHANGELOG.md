@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.34.0
+
+- **god mode auto-accepts hook-less permission dialogs (content-based).** Some permission prompts fire **no** PreToolUse/Notification hook — most notably editing Claude Code's own `settings.json` (a built-in safety gate) — so god mode's hook path could never approve them and the session sat stuck. The listener already scans busy panes for menus/dialogs that fire no hooks; that scan now, **under god mode**, auto-selects the approve option for prompts a new classifier identifies as genuine tool-permission dialogs.
+  - New `content._detect_permission_dialog(raw)`: builds on `_detect_interactive_menu`, then requires a permission marker (`Edit file` / `Bash command` / `Do you want to …` / `wants to run|edit|… ` / `allow Claude to edit its own settings`, etc.) **and** an affirmative first option. This deliberately excludes `/model` menus and AskUserQuestion — those are user choices and are still offered as buttons, never auto-accepted (covered by a regression test on the real `/model` "Switch model?" confirmation).
+  - Runs only after the menu's 1s stability debounce, so normal in-cwd tool perms are still handled first by the faster PreToolUse hook; this is the fallback for the hook-less ones. Sends a `⚡ Auto-allowed` receipt (unless god-quiet/local).
+  - Real captured fixture `tests/fixtures/menus/permission_edit.txt`; 6 classifier tests + 3 end-to-end sim tests.
+
 ## 0.33.4
 
 - **Test isolation: stop unit tests polluting the live signal dir.** Added `tests/conftest.py` with an autouse fixture that points `config.SIGNAL_DIR` and `config.GOD_MODE_PATH` at a per-test temp dir. Non-isolated unit tests had been writing `_active_prompt_*`, `_smartfocus.json`, etc. into the real `/tmp/astra_signals` and `~/.config/astra_god_mode.json`, leaking state between tests **and into a running listener**. Two concrete live breakages traced to this: a stale `_active_prompt_w4.json` made `_is_active_question_prompt("w4")` match (via its `_active_prompt_w4*` glob) and suppress real permission notifications for window 4 (god-mode fallback silently dropped); a stale `_smartfocus.json` (bogus pane `0:4.0`) leaked a 👁‍🗨 icon into `/status` and left the listener tracking a non-existent smartfocus target. Tests that manage `SIGNAL_DIR` themselves are unaffected.
