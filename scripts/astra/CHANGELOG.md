@@ -5,6 +5,11 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.33.3
+
+- **Fix unprefixed messages routing to the wrong window.** After targeting a window with `wN`, the next message without a prefix could go to the wrong session (often w0). Root cause: `_listen_tick` overwrote `last_win_idx` (the default target for an unprefixed message) with the wid of the *last background signal processed* — so a busy window emitting stop/god_approve/permission signals would silently hijack the default. `last_win_idx` now tracks only the last session the **user** interacted with; background signals never change it. Replies to a specific prompt still route via the inline buttons (which carry the wid) or an explicit `wN` prefix. Regression test `test_background_signal_does_not_change_default_target`.
+- **Test isolation fix.** `test_status_hides_local_icon_for_remote_override` read the real `SIGNAL_DIR` for focus state, so a leftover `_smartfocus.json` made its 👁‍🗨 icon trip the test's `👁` substring check. The test now patches the focus-state loaders to `None`.
+
 ## 0.33.2
 
 - **Fix footer-less menus (the `/model` "Switch model?" confirmation).** The confirmation step renders no nav footer at all — just the title and numbered options — so the footer-required detector returned `None` and the step was never offered (the user stayed stuck even after 0.33.1). `_detect_interactive_menu` now recognizes a menu by EITHER the `❯` selection cursor on a numbered option (`_MENU_POINTER_RE` — present on every interactive Claude Code menu, absent from prose) OR a nav footer, with a hard guard against the working state (`esc to interrupt`). Verified end-to-end live: list → select → footer-less confirmation offered → tap Yes → model switched. New fixture `tests/fixtures/menus/model_confirm.txt` + detector test.

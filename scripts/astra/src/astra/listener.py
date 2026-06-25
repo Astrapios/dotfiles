@@ -502,15 +502,21 @@ def _listen_tick(s):
     if deepfocus_state:
         focused_wids.add(deepfocus_state["wid"])
 
-    signal_wid = signals.process_signals(
+    signals.process_signals(
         focused_wids=focused_wids or None,
         locally_viewed=locally_viewed or None,
         sessions=s.sessions,
     )
     # Re-read smartfocus state — process_signals may have cleared it
     smartfocus_state = state._load_smartfocus_state()
-    if signal_wid:
-        s.last_win_idx = signal_wid
+    # NOTE: deliberately do NOT update s.last_win_idx from signals here.
+    # last_win_idx is the "default target for an unprefixed message" and
+    # must track the last session the USER interacted with — not whichever
+    # window most recently emitted a background signal (a busy w0 firing
+    # stop/god_approve/permission would otherwise hijack the default and
+    # send the user's next unprefixed message to the wrong window).
+    # Replies to a specific prompt still route correctly via the inline
+    # buttons (perm_/q_ callbacks carry the wid) or an explicit wN prefix.
 
     # --- Focus monitoring (shared pipeline for both focus and smartfocus) ---
     # Pipeline: capture → _focus_capture_lines (filter + strip prompt + wrap) → diff → collapse → send.

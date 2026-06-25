@@ -114,6 +114,40 @@ class TestTextMessageRouting(SimTestBase):
         sent = self.h.tg.find_sent("Sent to.*w4")
         self.assertEqual(len(sent), 2)
 
+    def test_background_signal_does_not_change_default_target(self):
+        """Regression: a background signal (stop/god_approve/permission) from
+        a DIFFERENT window must not hijack the unprefixed-routing default.
+        After targeting w4a, a w0a signal must leave the next unprefixed
+        message still going to w4a — not w0a."""
+        self.h.tmux.add_session("0", "%10", "projZero", idle=True)
+        self.h.tmux.add_session("4", "%20", "projA", idle=True)
+        s = self.h.make_listener_state()
+
+        # User explicitly targets w4a
+        self.h.tg.inject_text_message("w4a first task")
+        self.h.tick(s)
+        state._clear_busy("w4a")
+        self.h.tmux.set_pane_idle("4")
+        self.assertEqual(s.last_win_idx, "w4a")
+
+        # A background signal arrives from w0a (the busy window)
+        self.h.inject_signal("stop", "w0", pane="%10", project="projZero")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        # Default target must be unchanged
+        self.assertEqual(s.last_win_idx, "w4a",
+                         "w0 signal hijacked the unprefixed-routing default")
+
+        # Next unprefixed message still goes to w4a
+        self.h.tmux.set_pane_idle("4")
+        self.h.tg.inject_text_message("continue working")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        sent = self.h.tg.find_sent("Sent to.*w4")
+        self.assertEqual(len(sent), 2)
+        self.assertFalse(self.h.tg.find_sent("Sent to.*w0"),
+                         "unprefixed message wrongly routed to w0")
+
 
 class TestStopSignalWithSmartfocus(SimTestBase):
     """Scenario 2: Stop signal with smartfocus tail.

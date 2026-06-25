@@ -5880,6 +5880,13 @@ class TestStatusCommand(unittest.TestCase):
         msg = mock_send.call_args[0][0]
         self.assertIn("No session", msg)
 
+    # Isolate from ambient focus state: format_sessions_message reads the
+    # real SIGNAL_DIR for smartfocus/focus/deepfocus targets, whose icons
+    # (e.g. smartfocus 👁‍🗨) would otherwise leak into the 👁 substring
+    # check below and make this test order-dependent on leftover state.
+    @patch.object(astra.state, "_load_smartfocus_state", return_value=None)
+    @patch.object(astra.state, "_load_focus_state", return_value=None)
+    @patch.object(astra.state, "_load_deepfocus_state", return_value=None)
     @patch.object(astra.tmux, "scan_claude_sessions")
     @patch.object(astra.tmux, "_get_locally_viewed_windows", return_value={"4"})
     @patch.object(astra.tmux, "_get_client_last_activity", return_value=500.0)
@@ -5887,7 +5894,8 @@ class TestStatusCommand(unittest.TestCase):
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_status_hides_local_icon_for_remote_override(self, mock_send, mock_local,
                                                           mock_activity, mock_viewed,
-                                                          mock_scan):
+                                                          mock_scan, mock_df, mock_fc,
+                                                          mock_sf):
         """Remote-overridden sessions should not show the local 👁 icon in /status."""
         sessions = {"w4a": astra.SessionInfo("0:4.0", "proj", "claude", "4", "a")}
         mock_scan.return_value = sessions
