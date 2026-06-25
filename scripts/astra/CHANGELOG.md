@@ -5,6 +5,11 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.33.4
+
+- **Test isolation: stop unit tests polluting the live signal dir.** Added `tests/conftest.py` with an autouse fixture that points `config.SIGNAL_DIR` and `config.GOD_MODE_PATH` at a per-test temp dir. Non-isolated unit tests had been writing `_active_prompt_*`, `_smartfocus.json`, etc. into the real `/tmp/astra_signals` and `~/.config/astra_god_mode.json`, leaking state between tests **and into a running listener**. Two concrete live breakages traced to this: a stale `_active_prompt_w4.json` made `_is_active_question_prompt("w4")` match (via its `_active_prompt_w4*` glob) and suppress real permission notifications for window 4 (god-mode fallback silently dropped); a stale `_smartfocus.json` (bogus pane `0:4.0`) leaked a 👁‍🗨 icon into `/status` and left the listener tracking a non-existent smartfocus target. Tests that manage `SIGNAL_DIR` themselves are unaffected.
+- _Note: editing Claude Code's own `settings.json` (e.g. via a symlink outside the cwd) fires no PreToolUse/Notification hook — it's a built-in Claude safety gate — so god mode cannot auto-approve it. That prompt must be answered manually (or via astra's menu buttons)._
+
 ## 0.33.3
 
 - **Fix unprefixed messages routing to the wrong window.** After targeting a window with `wN`, the next message without a prefix could go to the wrong session (often w0). Root cause: `_listen_tick` overwrote `last_win_idx` (the default target for an unprefixed message) with the wid of the *last background signal processed* — so a busy window emitting stop/god_approve/permission signals would silently hijack the default. `last_win_idx` now tracks only the last session the **user** interacted with; background signals never change it. Replies to a specific prompt still route via the inline buttons (which carry the wid) or an explicit `wN` prefix. Regression test `test_background_signal_does_not_change_default_target`.
