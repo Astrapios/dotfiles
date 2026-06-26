@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.34.1
+
+- **`/status` self-heals the persistent reply keyboard — no more separate `/kb`.** The bottom reply keyboard sometimes disappears; previously you had to run `/kb` to bring it back. Since Telegram allows only one `reply_markup` per message, bare `/status` now sends **two** messages: a small silent lead message (`📋 Sessions`) that carries the `ReplyKeyboardMarkup` (it shows in the bottom input dock regardless of which bubble sets it), then the status text carrying the inline session picker — so the picker buttons land directly **under the status text** where they belong. Status goes last so it stays the focal bottom bubble and anything reading the final `tg_send` still sees the status. When there's no picker (`_sessions_keyboard` → `None`), `/status` stays a single message that still carries the keyboard.
+
 ## 0.34.0
 
 - **god mode auto-accepts hook-less permission dialogs (content-based).** Some permission prompts fire **no** PreToolUse/Notification hook — most notably editing Claude Code's own `settings.json` (a built-in safety gate) — so god mode's hook path could never approve them and the session sat stuck. The listener already scans busy panes for menus/dialogs that fire no hooks; that scan now, **under god mode**, auto-selects the approve option for prompts a new classifier identifies as genuine tool-permission dialogs.

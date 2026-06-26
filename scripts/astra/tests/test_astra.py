@@ -2931,6 +2931,38 @@ class TestBareCommandSessionPicker(unittest.TestCase):
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.tmux, "scan_claude_sessions")
+    def test_bare_status_restores_reply_keyboard(self, mock_scan, mock_send):
+        """Bare /status self-heals the persistent reply keyboard (no /kb
+        needed): the final message carries the ReplyKeyboardMarkup, and a
+        separate picker message carries the inline session buttons."""
+        mock_scan.return_value = self.sessions
+        astra._handle_command("/status", self.sessions, None)
+        # Two messages: lead (reply keyboard) then status (inline picker), so
+        # the picker buttons land directly under the status text.
+        assert mock_send.call_count == 2
+        lead_kb = mock_send.call_args_list[0].kwargs.get("reply_markup")
+        status_kb = mock_send.call_args_list[1].kwargs.get("reply_markup")
+        # Lead message restores the persistent reply keyboard
+        assert lead_kb and lead_kb.get("keyboard") and lead_kb.get("is_persistent")
+        # Status message carries the inline session picker
+        assert status_kb and "inline_keyboard" in status_kb
+        # Status text is the last send (callers/other tests read call_args)
+        assert "Active sessions" in mock_send.call_args[0][0]
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
+    @patch.object(astra.tmux, "_sessions_keyboard", return_value=None)
+    def test_bare_status_no_picker_still_restores_keyboard(self, mock_kb, mock_scan, mock_send):
+        """When there's no session picker, /status is a single message that
+        still carries the persistent reply keyboard."""
+        mock_scan.return_value = self.sessions
+        astra._handle_command("/status", self.sessions, None)
+        assert mock_send.call_count == 1
+        status_kb = mock_send.call_args.kwargs.get("reply_markup")
+        assert status_kb and status_kb.get("is_persistent")
+
+    @patch.object(astra.telegram, "tg_send", return_value=1)
+    @patch.object(astra.tmux, "scan_claude_sessions")
     def test_bare_focus_shows_picker(self, mock_scan, mock_send):
         mock_scan.return_value = self.sessions
         action, _, _ = astra._handle_command("/focus", self.sessions, "4")

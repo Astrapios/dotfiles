@@ -317,10 +317,29 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 del config._remote_sessions[k]
             if config._remote_sessions:
                 viewed = viewed - set(config._remote_sessions.keys())
-        telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
-                                                       locally_viewed=viewed,
-                                                       resources=resources),
-                         reply_markup=tmux._sessions_keyboard(sessions))
+        # Telegram allows one reply_markup per message. We want BOTH the
+        # inline session-picker buttons sitting under the status text AND the
+        # persistent bottom reply keyboard restored. So we send two messages:
+        # a small lead message that carries the reply keyboard (it shows in
+        # the bottom input dock regardless of which bubble sets it), then the
+        # status text carrying the inline picker so its buttons land directly
+        # under the status. Status goes last so it's the focal bottom bubble
+        # and callers reading the last tg_send still see the status text.
+        # This makes the keyboard self-heal on every /status — no separate /kb.
+        picker = tmux._sessions_keyboard(sessions)
+        if picker:
+            telegram.tg_send("📋 Sessions", reply_markup=telegram._build_reply_keyboard(),
+                             silent=True)
+            telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
+                                                          locally_viewed=viewed,
+                                                          resources=resources),
+                             reply_markup=picker)
+        else:
+            # No picker (no sessions): one message still restores the keyboard.
+            telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
+                                                          locally_viewed=viewed,
+                                                          resources=resources),
+                             reply_markup=telegram._build_reply_keyboard())
         return None, sessions, last_win_idx
 
     status_m = re.match(r"^/status\s+w?(\w[\w-]*)(?:\s+(\d+))?$", text.lower())
