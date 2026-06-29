@@ -10,6 +10,21 @@
 - When dealing with terminal UI interactions (tmux send-keys), capture the actual pane content at each step to understand the UI state before writing key sequences.
 - Think through the full execution path before making changes — trace through the code, consider timing, and verify assumptions.
 
+## Resource Limits
+
+When running any compute script (Python, pytest, simulations, etc.), cap its virtual address space at **220 GB** using `prlimit` to prevent runaway allocations from taking down the machine:
+
+```bash
+prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python my_script.py
+prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python -m pytest ...
+```
+
+Notes:
+- Use **explicit bytes** (`$((220*1024*1024*1024))`). The `G` suffix silently misparses as bytes on util-linux 2.39.
+- Apply to any long-running or memory-intensive invocation — simulations, pytest runs with large fixtures, data loads. Short read-only commands (`ls`, `git status`) don't need it.
+- On overshoot the process fails its allocation (usually `MemoryError` in Python), which is recoverable — the machine stays up.
+- `prlimit` limits virtual memory (`RLIMIT_AS`); GPU/cuda allocations may not count against it.
+
 ## Testing
 
 - Default to **pytest** for writing unit tests (not unittest). Use plain `assert` statements, pytest fixtures, and `mocker` (pytest-mock) instead of `unittest.TestCase`, `self.assert*`, and `@patch` decorators.
@@ -31,11 +46,13 @@ When generating PowerPoint presentations, follow the dark theme established in `
 
 ## Telegram Integration
 
-When the user asks you to show, send, or share an image, figure, chart, screenshot, or any visual file to Telegram, use:
+Whenever the user asks you to **show** them a figure, image, chart, screenshot, or plot — even without explicitly saying "Telegram" or "send" — assume they mean for it to be delivered via Telegram (the user is typically on a phone/CLI without an inline image viewer). Use `astra send-photo` automatically as part of fulfilling the request:
 
 ```bash
 astra send-photo /path/to/file.png "optional caption"
 ```
+
+Triggers include phrases like "show me <figure/plot/chart>", "let me see X", "plot X" (after the plot is generated), as well as the explicit "send to Telegram" / "share". The default action is `astra send-photo` unless the user specifies otherwise.
 
 Images larger than 1280px are automatically sent as documents to preserve full resolution.
 
