@@ -310,6 +310,19 @@ def _build_reply_keyboard() -> dict:
     ], "resize_keyboard": True, "is_persistent": True}
 
 
+def tg_send_receipt(text: str, silent: bool = False) -> int:
+    """Send a routed-action receipt (e.g. '📨 Sent to wN: …', '📷 Photo sent',
+    '⌨️ Sent <key>') carrying the persistent reply keyboard.
+
+    The reply keyboard is the bottom input dock, not a message bubble, so
+    riding it on receipts astra already sends keeps it alive on every
+    interaction with zero extra chrome — no separate /kb message needed.
+    Telegram allows one reply_markup per message, so receipts must NOT also
+    carry an inline keyboard (they don't).
+    """
+    return tg_send(text, reply_markup=_build_reply_keyboard(), silent=silent)
+
+
 def _build_inline_keyboard(rows: list[list[tuple[str, str]]]) -> dict:
     """Build InlineKeyboardMarkup from rows of (label, callback_data) tuples."""
     return {"inline_keyboard": [

@@ -826,7 +826,7 @@ def _listen_tick(s):
                     tmux_send.submit_text(pane, instruction, settle=settle)
                     state._mark_busy(target_wid)
                     confirm = f"📷 Photo sent to `{target_wid}` (`{project}`):\n`{paths_display}`"
-                    telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                    telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
                     commands._maybe_activate_smartfocus(target_wid, pane, project, confirm)
                     s.last_win_idx = target_wid
                 else:
@@ -900,7 +900,7 @@ def _listen_tick(s):
                     tmux_send.submit_text(pane, instruction)
                     state._mark_busy(target_wid)
                     confirm = f"📎 Document sent to `{target_wid}` (`{project}`):\n`{file_name}`"
-                    telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                    telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
                     commands._maybe_activate_smartfocus(target_wid, pane, project, confirm)
                     s.last_win_idx = target_wid
                 else:

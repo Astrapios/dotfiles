@@ -317,29 +317,13 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 del config._remote_sessions[k]
             if config._remote_sessions:
                 viewed = viewed - set(config._remote_sessions.keys())
-        # Telegram allows one reply_markup per message. We want BOTH the
-        # inline session-picker buttons sitting under the status text AND the
-        # persistent bottom reply keyboard restored. So we send two messages:
-        # a small lead message that carries the reply keyboard (it shows in
-        # the bottom input dock regardless of which bubble sets it), then the
-        # status text carrying the inline picker so its buttons land directly
-        # under the status. Status goes last so it's the focal bottom bubble
-        # and callers reading the last tg_send still see the status text.
-        # This makes the keyboard self-heal on every /status — no separate /kb.
-        picker = tmux._sessions_keyboard(sessions)
-        if picker:
-            telegram.tg_send("📋 Sessions", reply_markup=telegram._build_reply_keyboard(),
-                             silent=True)
-            telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
-                                                          locally_viewed=viewed,
-                                                          resources=resources),
-                             reply_markup=picker)
-        else:
-            # No picker (no sessions): one message still restores the keyboard.
-            telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
-                                                          locally_viewed=viewed,
-                                                          resources=resources),
-                             reply_markup=telegram._build_reply_keyboard())
+        # Single message: status text + inline session picker. The persistent
+        # reply keyboard is kept alive by telegram.tg_send_receipt on every
+        # routed action, so /status needs no separate keyboard-restore message.
+        telegram.tg_send(tmux.format_sessions_message(sessions, statuses=statuses,
+                                                      locally_viewed=viewed,
+                                                      resources=resources),
+                         reply_markup=tmux._sessions_keyboard(sessions))
         return None, sessions, last_win_idx
 
     status_m = re.match(r"^/status\s+w?(\w[\w-]*)(?:\s+(\d+))?$", text.lower())
@@ -818,7 +802,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             tokens = key_str.split()
             tmux_keys = [_resolve_key(t) for t in tokens]
             tmux_send.press_keys(pane, *tmux_keys)
-            telegram.tg_send(f"⌨️ Sent `{key_str}` to {state._wid_label(idx)} (`{project}`).")
+            telegram.tg_send_receipt(f"⌨️ Sent `{key_str}` to {state._wid_label(idx)} (`{project}`).")
             return None, sessions, idx
         else:
             telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
@@ -1032,7 +1016,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             pane, project = sessions[resolved]
             _clear_suggestion_keyboard(resolved)
             confirm = routing.route_to_pane(pane, resolved, prompt, force=force)
-            telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+            telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(resolved, confirm[:100])
             _maybe_activate_smartfocus(resolved, pane, project, confirm)
             return None, sessions, resolved
@@ -1050,7 +1034,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             pane, project = sessions[name_idx]
             _clear_suggestion_keyboard(name_idx)
             confirm = routing.route_to_pane(pane, name_idx, words[1].strip(), force=force)
-            telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+            telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(name_idx, confirm[:100])
             _maybe_activate_smartfocus(name_idx, pane, project, confirm)
             return None, sessions, name_idx
@@ -1066,7 +1050,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         pane, project = sessions[target_idx]
         _clear_suggestion_keyboard(target_idx)
         confirm = routing.route_to_pane(pane, target_idx, text, force=force)
-        telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+        telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
         config._log(target_idx, confirm[:100])
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)
         return None, sessions, target_idx
@@ -1159,7 +1143,7 @@ def _handle_callback(callback: dict, sessions: dict,
         if resolved:
             pane, project = sessions[resolved]
             confirm = routing.route_to_pane(pane, resolved, n_str)
-            telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+            telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
             last_win_idx = resolved
         return sessions, last_win_idx, None
 
@@ -1181,7 +1165,7 @@ def _handle_callback(callback: dict, sessions: dict,
                 config._mark_remote(resolved)
                 pane, project = sessions[resolved]
                 tmux_send.press_key(pane, tmux_key)
-                telegram.tg_send(f"⌨️ Sent `{label}` to {state._wid_label(resolved)} (`{project}`).")
+                telegram.tg_send_receipt(f"⌨️ Sent `{label}` to {state._wid_label(resolved)} (`{project}`).")
                 last_win_idx = resolved
             else:
                 telegram.tg_send(f"⚠️ Session `{wid}` no longer active.")
@@ -1220,7 +1204,7 @@ def _handle_callback(callback: dict, sessions: dict,
                 combined = "\n".join(m_q["text"] for m_q in msgs)
                 pane, project = sessions[resolved]
                 confirm = routing.route_to_pane(pane, resolved, combined)
-                telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
                 _maybe_activate_smartfocus(resolved, pane, project, confirm)
                 last_win_idx = resolved
             elif msgs:
@@ -1245,7 +1229,7 @@ def _handle_callback(callback: dict, sessions: dict,
             if resolved:
                 pane, project = sessions[resolved]
                 confirm = routing.route_to_pane(pane, resolved, suggestion)
-                telegram.tg_send(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
                 _maybe_activate_smartfocus(resolved, pane, project, confirm)
                 last_win_idx = resolved
             else:

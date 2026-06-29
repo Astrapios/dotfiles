@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.34.2
+
+- **Reply keyboard now self-heals via routed-action receipts (no extra bubble).** Supersedes the 0.34.1 approach: instead of `/status` sending an extra keyboard-restore message, the persistent reply keyboard now rides every routed-action **receipt** astra already sends — `📨 Sent to wN`, `📷 Photo sent`, `📎 Document sent`, `⌨️ Sent <key>`. New `telegram.tg_send_receipt()` attaches the `ReplyKeyboardMarkup`; the keyboard is the bottom input dock (not a bubble), so this revives it on every interaction with **zero extra chrome**. `/status` reverts to a single message (status text + inline session picker). `/kb` stays as a manual fallback for the rare case the keyboard is gone before your first interaction.
+
 ## 0.34.1
 
 - **`/status` self-heals the persistent reply keyboard — no more separate `/kb`.** The bottom reply keyboard sometimes disappears; previously you had to run `/kb` to bring it back. Since Telegram allows only one `reply_markup` per message, bare `/status` now sends **two** messages: a small silent lead message (`📋 Sessions`) that carries the `ReplyKeyboardMarkup` (it shows in the bottom input dock regardless of which bubble sets it), then the status text carrying the inline session picker — so the picker buttons land directly **under the status text** where they belong. Status goes last so it stays the focal bottom bubble and anything reading the final `tg_send` still sees the status. When there's no picker (`_sessions_keyboard` → `None`), `/status` stays a single message that still carries the keyboard.
