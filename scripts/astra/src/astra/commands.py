@@ -810,6 +810,24 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
+    # /re | /redirect (bare) — offer a session picker for the redirect target.
+    if text.lower().strip() in ("/re", "/redirect"):
+        last = config._get_last_routed()
+        if not last:
+            telegram.tg_send("⚠️ Nothing to redirect — no recent message.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return None, sessions, last_win_idx
+        sessions = tmux.scan_claude_sessions()
+        kb = tmux._command_sessions_keyboard("re", sessions)
+        if kb:
+            telegram.tg_send(
+                f"↪️ Redirect last message to which session?\n`{last['text'][:80]}`",
+                reply_markup=kb)
+        else:
+            telegram.tg_send("⚠️ No CLI sessions found.",
+                             silent=state._is_silent(_CAT_ERROR))
+        return None, sessions, last_win_idx
+
     # /re wN | /redirect wN — recover a misrouted message: interrupt the
     # session the last message was sent to and resend that same text to wN.
     re_m = re.match(r"^/re(?:direct)?\s+w?(\w[\w-]*)$", text.lower())
@@ -1243,7 +1261,7 @@ def _handle_callback(callback: dict, sessions: dict,
         return sessions, last_win_idx, None
 
     # Command callbacks: cmd_{action}_{wid}
-    m = re.match(r"^cmd_(status|focus|deepfocus|autofocus|interrupt|kill|restart|last|god|keys)_(w?\d+[a-z]?)$", cb_data)
+    m = re.match(r"^cmd_(status|focus|deepfocus|autofocus|interrupt|kill|restart|last|god|keys|re)_(w?\d+[a-z]?)$", cb_data)
     if m:
         cmd, wid_part = m.group(1), m.group(2)
         wid_str = wid_part if wid_part.startswith("w") else f"w{wid_part}"

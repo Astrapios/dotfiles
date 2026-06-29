@@ -306,7 +306,7 @@ def _build_reply_keyboard() -> dict:
     """Build a persistent ReplyKeyboardMarkup with common commands."""
     return {"keyboard": [
         [{"text": "/status"}, {"text": "/keys"}, {"text": "/god"}],
-        [{"text": "/interrupt"}, {"text": "/saved"}, {"text": "/last"}],
+        [{"text": "/interrupt"}, {"text": "/saved"}, {"text": "/re"}],
     ], "resize_keyboard": True, "is_persistent": True}
 
 

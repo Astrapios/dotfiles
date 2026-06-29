@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.1
+
+- **`/re` is now button-friendly and replaces `/last` on the reply keyboard.** Tapping `/re` (bare, no `wN`) now offers a session picker — "↪️ Redirect last message to which session?" with one button per session (`cmd_re_wN` callbacks that run `/re wN`) — mirroring how bare `/interrupt`/`/kill` ask which session. The persistent reply keyboard's third button in row 2 swaps `/last` → `/re` (the `/last` command itself stays available). Bare `/re` with nothing to redirect still answers "Nothing to redirect".
+
 ## 0.36.0
 
 - **`/re wN` redirects a misrouted message to the right window.** When you reply thinking it'll go to one conversation but it routes to whatever window was last targeted (`last_win_idx`), the message lands in the wrong session. `/re wN` (alias `reN`, e.g. `re4`) recovers it: it **interrupts** the window the last message was actually sent to (Esc + clear, and unqueues it there if it was queued because that session was busy), then **resends the same text** to `wN`. Scoped to free-text messages — the last text routed to a pane is remembered in `config._last_routed` (recorded only on a successful 📨 send / 💾 queue, never on an error). Guards: warns when there's nothing to redirect or when the target is the same window the message already went to.

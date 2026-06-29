@@ -627,6 +627,48 @@ class TestRedirectCommand:
         astra.commands._handle_command("/re w4", sessions, "w4a")
         assert any("already went to" in (s or "") for s in sent)
 
+    def test_bare_re_shows_session_picker(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        config._save_last_routed("w3a", "fix the bug")
+        calls = []
+        monkeypatch.setattr(astra.telegram, "tg_send",
+                            lambda *a, **k: calls.append((a, k)) or 1)
+        monkeypatch.setattr(astra.tmux, "scan_claude_sessions", lambda: sessions)
+        astra.commands._handle_command("/re", sessions, "w3a")
+        (text_arg, *_), kwargs = calls[-1]
+        assert "Redirect last message" in text_arg
+        flat = str(kwargs.get("reply_markup"))
+        assert "cmd_re_w3" in flat and "cmd_re_w4" in flat
+
+    def test_bare_re_no_message(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        sent = []
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: sent.append(a[0]) or 1)
+        monkeypatch.setattr(astra.tmux, "scan_claude_sessions", lambda: sessions)
+        astra.commands._handle_command("/re", sessions, None)
+        assert any("Nothing to redirect" in (s or "") for s in sent)
+
+    def test_cmd_re_callback_runs_redirect(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        config._save_last_routed("w3a", "fix the bug")
+        monkeypatch.setattr(astra.telegram, "_answer_callback_query", lambda *a, **k: None)
+        monkeypatch.setattr(astra.telegram, "_remove_inline_keyboard", lambda *a, **k: None)
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: 1)
+        monkeypatch.setattr(astra.telegram, "tg_send_receipt", lambda *a, **k: None)
+        monkeypatch.setattr(astra.tmux_send, "interrupt", lambda pane: None)
+        routed = {}
+        monkeypatch.setattr(astra.routing, "route_to_pane",
+                            lambda pane, wid, text, force=False:
+                            routed.update(wid=wid, text=text) or f"📨 Sent to `{wid}`")
+        astra.commands._handle_callback(
+            {"id": "cb", "data": "cmd_re_w4", "message_id": 1}, sessions, "w3a")
+        assert routed == {"wid": "w4a", "text": "fix the bug"}
+
+    def test_reply_keyboard_swaps_last_for_re(self):
+        flat = str(astra.telegram._build_reply_keyboard())
+        assert "/re" in flat
+        assert "/last" not in flat
+
 
 # --- log ---
 
