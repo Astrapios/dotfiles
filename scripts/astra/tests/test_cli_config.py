@@ -432,6 +432,109 @@ class TestCmdSaved:
                 astra.cmd_saved()
 
 
+class TestRemoveQueuedMsgAt:
+    def test_remove_middle(self):
+        for t in ("a", "b", "c"):
+            state._save_queued_msg("w4a", t)
+        removed = state._remove_queued_msg_at("w4a", 1)
+        assert removed["text"] == "b"
+        assert [m["text"] for m in state._load_queued_msgs("w4a")] == ["a", "c"]
+
+    def test_remove_last_deletes_file(self):
+        state._save_queued_msg("w4a", "only")
+        removed = state._remove_queued_msg_at("w4a", 0)
+        assert removed["text"] == "only"
+        path = os.path.join(config.SIGNAL_DIR, "_queued_w4a.json")
+        assert not os.path.exists(path)
+        assert state._load_queued_msgs("w4a") == []
+
+    def test_out_of_range_returns_none(self):
+        state._save_queued_msg("w4a", "a")
+        assert state._remove_queued_msg_at("w4a", 5) is None
+        assert state._remove_queued_msg_at("w4a", -1) is None
+        # Queue untouched
+        assert len(state._load_queued_msgs("w4a")) == 1
+
+    def test_empty_queue_returns_none(self):
+        assert state._remove_queued_msg_at("w99", 0) is None
+
+
+class TestSavedCallbacks:
+    """Per-message and bulk saved-message inline-keyboard callbacks."""
+
+    @pytest.fixture
+    def patched(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(astra.telegram, "_answer_callback_query", lambda *a, **k: None)
+        monkeypatch.setattr(astra.telegram, "_remove_inline_keyboard", lambda *a, **k: None)
+        monkeypatch.setattr(astra.telegram, "_build_inline_keyboard", lambda rows: rows)
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: sent.append(a[0] if a else None) or 1)
+        monkeypatch.setattr(astra.telegram, "tg_send_receipt", lambda *a, **k: sent.append(a[0] if a else None))
+        return sent
+
+    def _sessions(self):
+        return {"w4a": tmux.SessionInfo(pane_target="%5", project="proj", cli="claude",
+                                        win_idx="4", pane_suffix="a", pane_id="%5")}
+
+    def test_send_one_routes_and_removes(self, patched):
+        for t in ("first", "second", "third"):
+            state._save_queued_msg("w4a", t)
+        sessions = self._sessions()
+        with patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4a`:\n`second`") as route:
+            _, last, _ = astra.commands._handle_callback(
+                {"id": "cb", "data": "saved_sendone_w4a_1", "message_id": 1}, sessions, None)
+        route.assert_called_once_with("%5", "w4a", "second")
+        assert last == "w4a"
+        assert [m["text"] for m in state._load_queued_msgs("w4a")] == ["first", "third"]
+
+    def test_delete_one_removes_without_routing(self, patched):
+        for t in ("first", "second"):
+            state._save_queued_msg("w4a", t)
+        sessions = self._sessions()
+        with patch.object(astra.routing, "route_to_pane") as route:
+            astra.commands._handle_callback(
+                {"id": "cb", "data": "saved_delone_w4a_0", "message_id": 1}, sessions, None)
+        route.assert_not_called()
+        assert [m["text"] for m in state._load_queued_msgs("w4a")] == ["second"]
+        assert any("Deleted saved message 1" in (s or "") for s in patched)
+
+    def test_send_all_still_works(self, patched):
+        state._save_queued_msg("w4a", "a")
+        state._save_queued_msg("w4a", "b")
+        sessions = self._sessions()
+        with patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4a`") as route:
+            astra.commands._handle_callback(
+                {"id": "cb", "data": "saved_send_w4a", "message_id": 1}, sessions, None)
+        route.assert_called_once_with("%5", "w4a", "a\nb")
+        assert state._load_queued_msgs("w4a") == []
+
+    def test_keyboard_per_message_rows_when_multiple(self, monkeypatch):
+        monkeypatch.setattr(astra.telegram, "_build_inline_keyboard", lambda rows: rows)
+        rows = astra.commands._saved_keyboard("w4a", 2)
+        # Two per-message rows + one send-all/discard-all row
+        assert len(rows) == 3
+        cb = [btn[1] for row in rows for btn in row]
+        assert "saved_sendone_w4a_0" in cb
+        assert "saved_delone_w4a_1" in cb
+        assert "saved_send_w4a" in cb and "saved_discard_w4a" in cb
+
+    def test_keyboard_single_message_simple(self, monkeypatch):
+        monkeypatch.setattr(astra.telegram, "_build_inline_keyboard", lambda rows: rows)
+        rows = astra.commands._saved_keyboard("w4a", 1)
+        assert len(rows) == 1
+        cb = [btn[1] for row in rows for btn in row]
+        assert cb == ["saved_send_w4a", "saved_discard_w4a"]
+
+    def test_stale_index_reports_gone(self, patched):
+        state._save_queued_msg("w4a", "a")
+        sessions = self._sessions()
+        with patch.object(astra.routing, "route_to_pane") as route:
+            astra.commands._handle_callback(
+                {"id": "cb", "data": "saved_sendone_w4a_9", "message_id": 1}, sessions, None)
+        route.assert_not_called()
+        assert any("no longer there" in (s or "") for s in patched)
+
+
 # --- log ---
 
 class TestCmdLog:

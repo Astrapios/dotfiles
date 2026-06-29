@@ -230,6 +230,45 @@ def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: s
     state._save_smartfocus_state(win_idx, pane, project)
 
 
+def _saved_keyboard(idx: str, count: int):
+    """Build the inline keyboard for a session's saved messages.
+
+    With multiple messages, offer a per-message send/delete row for each plus
+    a send-all/discard-all row; with a single message, just send/discard."""
+    rows = []
+    if count > 1:
+        for i in range(count):
+            rows.append([
+                (f"✉️ {i + 1}", f"saved_sendone_{idx}_{i}"),
+                (f"\U0001f5d1 {i + 1}", f"saved_delone_{idx}_{i}"),
+            ])
+        rows.append([
+            ("✉️ Send all", f"saved_send_{idx}"),
+            ("\U0001f5d1 Discard all", f"saved_discard_{idx}"),
+        ])
+    else:
+        rows.append([
+            ("✉️ Send", f"saved_send_{idx}"),
+            ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
+        ])
+    return telegram._build_inline_keyboard(rows)
+
+
+def _show_saved(idx: str) -> bool:
+    """Send the saved-messages list + action keyboard for one session.
+
+    Returns True if there were saved messages to show, False otherwise."""
+    queued = state._load_queued_msgs(idx)
+    if not queued:
+        return False
+    preview_lines = [f"{i}. `{m_q['text'][:100]}`" for i, m_q in enumerate(queued, 1)]
+    telegram.tg_send(
+        f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
+        reply_markup=_saved_keyboard(idx, len(queued)),
+    )
+    return True
+
+
 def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tuple[str | None, dict, str | None]:
     """Handle a command in active mode. Returns (action, sessions, last_win_idx).
     action is 'pause', 'quit', or None (continue processing)."""
@@ -258,7 +297,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/focus wN` — watch completed responses",
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
-            "`/saved [wN]` — review saved messages",
+            "`/saved [wN]` — review saved messages (send/delete individually)",
             "`/last [wN]` — re-send last Telegram message",
             "",
             "*Settings:*",
@@ -963,39 +1002,14 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if not idx:
                 telegram.tg_send(f"⚠️ No session `{raw_target}`.")
                 return None, sessions, last_win_idx
-            queued = state._load_queued_msgs(idx)
-            if queued:
-                preview_lines = []
-                for i, m_q in enumerate(queued, 1):
-                    preview_lines.append(f"{i}. `{m_q['text'][:100]}`")
-                saved_kb = telegram._build_inline_keyboard([[
-                    ("\u2709\ufe0f Send", f"saved_send_{idx}"),
-                    ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
-                ]])
-                telegram.tg_send(
-                    f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
-                    reply_markup=saved_kb,
-                )
-            else:
+            if not _show_saved(idx):
                 telegram.tg_send(f"No saved messages for {state._wid_label(idx)}.")
         else:
             # Scan all sessions for queued messages
             found_any = False
             for idx in tmux._sort_session_keys(sessions):
-                queued = state._load_queued_msgs(idx)
-                if queued:
+                if _show_saved(idx):
                     found_any = True
-                    preview_lines = []
-                    for i, m_q in enumerate(queued, 1):
-                        preview_lines.append(f"{i}. `{m_q['text'][:100]}`")
-                    saved_kb = telegram._build_inline_keyboard([[
-                        ("\u2709\ufe0f Send", f"saved_send_{idx}"),
-                        ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
-                    ]])
-                    telegram.tg_send(
-                        f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
-                        reply_markup=saved_kb,
-                    )
             if not found_any:
                 telegram.tg_send("No saved messages.")
         return None, sessions, last_win_idx
@@ -1191,6 +1205,33 @@ def _handle_callback(callback: dict, sessions: dict,
         cmd_text = f"/status {wid}"
         _, sessions, last_win_idx = _handle_command(
             cmd_text, sessions, last_win_idx)
+        return sessions, last_win_idx, None
+
+    # Per-message saved callbacks: saved_sendone_{wid}_{i}, saved_delone_{wid}_{i}
+    m = re.match(r"^saved_(sendone|delone)_(w\d+[a-z]?)_(\d+)$", cb_data)
+    if m:
+        action_type, wid, index = m.group(1), m.group(2), int(m.group(3))
+        removed = state._remove_queued_msg_at(wid, index)
+        if not removed:
+            telegram.tg_send("⚠️ That saved message is no longer there.",
+                             silent=state._is_silent(_CAT_ERROR))
+        elif action_type == "sendone":
+            resolved = tmux.resolve_session_id(wid, sessions)
+            if resolved:
+                pane, project = sessions[resolved]
+                confirm = routing.route_to_pane(pane, resolved, removed["text"])
+                telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
+                _maybe_activate_smartfocus(resolved, pane, project, confirm)
+                last_win_idx = resolved
+            else:
+                telegram.tg_send(f"⚠️ Session `{wid}` no longer active.",
+                                 silent=state._is_silent(_CAT_ERROR))
+        else:  # delone
+            telegram.tg_send(
+                f"🗑 Deleted saved message {index + 1} for {state._wid_label(wid)}:\n`{removed['text'][:100]}`",
+                silent=state._is_silent(_CAT_CONFIRM))
+        # Re-display whatever remains so the keyboard stays current
+        _show_saved(wid)
         return sessions, last_win_idx, None
 
     # Saved message callbacks: saved_send_{wid}, saved_discard_{wid}

@@ -1576,7 +1576,7 @@ Telegram commands (inside listener):
   /focus wN            Watch completed responses
   /deepfocus wN        Stream all output in real-time
   /unfocus             Stop monitoring
-  /saved [wN]          Review saved messages
+  /saved [wN]          Review saved messages (send/delete individually)
   /last [wN]           Re-send last Telegram message
   /autofocus [on|off]  Auto-monitor on send (default: on)
   /local [on|off]      Suppress Telegram when viewing locally

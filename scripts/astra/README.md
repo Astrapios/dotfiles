@@ -142,7 +142,7 @@ Once the listener is running, send these from Telegram:
 | `/interrupt wN` | Interrupt current task (Esc) |
 | `/keys wN key...` | Send keys (e.g. `/keys w4 down`, `/keys w4 shift+tab`); bare `/keys wN` shows a nav keypad (↑ ↓ Enter Esc Tab …) |
 | `/new [dir]` | Start a new Claude session |
-| `/saved [wN]` | Review queued messages |
+| `/saved [wN]` | Review queued messages; tap to send or delete each one individually, or send/discard all |
 | `/last [wN]` | Re-send last Telegram message |
 | `/kill wN` | Exit a Claude session (Ctrl+C) |
 | `/notification [digits\|all\|off]` | Control which alerts buzz your phone |

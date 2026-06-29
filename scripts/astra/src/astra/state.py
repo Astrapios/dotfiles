@@ -371,6 +371,28 @@ def _pop_queued_msgs(wid: str) -> list[dict]:
         return []
 
 
+def _remove_queued_msg_at(wid: str, index: int) -> dict | None:
+    """Remove and return a single queued message by 0-based index.
+
+    Returns the removed message dict, or None if the index is out of range.
+    Rewrites the queue file with the remaining messages (deleting it when the
+    queue becomes empty)."""
+    path = os.path.join(config.SIGNAL_DIR, f"_queued_{wid}.json")
+    msgs = _load_queued_msgs(wid)
+    if index < 0 or index >= len(msgs):
+        return None
+    removed = msgs.pop(index)
+    try:
+        if msgs:
+            with open(path, "w") as f:
+                json.dump(msgs, f)
+        else:
+            os.remove(path)
+    except OSError:
+        pass
+    return removed
+
+
 def _save_prompt_text(wid: str, text: str):
     """Save locally typed prompt text that was cleared."""
     os.makedirs(config.SIGNAL_DIR, exist_ok=True)

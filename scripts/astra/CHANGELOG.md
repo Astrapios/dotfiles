@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.35.0
+
+- **`/saved` can now send or delete each queued message individually.** Previously the saved-messages keyboard only offered "Send" (concatenated all queued messages with newlines and fired them as one) and "Discard" (dropped the whole queue). When a session has more than one queued message, the keyboard now shows a per-message row for each — `✉️ N` to send just that message and `🗑 N` to delete just that message — plus a final `✉️ Send all` / `🗑 Discard all` row. A single queued message keeps the simple `✉️ Send` / `🗑 Discard` pair. After any per-message action the listener re-displays the remaining queue with a fresh keyboard so the indices stay current.
+  - New `state._remove_queued_msg_at(wid, index)` removes and returns one message by 0-based index (rewriting the queue file, deleting it when empty); out-of-range indices return `None`.
+  - New callbacks `saved_sendone_{wid}_{i}` / `saved_delone_{wid}_{i}`; `_show_saved()` / `_saved_keyboard()` helpers centralize the display so `/saved` (specific + scan-all) and the callbacks share one code path.
+
 ## 0.34.2
 
 - **Reply keyboard now self-heals via routed-action receipts (no extra bubble).** Supersedes the 0.34.1 approach: instead of `/status` sending an extra keyboard-restore message, the persistent reply keyboard now rides every routed-action **receipt** astra already sends — `📨 Sent to wN`, `📷 Photo sent`, `📎 Document sent`, `⌨️ Sent <key>`. New `telegram.tg_send_receipt()` attaches the `ReplyKeyboardMarkup`; the keyboard is the bottom input dock (not a bubble), so this revives it on every interaction with **zero extra chrome**. `/status` reverts to a single message (status text + inline session picker). `/kb` stays as a manual fallback for the rare case the keyboard is gone before your first interaction.
