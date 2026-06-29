@@ -140,6 +140,7 @@ Once the listener is running, send these from Telegram:
 | `/local [on\|off]` | Suppress Telegram when viewing locally in tmux |
 | `/name wN label` | Name a session for easier routing |
 | `/interrupt wN` | Interrupt current task (Esc) |
+| `/re wN` | Redirect the last message to `wN` — interrupts the window it was wrongly sent to (and unqueues it there), then resends the same text to `wN` |
 | `/keys wN key...` | Send keys (e.g. `/keys w4 down`, `/keys w4 shift+tab`); bare `/keys wN` shows a nav keypad (↑ ↓ Enter Esc Tab …) |
 | `/new [dir]` | Start a new Claude session |
 | `/saved [wN]` | Review queued messages; tap to send or delete each one individually, or send/discard all |
@@ -159,6 +160,7 @@ Once the listener is running, send these from Telegram:
 | `f4` | `/focus w4` |
 | `df4` | `/deepfocus w4` |
 | `i4` | `/interrupt w4` |
+| `re4` | `/re w4` (redirect last message to w4) |
 | `k5 shift+tab` | `/keys w5 shift+tab` |
 | `c` / `c4` | `/clear` / `/clear w4` |
 | `g4` | `/god w4` |

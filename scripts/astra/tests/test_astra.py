@@ -2814,7 +2814,8 @@ class TestSetBotCommands(unittest.TestCase):
         self.assertIn("local", names)
         self.assertIn("keys", names)
         self.assertIn("kb", names)
-        self.assertEqual(len(commands), 23)
+        self.assertIn("re", names)
+        self.assertEqual(len(commands), 24)
 
     @patch("requests.post", side_effect=Exception("network error"))
     def test_survives_exception(self, mock_post):

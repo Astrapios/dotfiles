@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.0
+
+- **`/re wN` redirects a misrouted message to the right window.** When you reply thinking it'll go to one conversation but it routes to whatever window was last targeted (`last_win_idx`), the message lands in the wrong session. `/re wN` (alias `reN`, e.g. `re4`) recovers it: it **interrupts** the window the last message was actually sent to (Esc + clear, and unqueues it there if it was queued because that session was busy), then **resends the same text** to `wN`. Scoped to free-text messages — the last text routed to a pane is remembered in `config._last_routed` (recorded only on a successful 📨 send / 💾 queue, never on an error). Guards: warns when there's nothing to redirect or when the target is the same window the message already went to.
+
 ## 0.35.0
 
 - **`/saved` can now send or delete each queued message individually.** Previously the saved-messages keyboard only offered "Send" (concatenated all queued messages with newlines and fired them as one) and "Discard" (dropped the whole queue). When a session has more than one queued message, the keyboard now shows a per-message row for each — `✉️ N` to send just that message and `🗑 N` to delete just that message — plus a final `✉️ Send all` / `🗑 Discard all` row. A single queued message keeps the simple `✉️ Send` / `🗑 Discard` pair. After any per-message action the listener re-displays the remaining queue with a fresh keyboard so the indices stay current.

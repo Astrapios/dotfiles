@@ -131,11 +131,23 @@ _last_messages: dict[str, str] = {}  # wid -> last sent message
 _keyboard_messages: dict[str, int] = {}  # wid -> message_id with inline keyboard
 _render_bodies: dict[int, str] = {}  # msg_id -> body text for "render as image"
 _suggestions: dict[str, str] = {}  # wid -> suggestion text
+_last_routed: dict | None = None  # {"wid", "text"} — last free-text routed to a pane
 
 
 def _save_last_msg(wid: str, msg: str):
     """Track the last message sent for a window."""
     _last_messages[wid.lstrip("w")] = msg
+
+
+def _save_last_routed(wid: str, text: str):
+    """Record the last free-text message routed to a pane (for /re redirect)."""
+    global _last_routed
+    _last_routed = {"wid": wid, "text": text}
+
+
+def _get_last_routed() -> dict | None:
+    """Return the last routed {wid, text}, or None if nothing has been sent."""
+    return _last_routed
 
 
 def _save_keyboard_msg(wid: str, msg_id: int):

@@ -128,6 +128,9 @@ def _resolve_alias(text: str, has_active_prompt: bool) -> str:
     m = re.match(r"^c(\d+[a-z]?)$", stripped)
     if m:
         return f"/clear w{m.group(1)}"
+    m = re.match(r"^re(\d+[a-z]?)$", stripped)
+    if m:
+        return f"/re w{m.group(1)}"
     m = re.match(r"^r(\d+[a-z]?)$", stripped)
     if m:
         return f"/restart w{m.group(1)}"
@@ -213,6 +216,14 @@ def _clear_suggestion_keyboard(wid: str):
         telegram._fire_and_forget(telegram._remove_inline_keyboard, old_kb)
 
 
+def _record_routed(wid: str, text: str, confirm: str):
+    """Remember a free-text message that was sent or queued, so `/re` can
+    redirect it to another window if it went to the wrong one. Skips error
+    confirmations (which start with ⚠️)."""
+    if confirm.startswith(("📨", "💾")):
+        config._save_last_routed(wid, text)
+
+
 def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: str):
     """Activate smart focus after a message is sent (not queued/prompt reply)."""
     if not (confirm.startswith("📨 Sent to") or confirm.startswith("📷 Photo sent to") or confirm.startswith("📎 Document sent to")):
@@ -292,6 +303,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "📖 *Commands:*",
             "`/status [wN] [lines]` — list sessions or show output",
             "`/interrupt [wN]` — interrupt current task (Esc)",
+            "`/re wN` — redirect last message to wN (interrupts the wrong window)",
             "`/god [wN|all|off]` — auto-accept permissions",
             "`/god quiet|loud` — suppress/enable receipts",
             "`/focus wN` — watch completed responses",
@@ -319,7 +331,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "*Aliases:*",
             "`s` status | `s4` status w4 | `s4 10` status w4 10",
             "`f4` focus w4 | `df4` deepfocus w4 | `uf` unfocus",
-            "`i4` interrupt w4 | `sv` saved | `?` help",
+            "`i4` interrupt w4 | `re4` redirect→w4 | `sv` saved | `?` help",
             "`g4` god w4 | `ga` god all | `goff` god off",
             "`af` autofocus | `lv` local | `noti` notification",
             "`k` keys | `k5` keys w5 | `k5 shift+tab` keys w5 shift+tab",
@@ -798,6 +810,47 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
                 telegram.tg_send("⚠️ No CLI sessions found.")
         return None, sessions, last_win_idx
 
+    # /re wN | /redirect wN — recover a misrouted message: interrupt the
+    # session the last message was sent to and resend that same text to wN.
+    re_m = re.match(r"^/re(?:direct)?\s+w?(\w[\w-]*)$", text.lower())
+    if re_m:
+        raw_target = re_m.group(1)
+        last = config._get_last_routed()
+        if not last:
+            telegram.tg_send("⚠️ Nothing to redirect — no recent message.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return None, sessions, last_win_idx
+        target = state._resolve_name(raw_target)
+        if not target:
+            telegram.tg_send(f"⚠️ No session `{raw_target}`.\n{tmux.format_sessions_message(sessions)}",
+                             reply_markup=tmux._sessions_keyboard(sessions),
+                             silent=state._is_silent(_CAT_ERROR))
+            return None, sessions, last_win_idx
+        src, msg_text = last["wid"], last["text"]
+        if target == src:
+            telegram.tg_send(f"⚠️ Last message already went to {state._wid_label(target)}.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return None, sessions, last_win_idx
+        # Interrupt the wrong window and drop the misrouted message from its
+        # queue (if it was queued because that session was busy).
+        src_resolved = tmux.resolve_session_id(src, sessions)
+        if src_resolved:
+            _interrupt_session(src_resolved, sessions)
+            queued = state._load_queued_msgs(src_resolved)
+            for i in range(len(queued) - 1, -1, -1):
+                if queued[i].get("text") == msg_text:
+                    state._remove_queued_msg_at(src_resolved, i)
+                    break
+        # Resend to the intended window.
+        pane, project = sessions[target]
+        _clear_suggestion_keyboard(target)
+        confirm = routing.route_to_pane(pane, target, msg_text)
+        telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
+        config._log(target, f"redirect {src}->{target}: {confirm[:80]}")
+        _record_routed(target, msg_text, confirm)
+        _maybe_activate_smartfocus(target, pane, project, confirm)
+        return None, sessions, target
+
     # /keys (bare — combo picker, always ask which session for multiple)
     if re.match(r"^/keys?$", text.strip(), re.IGNORECASE):
         sessions = tmux.scan_claude_sessions()
@@ -1032,6 +1085,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             confirm = routing.route_to_pane(pane, resolved, prompt, force=force)
             telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(resolved, confirm[:100])
+            _record_routed(resolved, prompt, confirm)
             _maybe_activate_smartfocus(resolved, pane, project, confirm)
             return None, sessions, resolved
         else:
@@ -1047,9 +1101,11 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         if name_idx is not None:
             pane, project = sessions[name_idx]
             _clear_suggestion_keyboard(name_idx)
-            confirm = routing.route_to_pane(pane, name_idx, words[1].strip(), force=force)
+            _routed_text = words[1].strip()
+            confirm = routing.route_to_pane(pane, name_idx, _routed_text, force=force)
             telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
             config._log(name_idx, confirm[:100])
+            _record_routed(name_idx, _routed_text, confirm)
             _maybe_activate_smartfocus(name_idx, pane, project, confirm)
             return None, sessions, name_idx
 
@@ -1066,6 +1122,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         confirm = routing.route_to_pane(pane, target_idx, text, force=force)
         telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
         config._log(target_idx, confirm[:100])
+        _record_routed(target_idx, text, confirm)
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)
         return None, sessions, target_idx
     elif len(sessions) == 0:

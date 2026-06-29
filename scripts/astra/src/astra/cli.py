@@ -1570,6 +1570,7 @@ Setup:
 Telegram commands (inside listener):
   /status [wN] [lines] List sessions or show output
   /interrupt [wN]      Interrupt current task (Esc)
+  /re wN               Redirect last message to wN (interrupts the wrong window)
   /keys wN key...      Send keys (e.g. /keys w4 down); bare /keys wN = nav keypad
   /god [wN|all|off]    Auto-accept permissions (god mode)
   /god quiet|loud      Suppress/enable god mode receipts
@@ -1594,7 +1595,7 @@ Telegram commands (inside listener):
 Aliases:
   s / s4 / s4 10       /status / /status w4 / /status w4 10
   f4 / df4 / uf        /focus w4 / /deepfocus w4 / /unfocus
-  i4 / sv / ?          /interrupt w4 / /saved / /help
+  i4 / re4 / sv / ?    /interrupt w4 / /re w4 / /saved / /help
   g4 / ga / goff       /god w4 / /god all / /god off
   gq / gl              /god quiet / /god loud
   af / lv / noti       /autofocus / /local / /notification

@@ -363,6 +363,7 @@ def _set_bot_commands():
         # Core — used frequently
         {"command": "status", "description": "List sessions or show output for wN"},
         {"command": "interrupt", "description": "Interrupt current task (Esc)"},
+        {"command": "re", "description": "Redirect last message to wN (interrupts the wrong window)"},
         {"command": "god", "description": "Auto-accept permissions (god mode)"},
         {"command": "focus", "description": "Watch completed responses from a session"},
         {"command": "deepfocus", "description": "Stream all session output in real-time"},

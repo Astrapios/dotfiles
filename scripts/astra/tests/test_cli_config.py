@@ -535,6 +535,99 @@ class TestSavedCallbacks:
         assert any("no longer there" in (s or "") for s in patched)
 
 
+# --- /re redirect ---
+
+class TestRedirectCommand:
+    """`/re wN` interrupts the misrouted window and resends to wN."""
+
+    @pytest.fixture
+    def sessions(self):
+        return {
+            "w3a": tmux.SessionInfo(pane_target="%5", project="proj3", cli="claude",
+                                    win_idx="3", pane_suffix="a", pane_id="%5"),
+            "w4a": tmux.SessionInfo(pane_target="%7", project="proj4", cli="claude",
+                                    win_idx="4", pane_suffix="a", pane_id="%7"),
+        }
+
+    @pytest.fixture(autouse=True)
+    def _reset_last_routed(self):
+        config._last_routed = None
+        yield
+        config._last_routed = None
+
+    def test_alias_reN(self):
+        assert astra.commands._resolve_alias("re4", False) == "/re w4"
+        # The single-letter restart alias must still win for r4
+        assert astra.commands._resolve_alias("r4", False) == "/restart w4"
+
+    def test_record_routed_on_send(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        monkeypatch.setattr(astra.telegram, "tg_send_receipt", lambda *a, **k: None)
+        monkeypatch.setattr(astra.routing, "route_to_pane",
+                            lambda pane, wid, text, force=False: f"📨 Sent to `{wid}`")
+        astra.commands._handle_command("w3 fix the bug", sessions, None)
+        assert config._get_last_routed() == {"wid": "w3a", "text": "fix the bug"}
+
+    def test_error_confirm_not_recorded(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        monkeypatch.setattr(astra.telegram, "tg_send_receipt", lambda *a, **k: None)
+        monkeypatch.setattr(astra.routing, "route_to_pane",
+                            lambda pane, wid, text, force=False: "⚠️ something broke")
+        astra.commands._handle_command("w3 fix the bug", sessions, None)
+        assert config._get_last_routed() is None
+
+    def test_redirect_interrupts_source_and_routes_target(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        config._save_last_routed("w3a", "fix the bug")
+        sent = []
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: sent.append(a[0] if a else None) or 1)
+        monkeypatch.setattr(astra.telegram, "tg_send_receipt", lambda *a, **k: sent.append(a[0] if a else None))
+        interrupted = []
+        monkeypatch.setattr(astra.tmux_send, "interrupt", lambda pane: interrupted.append(pane))
+        routed = {}
+
+        def fake_route(pane, wid, text, force=False):
+            routed.update(pane=pane, wid=wid, text=text)
+            return f"📨 Sent to `{wid}`:\n`{text}`"
+
+        monkeypatch.setattr(astra.routing, "route_to_pane", fake_route)
+        _, _, last = astra.commands._handle_command("/re w4", sessions, "w3a")
+        assert interrupted == ["%5"]                       # source pane interrupted
+        assert routed == {"pane": "%7", "wid": "w4a", "text": "fix the bug"}
+        assert last == "w4a"
+        assert config._get_last_routed() == {"wid": "w4a", "text": "fix the bug"}
+
+    def test_redirect_unqueues_from_source(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        # message was queued at source because that session was busy
+        state._save_queued_msg("w3a", "do the thing")
+        config._save_last_routed("w3a", "do the thing")
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: 1)
+        monkeypatch.setattr(astra.telegram, "tg_send_receipt", lambda *a, **k: None)
+        monkeypatch.setattr(astra.tmux_send, "interrupt", lambda pane: None)
+        monkeypatch.setattr(astra.routing, "route_to_pane",
+                            lambda pane, wid, text, force=False: f"📨 Sent to `{wid}`")
+        astra.commands._handle_command("/re w4", sessions, "w3a")
+        assert state._load_queued_msgs("w3a") == []         # misrouted copy removed
+
+    def test_redirect_no_last_message(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        sent = []
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: sent.append(a[0]) or 1)
+        astra.commands._handle_command("/re w4", sessions, None)
+        assert any("Nothing to redirect" in (s or "") for s in sent)
+
+    def test_redirect_same_window_warns(self, sessions, monkeypatch):
+        state._current_sessions = sessions
+        config._save_last_routed("w4a", "hello")
+        sent = []
+        monkeypatch.setattr(astra.telegram, "tg_send", lambda *a, **k: sent.append(a[0]) or 1)
+        monkeypatch.setattr(astra.routing, "route_to_pane",
+                            lambda *a, **k: pytest.fail("should not route to same window"))
+        astra.commands._handle_command("/re w4", sessions, "w4a")
+        assert any("already went to" in (s or "") for s in sent)
+
+
 # --- log ---
 
 class TestCmdLog:
