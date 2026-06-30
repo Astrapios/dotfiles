@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.3
+
+- **Fix focus spamming repeated background-task status lines** (regression surfaced by 0.36.2's full-replace deltas). A backgrounded tool shows `⎿ Running in the background (↓ to manage)` and `⎿ (timeout 10m)` lines whose timer updates every tick; `_filter_noise` only stripped the `⎿ Running…` spinner form, so these slipped through and — now that `_compute_new_lines` emits in-place line changes — got re-sent as "new" content on every ~5s tick. Broadened the filter to also drop `⎿ Running in the background …` and `⎿ (timeout …)` (the `\s` in the patterns matches the NBSP these lines actually use). Genuine `⎿` tool output (file paths, results) is untouched.
+
 ## 0.36.2
 
 - **Focus/smartfocus/deepfocus no longer drop chunks of responses.** Two fixes to the live-monitoring delta stream, which was losing content for fast-scrolling, heavily-reflowing sessions (e.g. god-mode tool bursts):

@@ -401,8 +401,12 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
             # Thinking/spinner without timing (e.g. "⠐ Thinking…", "✶ Working…")
             if re.match(r'^[^\w\s●❯│┃║] \w+.*(…|\.\.\.)', s):
                 continue
-            # Tool output spinner (e.g. "⎿  Running…")
-            if re.match(r'^⎿\s+Running(…|\.\.\.)', s):
+            # Tool output spinner / background-run status that updates in
+            # place (e.g. "⎿  Running…", "⎿ Running in the background (↓ to
+            # manage)", "⎿ (timeout 10m)"). \s matches the NBSP these lines use.
+            if re.match(r'^⎿\s+Running(?:…|\.\.\.| in the background)', s):
+                continue
+            if re.match(r'^⎿\s+\(timeout\b', s):
                 continue
             # Collapsed output: "… +N lines (ctrl+o to expand/see all)"
             if re.match(r'^…\s+\+\d+', s):

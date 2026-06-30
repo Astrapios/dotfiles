@@ -179,6 +179,29 @@ class TestFilterNoise(unittest.TestCase):
         result = astra._filter_noise(raw)
         self.assertEqual(result, ["hello", "world"])
 
+    def test_removes_background_run_status(self):
+        """Background-task status lines update in place (timer ticks) and must
+        be filtered, else focus re-emits them every tick as 'new' content.
+        These use a NBSP (\\xa0) after ⎿ and say 'Running in the background'
+        rather than 'Running…', so the old spinner rule missed them."""
+        raw = (
+            "real assistant text\n"
+            "  ⎿  Running in the background (↓ to manage)\n"
+            "  ⎿  (timeout 10m)\n"
+            "  ⎿  Running… (4m 1s · timeout 10m)\n"
+            "  ⎿  /tmp/circsh.png\n"
+            "more text"
+        )
+        result = astra._filter_noise(raw)
+        # Transient status gone; genuine output and text kept.
+        joined = "\n".join(result)
+        assert "Running in the background" not in joined
+        assert "(timeout 10m)" not in joined
+        assert "Running…" not in joined
+        self.assertIn("real assistant text", result)
+        self.assertIn("  ⎿  /tmp/circsh.png", result)
+        self.assertIn("more text", result)
+
     def test_removes_tool_progress_without_bullet(self):
         """Filter tool progress without ● prefix (e.g. 'Reading 2 files…')."""
         raw = "hello\nReading 2 files… (ctrl+o to expand)\nworld"
