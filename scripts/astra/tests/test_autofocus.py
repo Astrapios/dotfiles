@@ -790,6 +790,27 @@ class TestComputeNewLines(unittest.TestCase):
         result = content._compute_new_lines(old, new)
         self.assertEqual(result, ["x", "y", "z"])
 
+    def test_growing_replace_keeps_head_lines(self):
+        """A replaced block that grows must emit ALL its new lines, not just the
+        tail beyond the old count. The old tail-only heuristic dropped the first
+        `old_count` new lines here ("new-a", "new-b"), which is how focus lost
+        chunks of responses when content was rewritten/reflowed in place."""
+        old = ["keep", "old-a", "old-b"]
+        new = ["keep", "new-a", "new-b", "new-c"]
+        result = content._compute_new_lines(old, new)
+        self.assertEqual(result, ["new-a", "new-b", "new-c"])
+
+    def test_replace_dedupes_unchanged_lines(self):
+        """Lines inside a replaced block that were already present aren't
+        re-emitted (dedup against the old block)."""
+        old = ["intro", "shared", "tail-old"]
+        new = ["intro-changed", "shared", "tail-old", "extra"]
+        result = content._compute_new_lines(old, new)
+        # 'shared' and 'tail-old' carried over → not re-sent; changed/new are.
+        self.assertNotIn("shared", result)
+        self.assertIn("intro-changed", result)
+        self.assertIn("extra", result)
+
     def test_bullets_with_tool_blocks_appended(self):
         """Simulate tool output appearing then more text."""
         old = [

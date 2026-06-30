@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.2
+
+- **Focus/smartfocus/deepfocus no longer drop chunks of responses.** Two fixes to the live-monitoring delta stream, which was losing content for fast-scrolling, heavily-reflowing sessions (e.g. god-mode tool bursts):
+  - **Deeper capture window (200 → 1000 lines).** The loop only re-captures every few seconds (Telegram long-poll cadence), so a 200-line tail let fast output scroll off between ticks and vanish before it was ever diffed. Bumped all three focus captures to `_FOCUS_CAPTURE_LINES = 1000` so a burst stays in-frame long enough to be seen.
+  - **`_compute_new_lines` now emits all genuinely-new lines in a replaced block, not just the tail.** Streamed/reflowed text and collapsing tool boxes show up as `replace` opcodes; the old heuristic emitted nothing for equal/shrinking replaces and only the lines beyond `old_count` for growing ones, silently dropping rewritten content. It now emits every replaced line not already present in the old block (order-preserving dedup). Spinner/timer status churn is still stripped upstream by `_filter_noise`, so this doesn't add status-line noise.
+
 ## 0.36.1
 
 - **`/re` is now button-friendly and replaces `/last` on the reply keyboard.** Tapping `/re` (bare, no `wN`) now offers a session picker — "↪️ Redirect last message to which session?" with one button per session (`cmd_re_wN` callbacks that run `/re wN`) — mirroring how bare `/interrupt`/`/kill` ask which session. The persistent reply keyboard's third button in row 2 swaps `/last` → `/re` (the `/last` command itself stays available). Bare `/re` with nothing to redirect still answers "Nothing to redirect".

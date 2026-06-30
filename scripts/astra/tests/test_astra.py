@@ -1144,19 +1144,23 @@ class TestComputeNewLines(unittest.TestCase):
         result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["f"])
 
-    def test_in_place_change_skipped(self):
-        """Lines that changed in place (e.g. timers) are not reported as new."""
+    def test_in_place_change_now_reported(self):
+        """A line replaced in place is reported as new: streamed/reflowed text
+        rewrites a logical line (after wrap-joining), and suppressing it dropped
+        genuine response content. Spinner/timer churn is removed by _filter_noise
+        upstream, so this no longer re-emits pure status lines."""
         old = ["a", "b", "progress 62%", "c", "d"]
         new = ["a", "b", "progress 88%", "c", "d"]
         result = astra._compute_new_lines(old, new)
-        self.assertEqual(result, [])
+        self.assertEqual(result, ["progress 88%"])
 
     def test_scroll_with_in_place_change(self):
-        """Scrolling + in-place change: only inserted lines returned."""
+        """Scrolling + in-place change: both the replaced line and the inserted
+        line are returned (the replaced line's new text is no longer dropped)."""
         old = ["a", "b", "progress 62%", "c", "d"]
         new = ["b", "progress 88%", "c", "d", "e"]
         result = astra._compute_new_lines(old, new)
-        self.assertEqual(result, ["e"])
+        self.assertEqual(result, ["progress 88%", "e"])
 
     def test_complete_change_returns_all(self):
         """No overlap (content scrolled past window) returns all new lines."""
@@ -2072,12 +2076,15 @@ class TestComputeNewLinesEdgeCases(unittest.TestCase):
         result = astra._compute_new_lines(old, new)
         self.assertEqual(result, ["b"])
 
-    def test_short_content_replace_no_duplicate(self):
-        """Short content where one line changes should NOT re-send everything."""
+    def test_short_content_replace_emits_changed_line(self):
+        """When a line is rewritten in place, only the changed line is emitted
+        (the unchanged line is deduped). Emitting the rewritten line is required
+        so reflowed/streamed response text isn't dropped; pure spinner/status
+        churn is removed upstream by _filter_noise before diffing."""
         old = ["Good question — let me check.", "Searching for 1 pattern…"]
         new = ["Good question — let me check.", "Searching for 1 pattern, reading 1 file…"]
         result = astra._compute_new_lines(old, new)
-        self.assertEqual(result, [])  # replace only, no inserts
+        self.assertEqual(result, ["Searching for 1 pattern, reading 1 file…"])
 
     def test_completely_different_content(self):
         """Zero overlap returns all new content."""

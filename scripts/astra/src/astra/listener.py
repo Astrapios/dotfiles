@@ -23,6 +23,12 @@ _reload_after: float | None = None
 
 _RESCAN_INTERVAL = 60
 
+# Lines captured per tick for focus/smartfocus/deepfocus monitoring. The loop
+# only re-captures every few seconds (Telegram long-poll cadence), so a shallow
+# window loses fast-scrolling output (e.g. god-mode tool bursts) between ticks —
+# the captured tail must be deep enough to span a burst before it scrolls off.
+_FOCUS_CAPTURE_LINES = 1000
+
 
 def _resolve_caption_target(caption: str, sessions: dict,
                             last_win_idx: str | None) -> tuple[str | None, str]:
@@ -560,7 +566,7 @@ def _listen_tick(s):
         if focus_state:
             _finfo = s.sessions.get(fw)
             _fprofile = profiles.get_profile(_finfo.cli) if _finfo and hasattr(_finfo, 'cli') else None
-            raw = tmux._capture_pane(fp, 200)
+            raw = tmux._capture_pane(fp, _FOCUS_CAPTURE_LINES)
             cleaned_lines = content._focus_capture_lines(raw, s.focus_pane_width, profile=_fprofile)
             if s.focus_prev_lines:
                 new = content._compute_new_lines(s.focus_prev_lines, cleaned_lines)
@@ -605,7 +611,7 @@ def _listen_tick(s):
             if smartfocus_state:
                 _sfinfo = s.sessions.get(sfw)
                 _sfprofile = profiles.get_profile(_sfinfo.cli) if _sfinfo and hasattr(_sfinfo, 'cli') else None
-                raw = tmux._capture_pane(sfp, 200)
+                raw = tmux._capture_pane(sfp, _FOCUS_CAPTURE_LINES)
                 cleaned_lines = content._focus_capture_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
                 _sf_debug = config._is_debug_enabled()
                 if _sf_debug:
@@ -668,7 +674,7 @@ def _listen_tick(s):
         _dfinfo = s.sessions.get(dfw)
         _dfprofile = profiles.get_profile(_dfinfo.cli) if _dfinfo and hasattr(_dfinfo, 'cli') else None
         _dfpc = _dfprofile.prompt_char if _dfprofile else "❯"
-        raw = tmux._capture_pane(dfp, 200)
+        raw = tmux._capture_pane(dfp, _FOCUS_CAPTURE_LINES)
         cur_lines = content._filter_noise(raw, profile=_dfprofile)
         for i in range(len(cur_lines) - 1, -1, -1):
             if cur_lines[i].strip().startswith(_dfpc):

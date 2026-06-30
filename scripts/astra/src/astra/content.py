@@ -771,9 +771,13 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
         if tag == "insert":
             new.extend(new_lines[j1:j2])
         elif tag == "replace":
-            # Include net new lines from replacements (skip 1:1 in-place updates)
-            old_count = i2 - i1
-            new_count = j2 - j1
-            if new_count > old_count:
-                new.extend(new_lines[j1 + old_count:j2])
+            # Emit every replaced line that wasn't already in the old block,
+            # not just the tail beyond old_count. Streaming reflow and
+            # tool-box collapses show up as replaces; the old tail-only
+            # heuristic silently dropped genuinely new text inside the
+            # replaced region (the cause of focus "missing" response chunks).
+            # Spinner/timing lines are already removed by _filter_noise, so
+            # this doesn't re-emit in-place status churn.
+            old_block = set(old_lines[i1:i2])
+            new.extend(l for l in new_lines[j1:j2] if l not in old_block)
     return new
