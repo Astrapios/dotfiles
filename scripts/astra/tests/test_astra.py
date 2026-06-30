@@ -3779,6 +3779,25 @@ class TestResolveName(unittest.TestCase):
         """None target returns None."""
         self.assertIsNone(astra._resolve_name(None, self.sessions))
 
+    def test_name_with_trailing_comma(self):
+        """Conversational trailing comma is tolerated: 'auth,' → w4a."""
+        astra._save_session_name("w4a", "auth")
+        self.assertEqual(astra._resolve_name("auth,", self.sessions), "w4a")
+
+    def test_name_with_trailing_colon(self):
+        """Trailing colon/period are tolerated too."""
+        astra._save_session_name("w4a", "auth")
+        self.assertEqual(astra._resolve_name("auth:", self.sessions), "w4a")
+        self.assertEqual(astra._resolve_name("auth.", self.sessions), "w4a")
+
+    def test_wid_with_trailing_comma(self):
+        """A wid addressed with a trailing comma resolves: 'w4,' → w4a."""
+        self.assertEqual(astra._resolve_name("w4,", self.sessions), "w4a")
+
+    def test_only_punctuation_returns_none(self):
+        """A target that is only punctuation resolves to nothing."""
+        self.assertIsNone(astra._resolve_name(",", self.sessions))
+
 
 class TestNameBasedCommands(unittest.TestCase):
     """Test commands accept session names as targets."""

@@ -295,6 +295,12 @@ def _resolve_name(target: str, sessions: dict | None = None) -> str | None:
     Returns the session key (e.g. 'w4a') or None."""
     if not target:
         return None
+    # Tolerate conversational trailing punctuation, e.g. "dof," / "w4:" —
+    # people address a session like a person. wids/names are [\w-] so a
+    # trailing ,;:. is never part of one.
+    target = target.rstrip(",;:.")
+    if not target:
+        return None
     sess = sessions if sessions is not None else _current_sessions
     from astra import tmux  # deferred to avoid circular import
     resolved = tmux.resolve_session_id(target, sess)

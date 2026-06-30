@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.4
+
+- **Tolerate conversational trailing punctuation when addressing a session by name.** Typing `dof, do this thing` (or `auth:`, `w4,`) now routes to the named session — `_resolve_name` strips a trailing `,;:.` before matching, since wids/names are `[\w-]` and never end in those. Applies everywhere names resolve: name-prefix routing, photo captions, `/saved`, `/re`, etc.
+
 ## 0.36.3
 
 - **Fix focus spamming repeated background-task status lines** (regression surfaced by 0.36.2's full-replace deltas). A backgrounded tool shows `⎿ Running in the background (↓ to manage)` and `⎿ (timeout 10m)` lines whose timer updates every tick; `_filter_noise` only stripped the `⎿ Running…` spinner form, so these slipped through and — now that `_compute_new_lines` emits in-place line changes — got re-sent as "new" content on every ~5s tick. Broadened the filter to also drop `⎿ Running in the background …` and `⎿ (timeout …)` (the `\s` in the patterns matches the NBSP these lines actually use). Genuine `⎿` tool output (file paths, results) is untouched.
