@@ -202,6 +202,32 @@ class TestFilterNoise(unittest.TestCase):
         self.assertIn("  ⎿  /tmp/circsh.png", result)
         self.assertIn("more text", result)
 
+    def test_removes_bare_elapsed_timer(self):
+        """A bare elapsed-timer line under a running tool ticks every capture;
+        leaving it in makes focus re-send the whole tool block each poll."""
+        raw = (
+            "real assistant text\n"
+            "     (1m 37s)\n"
+            "     (36s)\n"
+            "     (1m 31s · timeout 10m)\n"
+            "     (2m 4s · ↓ 6.1k tokens)\n"
+            "more text"
+        )
+        result = astra._filter_noise(raw)
+        joined = "\n".join(result)
+        assert "(1m 37s)" not in joined
+        assert "(36s)" not in joined
+        assert "timeout 10m" not in joined
+        assert "6.1k tokens" not in joined
+        self.assertEqual(result, ["real assistant text", "more text"])
+
+    def test_keeps_parenthetical_prose(self):
+        """Ordinary parenthetical text is not mistaken for an elapsed timer."""
+        raw = "line (as noted in step 3)\nresult = f(x)\n(see line 42)"
+        result = astra._filter_noise(raw)
+        self.assertEqual(
+            result, ["line (as noted in step 3)", "result = f(x)", "(see line 42)"])
+
     def test_removes_tool_progress_without_bullet(self):
         """Filter tool progress without ● prefix (e.g. 'Reading 2 files…')."""
         raw = "hello\nReading 2 files… (ctrl+o to expand)\nworld"

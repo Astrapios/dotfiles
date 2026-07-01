@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.5
+
+- **Fix focus flooding repeated tool-block messages while a command runs.** A running tool shows a bare elapsed-timer line (`(1m 37s)`, `(1m 31s · timeout 10m)`, `(2m 4s · ↓ 6.1k tokens)`) that ticks on every capture. `_collapse_tool_calls` only drops it when the `●` bullet is captured, but live-TUI repaints often capture the block without its bullet, so the timer leaked into the diff and re-sent the whole tool block every ~5s poll. Two fixes:
+  - **Filter bare elapsed-timer lines in `_filter_noise`** — a line that is just `(…)` starting with a duration (`\d+[hms]`) is dropped, so once a tool block is shown it stays stable across ticks. Ordinary parenthetical prose is untouched (must start with a duration).
+  - **Per-line recently-sent dedup backstop for focus/smartfocus** — each mode remembers the last ~200 content lines it sent and suppresses re-sends. The single-slot `last_sent` only caught immediate repeats, not the alternation a repainting TUI produces (bullet toggling `●`↔blank, blocks re-rendering). Resets when the focus target changes.
+
 ## 0.36.4
 
 - **Tolerate conversational trailing punctuation when addressing a session by name.** Typing `dof, do this thing` (or `auth:`, `w4,`) now routes to the named session — `_resolve_name` strips a trailing `,;:.` before matching, since wids/names are `[\w-]` and never end in those. Applies everywhere names resolve: name-prefix routing, photo captions, `/saved`, `/re`, etc.

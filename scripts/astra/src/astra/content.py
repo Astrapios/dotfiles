@@ -408,6 +408,14 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
                 continue
             if re.match(r'^⎿\s+\(timeout\b', s):
                 continue
+            # Bare elapsed-timer line under a running tool, e.g. "(1m 37s)",
+            # "(36s)", "(1m 31s · timeout 10m)", "(2m 4s · ↓ 6.1k tokens)".
+            # It ticks every capture, so leaving it in makes focus re-send the
+            # whole tool block on every poll. The `●`-bulleted tool line above
+            # it is only stripped by _collapse_tool_calls when the bullet is
+            # actually captured; on torn repaints it isn't, so filter here too.
+            if re.match(r'^\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\b.*\)$', s):
+                continue
             # Collapsed output: "… +N lines (ctrl+o to expand/see all)"
             if re.match(r'^…\s+\+\d+', s):
                 continue

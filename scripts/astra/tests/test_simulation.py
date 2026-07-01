@@ -334,6 +334,40 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         eye_msgs = self.h.tg.find_sent("👁")
         assert len(eye_msgs) > 0, f"Expected 👁 message. All sent: {self.h.dump_timeline()}"
 
+    def test_smartfocus_running_tool_timer_not_resent(self):
+        """A running tool's elapsed timer ticks every capture. It must not make
+        focus re-send the tool block on every poll (the 'lots of repeats' bug)."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("w4a run tests")
+        self.h.tick(s)
+        state._clear_busy("w4a")
+
+        # Baseline: a running tool block with an elapsed timer.
+        self.h.tmux.set_pane_content("4",
+            "● Bash(run the whole suite)\n"
+            "  ⎿  Running in the background (↓ to manage)\n"
+            "     (1m 5s)\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        baseline = len(self.h.tg.find_sent("👁"))
+
+        # Only the timer advances across the next few polls — no real new content.
+        for t in ("1m 10s", "1m 15s", "1m 20s"):
+            self.h.tmux.set_pane_content("4",
+                "● Bash(run the whole suite)\n"
+                "  ⎿  Running in the background (↓ to manage)\n"
+                f"     ({t})\n"
+            )
+            self.h.clock.advance(1)
+            self.h.tick(s)
+
+        # No further 👁 updates from pure timer ticks.
+        assert len(self.h.tg.find_sent("👁")) == baseline, \
+            f"timer ticks re-sent the tool block: {self.h.dump_timeline()}"
+
     def test_smartfocus_clears_on_stop(self):
         """Smartfocus state is cleared when stop signal is processed."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
