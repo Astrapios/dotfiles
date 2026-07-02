@@ -29,26 +29,6 @@ _RESCAN_INTERVAL = 60
 # the captured tail must be deep enough to span a burst before it scrolls off.
 _FOCUS_CAPTURE_LINES = 1000
 
-# Focus/smartfocus settle-debounce (Layer 2): accumulate deltas and only flush
-# once the pane has been stable for _FOCUS_SETTLE seconds (or _FOCUS_MAX_DELAY
-# has elapsed), coalescing transient repaint frames into one clean message.
-# deepfocus uses 3s/15s; focus/smartfocus settle faster since they send less.
-_FOCUS_SETTLE = 2
-_FOCUS_MAX_DELAY = 15
-
-
-def _debounce_ready(pending: list, last_new_ts: float, first_new_ts: float,
-                    now: float, settle: float, max_delay: float) -> bool:
-    """True when accumulated ``pending`` should flush: stable for ``settle``s,
-    or ``max_delay``s since the first pending line (whichever comes first)."""
-    if not pending:
-        return False
-    if last_new_ts and now - last_new_ts >= settle:
-        return True
-    if first_new_ts and now - first_new_ts >= max_delay:
-        return True
-    return False
-
 
 def _resolve_caption_target(caption: str, sessions: dict,
                             last_win_idx: str | None) -> tuple[str | None, str]:
@@ -181,9 +161,6 @@ class _ListenerState:
     focus_prev_lines: list = field(default_factory=list)
     focus_last_sent: str = ""
     focus_seeded: bool = False
-    focus_pending: list = field(default_factory=list)
-    focus_last_new_ts: float = 0
-    focus_first_new_ts: float = 0
     deepfocus_target_wid: str | None = None
     deepfocus_pane_width: int = 0
     deepfocus_prev_lines: list = field(default_factory=list)
@@ -196,9 +173,6 @@ class _ListenerState:
     smartfocus_has_sent: bool = False
     smartfocus_last_sent: str = ""
     smartfocus_seeded: bool = False
-    smartfocus_pending: list = field(default_factory=list)
-    smartfocus_last_new_ts: float = 0
-    smartfocus_first_new_ts: float = 0
     compact_notified: set = field(default_factory=set)
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
@@ -267,9 +241,6 @@ def _listen_tick(s):
                 s.focus_pane_width = 0
                 s.focus_prev_lines = []
                 s.focus_seeded = False
-                s.focus_pending = []
-                s.focus_last_new_ts = 0
-                s.focus_first_new_ts = 0
                 s.deepfocus_target_wid = None
                 s.deepfocus_pane_width = 0
                 s.deepfocus_prev_lines = []
@@ -281,9 +252,6 @@ def _listen_tick(s):
                 s.smartfocus_prev_lines = []
                 s.smartfocus_seeded = False
                 s.smartfocus_has_sent = False
-                s.smartfocus_pending = []
-                s.smartfocus_last_new_ts = 0
-                s.smartfocus_first_new_ts = 0
                 statuses = routing._get_session_statuses(s.sessions)
                 s.interrupted_notified = {idx for idx, st in statuses.items() if st == "interrupted"}
                 resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
@@ -591,9 +559,6 @@ def _listen_tick(s):
             s.focus_prev_lines = []
             s.focus_seeded = False
             s.focus_last_sent = ""
-            s.focus_pending = []
-            s.focus_last_new_ts = 0
-            s.focus_first_new_ts = 0
         fp, fproj = focus_state["pane"], focus_state["project"]
         if fw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
@@ -611,30 +576,17 @@ def _listen_tick(s):
             if s.focus_seeded:
                 new = content._compute_new_lines(s.focus_prev_lines, canon)
                 if new:
-                    s.focus_pending.extend(new)
-                    s.focus_last_new_ts = time.time()
-                    if not s.focus_first_new_ts:
-                        s.focus_first_new_ts = time.time()
+                    new_text = "\n".join(new).strip()
+                    if new_text and new_text != s.focus_last_sent:
+                        config._log("focus", f"sending {len(new)} new lines for {fw}")
+                        header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
+                        telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+                        s.focus_last_sent = new_text
             s.focus_prev_lines = canon
             s.focus_seeded = True
-            if _debounce_ready(s.focus_pending, s.focus_last_new_ts,
-                               s.focus_first_new_ts, time.time(),
-                               _FOCUS_SETTLE, _FOCUS_MAX_DELAY):
-                chunk = "\n".join(s.focus_pending).strip()
-                s.focus_pending = []
-                s.focus_last_new_ts = 0
-                s.focus_first_new_ts = 0
-                if chunk and chunk != s.focus_last_sent:
-                    config._log("focus", f"sending {chunk.count(chr(10)) + 1} new lines for {fw}")
-                    header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
-                    telegram._send_long_message(header, chunk, fw, silent=state._is_silent(_CAT_MONITOR))
-                    s.focus_last_sent = chunk
     elif s.focus_target_wid:
         s.focus_target_wid = None
         s.focus_seeded = False
-        s.focus_pending = []
-        s.focus_last_new_ts = 0
-        s.focus_first_new_ts = 0
 
     # --- Smart focus monitoring (auto-activated on message send) ---
     # Same pipeline as focus above — smartfocus is just automatic activation.
@@ -652,9 +604,6 @@ def _listen_tick(s):
                 s.smartfocus_seeded = False
                 s.smartfocus_has_sent = False
                 s.smartfocus_last_sent = ""
-                s.smartfocus_pending = []
-                s.smartfocus_last_new_ts = 0
-                s.smartfocus_first_new_ts = 0
             sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
             if sfw not in s.sessions:
                 s.sessions = tmux.scan_claude_sessions()
@@ -664,9 +613,6 @@ def _listen_tick(s):
                     s.smartfocus_target_wid = None
                     s.smartfocus_prev_lines = []
                     s.smartfocus_seeded = False
-                    s.smartfocus_pending = []
-                    s.smartfocus_last_new_ts = 0
-                    s.smartfocus_first_new_ts = 0
                     smartfocus_state = None
             if smartfocus_state:
                 _sfinfo = s.sessions.get(sfw)
@@ -675,48 +621,35 @@ def _listen_tick(s):
                 canon = content._focus_canonical_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
                 _sf_debug = config._is_debug_enabled()
                 if _sf_debug:
-                    config._debug_log(f"[sf:{sfw}] canon={len(canon)} prev={len(s.smartfocus_prev_lines)} pending={len(s.smartfocus_pending)}")
+                    config._debug_log(f"[sf:{sfw}] canon={len(canon)} prev={len(s.smartfocus_prev_lines)} seeded={s.smartfocus_seeded}")
                     config._debug_log(f"[sf:{sfw}] canon_tail: {canon[-5:]}")
                 if s.smartfocus_seeded:
                     new = content._compute_new_lines(s.smartfocus_prev_lines, canon)
                     if new:
+                        new_text = "\n".join(new).strip()
                         if _sf_debug:
                             config._debug_log(f"[sf:{sfw}] delta={len(new)}: {new[:10]}")
-                        s.smartfocus_pending.extend(new)
-                        s.smartfocus_last_new_ts = time.time()
-                        if not s.smartfocus_first_new_ts:
-                            s.smartfocus_first_new_ts = time.time()
+                        # Skip trivial deltas (just emoji/symbols, no real text)
+                        if new_text and not re.search(r'[a-zA-Z0-9]{2,}', new_text):
+                            if _sf_debug:
+                                config._debug_log(f"[sf:{sfw}] trivial skip: {new_text[:200]}")
+                            new_text = ""
+                        if new_text and new_text != s.smartfocus_last_sent:
+                            config._log("smartfocus", f"sending {len(new)} new lines for {sfw}")
+                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                            telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
+                            s.smartfocus_has_sent = True
+                            s.smartfocus_last_sent = new_text
+                        elif _sf_debug and new_text:
+                            config._debug_log(f"[sf:{sfw}] dedup skip: {new_text[:200]}")
                 s.smartfocus_prev_lines = canon
                 s.smartfocus_seeded = True
-                if _debounce_ready(s.smartfocus_pending, s.smartfocus_last_new_ts,
-                                   s.smartfocus_first_new_ts, time.time(),
-                                   _FOCUS_SETTLE, _FOCUS_MAX_DELAY):
-                    chunk = "\n".join(s.smartfocus_pending).strip()
-                    s.smartfocus_pending = []
-                    s.smartfocus_last_new_ts = 0
-                    s.smartfocus_first_new_ts = 0
-                    # Skip trivial deltas (just emoji/symbols, no real text)
-                    if chunk and not re.search(r'[a-zA-Z0-9]{2,}', chunk):
-                        if _sf_debug:
-                            config._debug_log(f"[sf:{sfw}] trivial skip: {chunk[:200]}")
-                        chunk = ""
-                    if chunk and chunk != s.smartfocus_last_sent:
-                        config._log("smartfocus", f"sending {chunk.count(chr(10)) + 1} new lines for {sfw}")
-                        header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                        telegram._send_long_message(header, chunk, sfw, silent=state._is_silent(_CAT_MONITOR))
-                        s.smartfocus_has_sent = True
-                        s.smartfocus_last_sent = chunk
-                    elif _sf_debug and chunk:
-                        config._debug_log(f"[sf:{sfw}] dedup skip: {chunk[:200]}")
     elif s.smartfocus_target_wid:
         s.smartfocus_target_wid = None
         s.smartfocus_prev_lines = []
         s.smartfocus_seeded = False
         s.smartfocus_has_sent = False
         s.smartfocus_last_sent = ""
-        s.smartfocus_pending = []
-        s.smartfocus_last_new_ts = 0
-        s.smartfocus_first_new_ts = 0
 
     # --- Deep focus monitoring (streams all output) ---
     if deepfocus_state:

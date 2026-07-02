@@ -231,7 +231,7 @@ class TestToolCallInterleaved(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
-        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.clock.advance(3)  # advance to next poll tick
         self.h.tick(s)
 
         eye_msgs = self.h.tg.find_sent("👁")
@@ -273,7 +273,7 @@ class TestToolCallInterleaved(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
-        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.clock.advance(3)  # advance to next poll tick
         self.h.tick(s)
 
         eye_msgs = self.h.tg.find_sent("👁")
@@ -489,7 +489,7 @@ class TestFullLifecycle(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
-        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.clock.advance(3)  # advance to next poll tick
         self.h.tick(s)
         eye1 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye1, 0, "First update after tool call")
@@ -519,7 +519,7 @@ class TestFullLifecycle(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
-        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.clock.advance(3)  # advance to next poll tick
         self.h.tick(s)
         eye2 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye2, eye1, "Second update after edit")
@@ -559,7 +559,7 @@ class TestFullLifecycle(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
-        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.clock.advance(3)  # advance to next poll tick
         self.h.tick(s)
 
         # --- Step 6: Stop signal arrives ---

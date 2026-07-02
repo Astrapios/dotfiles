@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.37.1
+
+- **Remove the focus settle-debounce added in 0.37.0 — it made focus feel broken (laggy/stalled).** The debounce held every focus/smartfocus update until the pane was stable ~2s, and up to 15s during continuous work, so updates arrived in delayed batches instead of streaming. It was defense-in-depth that wasn't needed: **canonicalize-before-diff (Layer 1) already eliminates the repeat churn on its own** — a toggling bullet / ticking timer produces an identical canonical line tick-to-tick, so the diff yields nothing regardless of timing. Focus/smartfocus now send immediately again (per poll), while staying repeat-free (canonicalize) and free of in-progress-tool churn (suppression, Layer 3, retained). deepfocus keeps its own debounce (unchanged). The single-slot `last_sent` still guards immediate full-block repeats.
+
 ## 0.37.0
 
 - **Focus/smartfocus reworked to end the recurring "repeats" whack-a-mole.** The pipeline diffed *raw* pane text and collapsed tool calls *after* the diff, so any cosmetic/animated change — a tool bullet toggling `● Bash(…)`↔`  Bash(…)`, a spinner, a `(1m 37s)` timer — looked like new content and got streamed. Three layers now prevent the whole class instead of patching each variant:

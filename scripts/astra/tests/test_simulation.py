@@ -326,7 +326,7 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             "Found the bug in line 42\n"
         )
 
-        # Tick to accumulate, then advance past the settle to flush.
+        # Advance to the next poll tick.
         self.h.clock.advance(1)
         self.h.tick(s)
         self.h.clock.advance(3)
@@ -382,7 +382,7 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         state._clear_busy("w4a")
 
         def _settle_tick():
-            # accumulate, then advance past the settle to flush
+            # advance to the next poll tick
             self.h.clock.advance(1)
             self.h.tick(s)
             self.h.clock.advance(3)
@@ -430,7 +430,7 @@ class TestSmartfocusAcrossTicks(SimTestBase):
                 f"{bullet} Bash(run the whole suite)\n"
                 f"  ⎿  Running… ({t})\n"
             )
-            self.h.clock.advance(3)  # past the settle each frame
+            self.h.clock.advance(3)  # next poll tick each frame
             self.h.tick(s)
 
         assert len(self.h.tg.find_sent("👁")) == 0, \
@@ -1591,7 +1591,7 @@ class TestFocusDiffOnly(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
-        # Debounce: nothing until the pane settles ~2s
+        # next poll tick
         self.h.clock.advance(3)
         self.h.tick(s)
 
