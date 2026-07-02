@@ -8823,5 +8823,79 @@ class TestCollapseToolCalls:
         assert result == lines
 
 
+class TestCollapseBulletStates:
+    """Collapse must recognize a tool header in ANY leading-bullet state, so a
+    running tool whose bullet animates/tears doesn't churn the diff."""
+
+    def test_bulletless_header_collapsed(self):
+        assert astra._collapse_tool_calls(["  Bash(echo hi)"]) == ["🔧 Bash(echo hi)"]
+
+    def test_spinner_prefixed_header_collapsed(self):
+        assert astra._collapse_tool_calls(["✶ Bash(echo hi)"]) == ["🔧 Bash(echo hi)"]
+        assert astra._collapse_tool_calls(["⠋ Read(a.py)"]) == ["🔧 Read(a.py)"]
+
+    def test_all_bullet_states_identical(self):
+        variants = ["● Bash(run x)", "  Bash(run x)", "✶ Bash(run x)", "⠹ Bash(run x)"]
+        outs = [astra._collapse_tool_calls([v]) for v in variants]
+        assert all(o == ["🔧 Bash(run x)"] for o in outs)
+
+    def test_prose_lowercase_not_swallowed(self):
+        # bulletless + lowercase name is prose, not a tool header
+        assert astra._collapse_tool_calls(["we call foo(x) here"]) == ["we call foo(x) here"]
+
+    def test_prose_capitalized_nontool_not_swallowed(self):
+        # bulletless + capitalized but not a known tool name → left alone
+        assert astra._collapse_tool_calls(["Result(x) is good"]) == ["Result(x) is good"]
+
+    def test_bulleted_unknown_tool_still_collapsed(self):
+        # a ●-bulleted header is always a tool call, even for an unlisted name
+        assert astra._collapse_tool_calls(["● Frobnicate(y)"]) == ["🔧 Frobnicate(y)"]
+
+
+class TestRunningToolCut:
+    """_running_tool_cut drops an in-progress tool at the bottom of the pane."""
+
+    def test_cuts_foreground_running(self):
+        lines = ["● Bash(run suite)", "  ⎿  Running… (1m 5s)"]
+        assert astra._running_tool_cut(lines, None) == 0
+
+    def test_cuts_background_running_with_timer(self):
+        lines = ["● Bash(run x)", "  ⎿  Running in the background (↓ to manage)", "     (1m 37s)"]
+        assert astra._running_tool_cut(lines, None) == 0
+
+    def test_keeps_completed_tool(self):
+        lines = ["● Bash(run suite)", "  ⎿  160 passed in 3s"]
+        assert astra._running_tool_cut(lines, None) == len(lines)
+
+    def test_keeps_completed_bg_with_trailing_timeout(self):
+        # a settled background tool shows "⎿ (timeout 10m)" but is complete
+        lines = ["● Bash(run x)", "  ⎿  launched", "  ⎿  (timeout 10m)"]
+        assert astra._running_tool_cut(lines, None) == len(lines)
+
+    def test_no_tool_no_cut(self):
+        lines = ["● Some plain response", "more text"]
+        assert astra._running_tool_cut(lines, None) == len(lines)
+
+
+class TestFocusCanonicalStable:
+    """The whole point: cosmetic churn produces no diff once canonicalized."""
+
+    def test_bullet_toggle_yields_no_delta(self):
+        raw_a = "● Reading the file\n● Bash(run x)\n  ⎿  done\n❯ "
+        raw_b = "● Reading the file\n  Bash(run x)\n  ⎿  done\n❯ "  # tool bullet torn off
+        a = astra._focus_canonical_lines(raw_a, 0, None)
+        b = astra._focus_canonical_lines(raw_b, 0, None)
+        assert a == b
+        assert astra._compute_new_lines(a, b) == []
+
+    def test_running_tool_absent_until_complete(self):
+        running = "● Prev text\n● Bash(run x)\n  ⎿  Running… (1m 2s)\n❯ "
+        complete = "● Prev text\n● Bash(run x)\n  ⎿  done\n❯ "
+        can_run = astra._focus_canonical_lines(running, 0, None)
+        can_done = astra._focus_canonical_lines(complete, 0, None)
+        assert "🔧 Bash(run x)" not in can_run   # suppressed while running
+        assert "🔧 Bash(run x)" in can_done       # appears once complete
+
+
 if __name__ == "__main__":
     unittest.main()

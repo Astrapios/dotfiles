@@ -5,6 +5,14 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.37.0
+
+- **Focus/smartfocus reworked to end the recurring "repeats" whack-a-mole.** The pipeline diffed *raw* pane text and collapsed tool calls *after* the diff, so any cosmetic/animated change — a tool bullet toggling `● Bash(…)`↔`  Bash(…)`, a spinner, a `(1m 37s)` timer — looked like new content and got streamed. Three layers now prevent the whole class instead of patching each variant:
+  1. **Canonicalize before the diff.** New `content._focus_canonical_lines()` runs filter → dialog-strip → tool-collapse → NBSP/rstrip normalize, and the *canonical* result is stored as the diff baseline. `_collapse_tool_calls` now recognizes a Claude tool header in **any** bullet state (settled `●`, spinner glyph, or bulletless torn repaint) via `_match_claude_tool`, validated against known tool names so prose isn't swallowed. A running tool is one stable line → zero diff churn.
+  2. **Settle-debounce** (like deepfocus): accumulate deltas and only flush after the pane is stable ~2s (or 15s max), coalescing transient repaint frames into one clean message.
+  3. **Suppress in-progress tools** (`_running_tool_cut`): a tool call still executing (its body ends in `⎿ Running…` or a ticking timer) is cut from the capture entirely — it streams once, when complete. A `seeded` flag ensures content reappearing after suppression still sends (not mistaken for the first-tick baseline).
+- No cross-line dedup was reintroduced (the 0.36.6 "cutting off" cause); recurring legitimate lines still stream. Trade-off: focus updates now lag ~2s (one settle) in exchange for clean, repeat-free output. 15 tests pin each failure mode (bullet-toggle, running-tool suppression, completed-once, prose-not-swallowed, recurring-line-not-dropped, debounce timing).
+
 ## 0.36.6
 
 - **Fix focus messages cutting off / dropping content.** Reverts the per-line recently-sent dedup added in 0.36.5. It remembered the last ~200 sent lines and suppressed any that recurred — but over a ~900-line focus buffer, ordinary lines recur constantly (blank-ish lines, common phrases, repeated tool patterns), so it punched holes in genuine responses. It also never fixed the toggle it targeted: `_collapse_tool_calls` turns `● Bash(…)` into `🔧 Bash(…)` while a bulletless repaint stays `  Bash(…)`, so the two forms never matched for dedup anyway. Net harm, removed. The 0.36.5 timer-line filter (the actual fix for the repeat flood) stays; the single-slot `last_sent` still catches immediate full-block repeats.

@@ -231,6 +231,8 @@ class TestToolCallInterleaved(SimTestBase):
         )
         self.h.clock.advance(1)
         self.h.tick(s)
+        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.tick(s)
 
         eye_msgs = self.h.tg.find_sent("👁")
         self.assertTrue(len(eye_msgs) > 0,
@@ -270,6 +272,8 @@ class TestToolCallInterleaved(SimTestBase):
             "- All 15 existing tests still pass\n"
         )
         self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.clock.advance(3)  # settle-debounce flush
         self.h.tick(s)
 
         eye_msgs = self.h.tg.find_sent("👁")
@@ -484,7 +488,9 @@ class TestFullLifecycle(SimTestBase):
             "2. No rate limiting on login attempts\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)  # Sends new lines immediately
+        self.h.tick(s)
+        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.tick(s)
         eye1 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye1, 0, "First update after tool call")
 
@@ -512,7 +518,9 @@ class TestFullLifecycle(SimTestBase):
             "- Added rate limiter (max 5 attempts/minute)\n"
         )
         self.h.clock.advance(1)
-        self.h.tick(s)  # Sends new lines immediately
+        self.h.tick(s)
+        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.tick(s)
         eye2 = len(self.h.tg.find_sent("👁"))
         self.assertGreater(eye2, eye1, "Second update after edit")
 
@@ -550,7 +558,9 @@ class TestFullLifecycle(SimTestBase):
             "❯ "
         )
         self.h.clock.advance(1)
-        self.h.tick(s)  # Sends new lines immediately
+        self.h.tick(s)
+        self.h.clock.advance(3)  # settle-debounce flush
+        self.h.tick(s)
 
         # --- Step 6: Stop signal arrives ---
         self.h.inject_signal("stop", "w4", pane="%20", project="myproject")

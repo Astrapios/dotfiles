@@ -326,8 +326,10 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             "Found the bug in line 42\n"
         )
 
-        # Tick — new lines should be sent immediately (same pipeline as focus)
+        # Tick to accumulate, then advance past the settle to flush.
         self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.clock.advance(3)
         self.h.tick(s)
 
         # Should have sent an eye update for the new content
@@ -379,18 +381,23 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         self.h.tick(s)
         state._clear_busy("w4a")
 
-        # Seed the baseline (first content tick doesn't send).
+        def _settle_tick():
+            # accumulate, then advance past the settle to flush
+            self.h.clock.advance(1)
+            self.h.tick(s)
+            self.h.clock.advance(3)
+            self.h.tick(s)
+
+        # Seed the baseline.
         self.h.tmux.set_pane_content("4", "Checking the files\n")
-        self.h.clock.advance(1)
-        self.h.tick(s)
+        _settle_tick()
 
         # First real delta — sends "All tests pass".
         self.h.tmux.set_pane_content("4",
             "Checking the files\n"
             "All tests pass\n"
         )
-        self.h.clock.advance(1)
-        self.h.tick(s)
+        _settle_tick()
 
         # Later delta whose new lines repeat that same line verbatim.
         self.h.tmux.set_pane_content("4",
@@ -399,13 +406,76 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             "Now fixing the bug\n"
             "All tests pass\n"
         )
-        self.h.clock.advance(1)
-        self.h.tick(s)
+        _settle_tick()
 
         all_sent = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
         assert "Now fixing the bug" in all_sent, self.h.dump_timeline()
         # The repeated line is genuine new content, not deduped away.
         assert all_sent.count("All tests pass") >= 2, self.h.dump_timeline()
+
+    def test_smartfocus_bullet_toggle_not_resent(self):
+        """The reported w2 flood: a RUNNING Bash tool whose leading bullet
+        toggles ●↔blank while its timer ticks was re-sent every ~5s poll. The
+        in-progress tool is now suppressed → it never streams."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+        self.h.tg.inject_text_message("w4a run it")
+        self.h.tick(s)
+        state._clear_busy("w4a")
+
+        frames = [("●", "1m 5s"), ("  ", "1m 10s"), ("●", "1m 15s"),
+                  ("  ", "1m 20s"), ("●", "1m 25s"), ("  ", "1m 30s")]
+        for bullet, t in frames:
+            self.h.tmux.set_pane_content("4",
+                f"{bullet} Bash(run the whole suite)\n"
+                f"  ⎿  Running… ({t})\n"
+            )
+            self.h.clock.advance(3)  # past the settle each frame
+            self.h.tick(s)
+
+        assert len(self.h.tg.find_sent("👁")) == 0, \
+            f"in-progress tool streamed: {self.h.dump_timeline()}"
+
+    def test_smartfocus_completed_tool_sent_once(self):
+        """A tool is suppressed while running, then its completion + the
+        narration after it is streamed exactly once (not repeatedly)."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+        self.h.tg.inject_text_message("w4a build")
+        self.h.tick(s)
+        state._clear_busy("w4a")
+
+        # Some narration exists above the tool from the start (the baseline).
+        base = "● Building the project now.\n"
+        self.h.tmux.set_pane_content("4", base)
+        self.h.clock.advance(3)
+        self.h.tick(s)
+        self.h.tg.clear_sent()
+
+        # Tool runs across several polls — suppressed.
+        for t in ("2s", "7s", "12s"):
+            self.h.tmux.set_pane_content("4",
+                base + f"● Bash(make all)\n  ⎿  Running… ({t})\n")
+            self.h.clock.advance(3)
+            self.h.tick(s)
+        assert len(self.h.tg.find_sent("👁")) == 0, "running tool should be suppressed"
+
+        # Completes + Claude narrates.
+        done = base + "● Bash(make all)\n  ⎿  Build OK\n● The build succeeded.\n"
+        self.h.tmux.set_pane_content("4", done)
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.clock.advance(3)
+        self.h.tick(s)
+        after_complete = len(self.h.tg.find_sent("👁"))
+        assert after_complete >= 1, f"completion not sent: {self.h.dump_timeline()}"
+
+        # Keep polling the unchanged completed pane — no further sends.
+        for _ in range(3):
+            self.h.clock.advance(3)
+            self.h.tick(s)
+        assert len(self.h.tg.find_sent("👁")) == after_complete, \
+            f"completed tool re-sent: {self.h.dump_timeline()}"
 
     def test_smartfocus_clears_on_stop(self):
         """Smartfocus state is cleared when stop signal is processed."""
@@ -1512,7 +1582,7 @@ class TestFocusDiffOnly(SimTestBase):
         assert len(s.focus_prev_lines) > 0, "Baseline should be set"
         self.h.assert_not_sent("🔍.*myproject")
 
-        # Tick 2: add new content → only new lines sent
+        # Tick 2: add new content → accumulated, then flushed after settle
         self.h.tmux.set_pane_content("4",
             "● First paragraph\n"
             "Line A\nLine B\n"
@@ -1520,6 +1590,9 @@ class TestFocusDiffOnly(SimTestBase):
             "❯ "
         )
         self.h.clock.advance(1)
+        self.h.tick(s)
+        # Debounce: nothing until the pane settles ~2s
+        self.h.clock.advance(3)
         self.h.tick(s)
 
         focus_msgs = self.h.tg.find_sent("🔍")

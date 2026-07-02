@@ -15,6 +15,106 @@ _BOX_HORIZ_CORNER = set("┌┐└┘├┤┬┴┼─━╔╗╚╝╠╣╦�
 # noise filtering (_filter_noise, _strip_dialog).
 _SURVEY_MARKER = 'How is Claude doing'
 
+# Elapsed-timer fragment that ticks every capture, e.g. "(1m 37s)", "(36s)",
+# "(1m 31s · timeout 10m)", "(2m 4s · ↓ 6.1k tokens)". Shared by _filter_noise
+# (whole-line filter) and running-tool detection.
+_ELAPSED_TIMER_LINE_RE = re.compile(r'^\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\b.*\)$')
+# Live tool-execution marker under a tool header, e.g. "⎿ Running…",
+# "⎿ Running in the background". \s matches the NBSP these lines use.
+_RUNNING_MARKER_RE = re.compile(r'^⎿\s*Running\b')
+
+# Leading glyphs Claude cycles for the response/tool bullet while a line is
+# rendering/animating (settled ●, plus spinner/star frames). A torn repaint
+# can also drop the glyph entirely, leaving just indentation.
+_BULLET_GLYPHS = "●⏺⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✶✻✽✳✢✷✻*"
+# Header line for a Claude tool call in ANY bullet state — settled, spinner-
+# prefixed, or bulletless (torn repaint). Group 1 is the tool name, group 2 the
+# remainder from "(" on.
+_CLAUDE_TOOL_HEADER_RE = re.compile(
+    rf'^[{_BULLET_GLYPHS}]?\s*([A-Z]\w*)(\(.*)$')
+# Known Claude tool display names. A bulletless "Word(" is only treated as a
+# tool header when the name is in this set (avoids swallowing prose like
+# "foo(x)"); a ●/spinner-bulleted "Word(" is always a tool call.
+_CLAUDE_TOOL_NAMES = frozenset({
+    "Bash", "BashOutput", "KillShell", "KillBash", "Read", "Edit", "MultiEdit",
+    "Write", "Update", "NotebookEdit", "Glob", "Grep", "Search", "WebFetch",
+    "Fetch", "WebSearch", "Task", "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+    "AskUserQuestion", "Skill", "SlashCommand",
+})
+
+
+def _match_claude_tool(s: str) -> str | None:
+    """If a stripped line is a Claude tool header in any bullet state, return
+    its canonical ``Name(args…`` form; else None.
+
+    Recognizes ``● Bash(x)``, spinner-prefixed ``✶ Bash(x)``, and the
+    bulletless torn-repaint ``Bash(x)`` (validated against known tool names so
+    prose isn't swallowed). This is what makes the diff stable when the leading
+    bullet toggles ●↔blank while a tool runs."""
+    m = _CLAUDE_TOOL_HEADER_RE.match(s)
+    if not m:
+        return None
+    name = m.group(1)
+    had_glyph = bool(s) and s[0] in _BULLET_GLYPHS
+    if had_glyph or name in _CLAUDE_TOOL_NAMES:
+        return f"{name}{m.group(2)}"
+    return None
+
+
+def _is_tool_header_line(s: str, profile) -> bool:
+    """True if stripped line ``s`` starts a tool call for this profile."""
+    if profile is not None and profile.name == "gemini":
+        return s.startswith("╭")
+    return _match_claude_tool(s) is not None
+
+
+def _region_is_running(body_lines: list[str], profile) -> bool:
+    """Given the lines below a tool header, decide whether that tool is still
+    executing. A tool is running when its own body (up to the next bullet/
+    header) ends in a live marker: ``⎿ Running…`` or a bare ticking timer.
+    A settled result line (``⎿ 160 passed``, ``⎿ (timeout 10m)`` after output)
+    means complete."""
+    bullet = profile.response_bullet if profile else "●"
+    region = []
+    for ln in body_lines:
+        t = ln.strip()
+        if _is_tool_header_line(t, profile) or (bullet and t.startswith(bullet)):
+            break
+        region.append(t)
+    for t in reversed(region):
+        if not t:
+            continue
+        return bool(_RUNNING_MARKER_RE.match(t) or _ELAPSED_TIMER_LINE_RE.match(t))
+    return False
+
+
+def _running_tool_cut(raw_lines: list[str], profile) -> int:
+    """Return an index to truncate ``raw_lines`` at so an in-progress tool call
+    at the bottom is dropped entirely (header + body). If the trailing tool is
+    complete (or there is none), returns ``len(raw_lines)`` (no cut).
+
+    Cutting the running tool from the RAW capture — before filtering strips its
+    ``Running…``/timer markers — is Layer 3: in-progress tools never stream;
+    they appear once, when complete."""
+    hdr = None
+    for i in range(len(raw_lines) - 1, -1, -1):
+        if _is_tool_header_line(raw_lines[i].strip(), profile):
+            hdr = i
+            break
+    if hdr is None:
+        return len(raw_lines)
+    if _region_is_running(raw_lines[hdr + 1:], profile):
+        return hdr
+    return len(raw_lines)
+
+
+def _canonicalize_lines(lines: list[str]) -> list[str]:
+    """Normalize cosmetic per-capture variation that would otherwise churn the
+    diff, WITHOUT dropping or merging lines: NBSP→space and rstrip. (Bullet/
+    tool-header normalization happens in _collapse_tool_calls; volatile status
+    lines are removed by _filter_noise or cut by _running_tool_cut.)"""
+    return [ln.replace("\u00a0", " ").rstrip() for ln in lines]
+
 
 def _is_survey_bullet(s: str) -> bool:
     """Check if a stripped line is the satisfaction survey bullet."""
@@ -414,7 +514,7 @@ def _filter_noise(raw: str, keep_status: bool = False, profile=None) -> list[str
             # whole tool block on every poll. The `●`-bulleted tool line above
             # it is only stripped by _collapse_tool_calls when the bullet is
             # actually captured; on torn repaints it isn't, so filter here too.
-            if re.match(r'^\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\b.*\)$', s):
+            if _ELAPSED_TIMER_LINE_RE.match(s):
                 continue
             # Collapsed output: "… +N lines (ctrl+o to expand/see all)"
             if re.match(r'^…\s+\+\d+', s):
@@ -629,6 +729,44 @@ def _focus_capture_lines(raw: str, pane_width: int = 0, profile=None) -> list[st
     return lines
 
 
+def _focus_canonical_lines(raw: str, pane_width: int = 0, profile=None) -> list[str]:
+    """Canonical, diff-stable view of a pane for focus/smartfocus.
+
+    Pipeline (filter → collapse/canonicalize → *then* the caller diffs), which
+    is the fix for the recurring focus "repeats": cosmetic/animated churn is
+    normalized away BEFORE the diff instead of after, so a running tool, a
+    toggling bullet, or a ticking timer produces no delta.
+
+      1. strip from the last prompt line to end (content boundary)
+      2. cut an in-progress tool call off the bottom (Layer 3 — never stream a
+         tool while it runs; it appears once, when complete)
+      3. _filter_noise (spinners/timers/chrome) + _join_wrapped_lines
+      4. _strip_dialog (permission overlay never becomes "new content")
+      5. _collapse_tool_calls (every bullet state → one 🔧 header)
+      6. _canonicalize_lines (NBSP/rstrip)
+
+    Callers store the RESULT as their diff baseline (prev_lines), so a stable
+    tool header compares equal tick-over-tick.
+    """
+    if profile is None:
+        from astra import profiles
+        profile = profiles.CLAUDE
+    prompt_char = profile.prompt_char
+    raw_lines = raw.splitlines()
+    for i in range(len(raw_lines) - 1, -1, -1):
+        if raw_lines[i].strip().startswith(prompt_char):
+            raw_lines = raw_lines[:i]
+            break
+    raw_lines = raw_lines[:_running_tool_cut(raw_lines, profile)]
+    lines = _filter_noise("\n".join(raw_lines), profile=profile)
+    if pane_width:
+        lines = tmux._join_wrapped_lines(lines, pane_width)
+    lines = _strip_dialog(lines)
+    lines = _collapse_tool_calls(lines, profile=profile)
+    lines = _canonicalize_lines(lines)
+    return lines
+
+
 def clean_pane_status(raw: str, pane_width: int = 0, profile=None) -> str:
     """Clean captured pane content for /status display."""
     filtered = _filter_noise(raw, keep_status=True, profile=profile)
@@ -672,7 +810,6 @@ def _collapse_tool_calls(lines: list[str], profile=None) -> list[str]:
     if profile is None:
         from astra import profiles
         profile = profiles.CLAUDE
-    tool_re = profile.tool_header_re
     bullet = profile.response_bullet
     is_gemini = profile.name == "gemini"
 
@@ -696,11 +833,13 @@ def _collapse_tool_calls(lines: list[str], profile=None) -> list[str]:
             in_tool = False
             collapsed.append(line)
         else:
-            # Claude: tool bullets match "● Word("
-            if re.match(tool_re, s):
-                # Extract "Word(args)" from "● Word(args)"
-                header = s[2:] if s.startswith("● ") else s
-                collapsed.append(f"🔧 {header}")
+            # Claude: tool header in ANY bullet state (settled ●, spinner glyph,
+            # or bulletless torn repaint) → one canonical "🔧 Name(args)".
+            # Matching bulletless headers here (before the diff) is what stops
+            # the ●↔blank toggle from churning.
+            tool = _match_claude_tool(s)
+            if tool is not None:
+                collapsed.append(f"🔧 {tool}")
                 in_tool = True
                 continue
             if s.startswith(bullet) if bullet else False:
