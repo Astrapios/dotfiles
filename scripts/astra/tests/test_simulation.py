@@ -368,6 +368,45 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         assert len(self.h.tg.find_sent("👁")) == baseline, \
             f"timer ticks re-sent the tool block: {self.h.dump_timeline()}"
 
+    def test_smartfocus_resends_recurring_line(self):
+        """A line identical to one sent earlier must NOT be dropped from a later
+        update. An over-aggressive per-line dedup once punched holes in
+        responses ('cutting off and incomplete')."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        self.h.tg.inject_text_message("w4a go")
+        self.h.tick(s)
+        state._clear_busy("w4a")
+
+        # Seed the baseline (first content tick doesn't send).
+        self.h.tmux.set_pane_content("4", "Checking the files\n")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # First real delta — sends "All tests pass".
+        self.h.tmux.set_pane_content("4",
+            "Checking the files\n"
+            "All tests pass\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        # Later delta whose new lines repeat that same line verbatim.
+        self.h.tmux.set_pane_content("4",
+            "Checking the files\n"
+            "All tests pass\n"
+            "Now fixing the bug\n"
+            "All tests pass\n"
+        )
+        self.h.clock.advance(1)
+        self.h.tick(s)
+
+        all_sent = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
+        assert "Now fixing the bug" in all_sent, self.h.dump_timeline()
+        # The repeated line is genuine new content, not deduped away.
+        assert all_sent.count("All tests pass") >= 2, self.h.dump_timeline()
+
     def test_smartfocus_clears_on_stop(self):
         """Smartfocus state is cleared when stop signal is processed."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)

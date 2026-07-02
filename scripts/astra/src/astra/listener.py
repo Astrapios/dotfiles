@@ -5,7 +5,6 @@ import pathlib
 import re
 import sys
 import time
-from collections import deque
 from dataclasses import dataclass, field
 
 from astra import config, telegram, tmux, tmux_send, state, content, commands, signals, routing, profiles
@@ -29,12 +28,6 @@ _RESCAN_INTERVAL = 60
 # window loses fast-scrolling output (e.g. god-mode tool bursts) between ticks —
 # the captured tail must be deep enough to span a burst before it scrolls off.
 _FOCUS_CAPTURE_LINES = 1000
-
-# Focus/smartfocus remember recently-sent content lines and suppress re-sends.
-# A live TUI repaints (bullets toggle ●↔blank, tool blocks re-render), so the
-# line diff can re-surface a line it already sent; the single-slot last_sent
-# only catches immediate repeats, not alternation. This is that backstop.
-_RECENT_LINE_MEMORY = 200
 
 
 def _resolve_caption_target(caption: str, sessions: dict,
@@ -167,7 +160,6 @@ class _ListenerState:
     focus_pane_width: int = 0
     focus_prev_lines: list = field(default_factory=list)
     focus_last_sent: str = ""
-    focus_recent: "deque" = field(default_factory=lambda: deque(maxlen=_RECENT_LINE_MEMORY))
     deepfocus_target_wid: str | None = None
     deepfocus_pane_width: int = 0
     deepfocus_prev_lines: list = field(default_factory=list)
@@ -179,7 +171,6 @@ class _ListenerState:
     smartfocus_prev_lines: list = field(default_factory=list)
     smartfocus_has_sent: bool = False
     smartfocus_last_sent: str = ""
-    smartfocus_recent: "deque" = field(default_factory=lambda: deque(maxlen=_RECENT_LINE_MEMORY))
     compact_notified: set = field(default_factory=set)
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
@@ -563,7 +554,6 @@ def _listen_tick(s):
             s.focus_pane_width = tmux._get_pane_width(focus_state["pane"])
             s.focus_prev_lines = []
             s.focus_last_sent = ""
-            s.focus_recent.clear()
         fp, fproj = focus_state["pane"], focus_state["project"]
         if fw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
@@ -584,14 +574,12 @@ def _listen_tick(s):
                     new = content._strip_dialog(new)
                 if new:
                     new = content._collapse_tool_calls(new, profile=_fprofile)
-                    new = [l for l in new if not l.strip() or l not in s.focus_recent]
                     new_text = "\n".join(new).strip()
                     if new_text and new_text != s.focus_last_sent:
                         config._log("focus", f"sending {len(new)} new lines for {fw}")
                         header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
                         telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
                         s.focus_last_sent = new_text
-                        s.focus_recent.extend(l for l in new if l.strip())
             s.focus_prev_lines = cleaned_lines
     elif s.focus_target_wid:
         s.focus_target_wid = None
@@ -611,7 +599,6 @@ def _listen_tick(s):
                 s.smartfocus_prev_lines = []
                 s.smartfocus_has_sent = False
                 s.smartfocus_last_sent = ""
-                s.smartfocus_recent.clear()
             sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
             if sfw not in s.sessions:
                 s.sessions = tmux.scan_claude_sessions()
@@ -640,7 +627,6 @@ def _listen_tick(s):
                         new = content._strip_dialog(new)
                     if new:
                         new = content._collapse_tool_calls(new, profile=_sfprofile)
-                        new = [l for l in new if not l.strip() or l not in s.smartfocus_recent]
                         new_text = "\n".join(new).strip()
                         # Skip trivial deltas (just emoji/symbols, no real text)
                         if new_text and not re.search(r'[a-zA-Z0-9]{2,}', new_text):
@@ -653,7 +639,6 @@ def _listen_tick(s):
                             telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                             s.smartfocus_has_sent = True
                             s.smartfocus_last_sent = new_text
-                            s.smartfocus_recent.extend(l for l in new if l.strip())
                         elif _sf_debug and new_text:
                             config._debug_log(f"[sf:{sfw}] dedup skip: {new_text[:200]}")
                 s.smartfocus_prev_lines = cleaned_lines

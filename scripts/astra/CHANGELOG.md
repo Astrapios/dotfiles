@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.36.6
+
+- **Fix focus messages cutting off / dropping content.** Reverts the per-line recently-sent dedup added in 0.36.5. It remembered the last ~200 sent lines and suppressed any that recurred — but over a ~900-line focus buffer, ordinary lines recur constantly (blank-ish lines, common phrases, repeated tool patterns), so it punched holes in genuine responses. It also never fixed the toggle it targeted: `_collapse_tool_calls` turns `● Bash(…)` into `🔧 Bash(…)` while a bulletless repaint stays `  Bash(…)`, so the two forms never matched for dedup anyway. Net harm, removed. The 0.36.5 timer-line filter (the actual fix for the repeat flood) stays; the single-slot `last_sent` still catches immediate full-block repeats.
+
 ## 0.36.5
 
 - **Fix focus flooding repeated tool-block messages while a command runs.** A running tool shows a bare elapsed-timer line (`(1m 37s)`, `(1m 31s · timeout 10m)`, `(2m 4s · ↓ 6.1k tokens)`) that ticks on every capture. `_collapse_tool_calls` only drops it when the `●` bullet is captured, but live-TUI repaints often capture the block without its bullet, so the timer leaked into the diff and re-sent the whole tool block every ~5s poll. Two fixes:
