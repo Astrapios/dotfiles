@@ -571,6 +571,9 @@ def _listen_tick(s):
         if focus_state:
             _finfo = s.sessions.get(fw)
             _fprofile = profiles.get_profile(_finfo.cli) if _finfo and hasattr(_finfo, 'cli') else None
+            # Refresh width each tick: a stale width rewraps every line after a
+            # pane resize, making the whole buffer look new (a full repeat).
+            s.focus_pane_width = tmux._get_pane_width(fp)
             raw = tmux._capture_pane(fp, _FOCUS_CAPTURE_LINES)
             canon = content._focus_canonical_lines(raw, s.focus_pane_width, profile=_fprofile)
             if s.focus_seeded:
@@ -617,6 +620,9 @@ def _listen_tick(s):
             if smartfocus_state:
                 _sfinfo = s.sessions.get(sfw)
                 _sfprofile = profiles.get_profile(_sfinfo.cli) if _sfinfo and hasattr(_sfinfo, 'cli') else None
+                # Refresh width each tick (see focus block) to avoid a
+                # resize rewrapping the whole buffer into a spurious repeat.
+                s.smartfocus_pane_width = tmux._get_pane_width(sfp)
                 raw = tmux._capture_pane(sfp, _FOCUS_CAPTURE_LINES)
                 canon = content._focus_canonical_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
                 _sf_debug = config._is_debug_enabled()

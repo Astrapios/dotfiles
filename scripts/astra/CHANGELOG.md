@@ -5,6 +5,14 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.37.3
+
+- **Focus omit/repeat fixes surfaced by a multi-agent review of the focus pipeline** (targeted fixes on the pane-diff path; a larger transcript-based rework is planned separately):
+  - **`_compute_new_lines` no longer drops genuine new lines in a `replace` op.** It emitted only replaced lines "not already in the old block", so a real new line byte-identical to a replaced one (e.g. a repeated `🔧 Bash(cd …)` header) was silently omitted — the same hole-punching that sank the 0.36.5 per-line dedup. A replace's new side is current content; emit it in full.
+  - **`_match_claude_tool` no longer misclassifies prose as a tool call.** A bulleted line like `● Fixed(config). Now the rest:` was collapsed to a `🔧` header, dropping the lines under it as "tool body" (real data loss). Now, after the last `)` only a `⎿` result or `…` truncation may follow — otherwise it's prose and left alone.
+  - **MCP/lowercase/dotted tool names now collapse.** The header pattern accepts `mcp__server__tool(...)` etc., so their bodies/timers no longer leak and churn.
+  - **Pane width is refreshed every tick.** It was captured once when focus attached; a stale width rewraps every line after a pane resize, making the whole buffer look new (a full-buffer repeat).
+
 ## 0.37.2
 
 - **Remove in-progress-tool suppression (0.37.0 Layer 3) — it caused the repeats/omits, not fixed them.** Live debug on a running tool showed canon oscillating `224 → 223 → 224`: `_running_tool_cut` classifies a tool as "running" inconsistently across its lifecycle (no `⎿ Running…` marker at start, present mid-run, gone at completion), so the collapsed `🔧 header` flips in and out of the diff baseline each tick — reappearing = a **repeat**, disappearing = an **omit**. The suppression can't be made stable from a single capture. Removed it. Canonicalization (Layer 1) already makes a running tool a single **stable** `🔧 Name(args)` line (bullet-toggle normalized, `⎿ Running…`/timer body filtered and collapsed away), so a tool now appears **exactly once** when it starts and never churns — the actual "no repeats" goal, without the oscillation. Verified live: canon holds steady across ticks on the fixed build where the old build flip-flopped. Focus is now just: canonicalize-before-diff + immediate per-poll send. (Removes `_running_tool_cut`/`_region_is_running`/`_is_tool_header_line`.)

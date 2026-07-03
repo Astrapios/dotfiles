@@ -27,8 +27,10 @@ _BULLET_GLYPHS = "●⏺⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✶✻✽✳✢✷✻*"
 # Header line for a Claude tool call in ANY bullet state — settled, spinner-
 # prefixed, or bulletless (torn repaint). Group 1 is the tool name, group 2 the
 # remainder from "(" on.
+# Group 1 = tool name (allows MCP/dotted/lowercase like ``mcp__srv__tool``),
+# group 2 = everything after the opening "(".
 _CLAUDE_TOOL_HEADER_RE = re.compile(
-    rf'^[{_BULLET_GLYPHS}]?\s*([A-Z]\w*)(\(.*)$')
+    rf'^[{_BULLET_GLYPHS}]?\s*([A-Za-z_][\w.:-]*)\((.*)$')
 # Known Claude tool display names. A bulletless "Word(" is only treated as a
 # tool header when the name is in this set (avoids swallowing prose like
 # "foo(x)"); a ●/spinner-bulleted "Word(" is always a tool call.
@@ -47,14 +49,25 @@ def _match_claude_tool(s: str) -> str | None:
     Recognizes ``● Bash(x)``, spinner-prefixed ``✶ Bash(x)``, and the
     bulletless torn-repaint ``Bash(x)`` (validated against known tool names so
     prose isn't swallowed). This is what makes the diff stable when the leading
-    bullet toggles ●↔blank while a tool runs."""
+    bullet toggles ●↔blank while a tool runs.
+
+    Rejects prose that merely contains parentheses (e.g. ``● Fixed(config). Now
+    the rest:``): after the last ``)`` only a tool result (``⎿ …``) or a
+    truncation ellipsis may follow — anything else means it is prose, not a
+    tool header, and must not be collapsed (which would drop the lines under
+    it as tool body)."""
     m = _CLAUDE_TOOL_HEADER_RE.match(s)
     if not m:
         return None
-    name = m.group(1)
+    name, rest = m.group(1), m.group(2)  # rest = text after the "("
+    close = rest.rfind(")")
+    if close != -1:
+        tail = rest[close + 1:].strip()
+        if tail and not tail.startswith(("⎿", "…")):
+            return None
     had_glyph = bool(s) and s[0] in _BULLET_GLYPHS
     if had_glyph or name in _CLAUDE_TOOL_NAMES:
-        return f"{name}{m.group(2)}"
+        return f"{name}({rest}"
     return None
 
 
@@ -851,10 +864,9 @@ def _extract_suggestion(pane: str, profile=None) -> str:
 def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     """Find genuinely new (inserted/replaced) lines between two captures.
 
-    Returns lines from "insert" and "replace" operations. For "replace",
-    only the net new lines are returned (lines beyond what was replaced).
-    Callers should use _strip_dialog() before passing to remove ephemeral
-    UI overlays that confuse the diff.
+    Returns the new-side lines of every "insert" and "replace" op. Callers
+    should use _strip_dialog() before passing to remove ephemeral UI overlays
+    that confuse the diff.
     """
     if not old_lines:
         return new_lines
@@ -868,16 +880,12 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
         return new_lines
     new = []
     for tag, i1, i2, j1, j2 in opcodes:
-        if tag == "insert":
+        if tag in ("insert", "replace"):
+            # Emit ALL new-side lines of the op. A replace's new side is the
+            # current version of that region — emitting it in full never drops
+            # content. (The old "skip lines also present in the replaced block"
+            # dedup silently omitted genuine new lines that happened to match a
+            # replaced line — e.g. a repeated `🔧 Bash(cd …)` header — the same
+            # hole-punching that sank the 0.36.5 per-line dedup.)
             new.extend(new_lines[j1:j2])
-        elif tag == "replace":
-            # Emit every replaced line that wasn't already in the old block,
-            # not just the tail beyond old_count. Streaming reflow and
-            # tool-box collapses show up as replaces; the old tail-only
-            # heuristic silently dropped genuinely new text inside the
-            # replaced region (the cause of focus "missing" response chunks).
-            # Spinner/timing lines are already removed by _filter_noise, so
-            # this doesn't re-emit in-place status churn.
-            old_block = set(old_lines[i1:i2])
-            new.extend(l for l in new_lines[j1:j2] if l not in old_block)
     return new

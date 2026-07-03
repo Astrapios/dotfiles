@@ -8851,6 +8851,25 @@ class TestCollapseBulletStates:
         # a ●-bulleted header is always a tool call, even for an unlisted name
         assert astra._collapse_tool_calls(["● Frobnicate(y)"]) == ["🔧 Frobnicate(y)"]
 
+    def test_bulleted_prose_with_paren_not_swallowed(self):
+        # "● Fixed(config). Now the rest:" is prose (text after the ")"), not a
+        # tool call — must NOT collapse (else the following lines get dropped as
+        # tool body). This was a real omit bug.
+        lines = ["● Fixed(config). Now the rest changed:",
+                 "  detail line one",
+                 "  detail line two"]
+        assert astra._collapse_tool_calls(lines) == lines
+
+    def test_mcp_tool_collapsed(self):
+        # MCP tools render lowercase/dotted; must still collapse.
+        assert astra._collapse_tool_calls(["● mcp__server__do_thing(x)"]) == [
+            "🔧 mcp__server__do_thing(x)"]
+
+    def test_tool_with_result_tail_collapsed(self):
+        # a header with an inline "⎿ result" tail is still a tool call
+        assert astra._collapse_tool_calls(["● Read(a.py) ⎿  5 lines"]) == [
+            "🔧 Read(a.py) ⎿  5 lines"]
+
 
 class TestFocusCanonicalStable:
     """The whole point: cosmetic churn produces no diff once canonicalized."""

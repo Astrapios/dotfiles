@@ -810,16 +810,23 @@ class TestComputeNewLines(unittest.TestCase):
         result = content._compute_new_lines(old, new)
         self.assertEqual(result, ["new-a", "new-b", "new-c"])
 
-    def test_replace_dedupes_unchanged_lines(self):
-        """Lines inside a replaced block that were already present aren't
-        re-emitted (dedup against the old block)."""
+    def test_replace_carries_unchanged_lines_in_equal_ops(self):
+        """Genuinely-unchanged lines land in 'equal' ops (not emitted); only
+        changed/new lines are emitted."""
         old = ["intro", "shared", "tail-old"]
         new = ["intro-changed", "shared", "tail-old", "extra"]
         result = content._compute_new_lines(old, new)
-        # 'shared' and 'tail-old' carried over → not re-sent; changed/new are.
-        self.assertNotIn("shared", result)
+        self.assertNotIn("shared", result)   # carried over via an equal op
         self.assertIn("intro-changed", result)
         self.assertIn("extra", result)
+
+    def test_replace_emits_full_new_side(self):
+        """A replace op emits its entire new side (never drops a line for
+        matching a replaced line — the F2 omit fix)."""
+        old = ["ctx", "old-1", "old-2"]
+        new = ["ctx", "n-1", "n-2", "n-3"]
+        result = content._compute_new_lines(old, new)
+        self.assertEqual(result, ["n-1", "n-2", "n-3"])
 
     def test_bullets_with_tool_blocks_appended(self):
         """Simulate tool output appearing then more text."""
