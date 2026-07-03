@@ -38,7 +38,7 @@ def _clear_signals(include_state: bool = False):
     Queued messages (_queued_) and session names (_names) are always preserved."""
     if not os.path.isdir(config.SIGNAL_DIR):
         return
-    _persist = ("_queued_", "_names")
+    _persist = ("_queued_", "_names", "_transcript_")
     for f in os.listdir(config.SIGNAL_DIR):
         if f.startswith(_persist):
             continue
@@ -284,6 +284,28 @@ def _load_session_names() -> dict[str, str]:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _save_transcript_path(wid: str, path: str):
+    """Persist the Claude session transcript JSONL path for a wid.
+
+    Claude hooks carry ``transcript_path``; caching it per-wid lets focus tail
+    the structured transcript instead of scraping the pane. Persisted across
+    signal cleanup (see ``_clear_signals`` _persist list)."""
+    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
+    p = os.path.join(config.SIGNAL_DIR, f"_transcript_{wid}.json")
+    with open(p, "w") as f:
+        json.dump({"path": path}, f)
+
+
+def _load_transcript_path(wid: str) -> str | None:
+    """Return the cached transcript JSONL path for a wid, or None."""
+    p = os.path.join(config.SIGNAL_DIR, f"_transcript_{wid}.json")
+    try:
+        with open(p) as f:
+            return json.load(f).get("path")
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _resolve_name(target: str, sessions: dict | None = None) -> str | None:

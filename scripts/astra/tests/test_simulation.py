@@ -473,6 +473,47 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         assert joined.count("Bash(make all)") == 1, self.h.dump_timeline()
         assert joined.count("The build succeeded") == 1, self.h.dump_timeline()
 
+    def test_smartfocus_uses_transcript_when_available(self):
+        """When a Claude session's transcript path is known, smartfocus streams
+        from the JSONL (repeat-free) instead of scraping the pane."""
+        import json
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True, cli="claude")
+        s = self.h.make_listener_state()
+        tpath = os.path.join(self.h._tmpdir, "session.jsonl")
+
+        def append(rec):
+            with open(tpath, "a") as f:
+                f.write(json.dumps(rec) + "\n")
+
+        def asst(*blocks):
+            return {"type": "assistant", "message": {"content": list(blocks)}}
+
+        append(asst({"type": "text", "text": "OLD history to skip"}))
+        state._save_transcript_path("w4a", tpath)
+
+        self.h.tg.inject_text_message("w4a go")
+        self.h.tick(s)             # activate smartfocus
+        state._clear_busy("w4a")
+        self.h.tick(s)             # resolve + seed the tail (skips OLD history)
+        assert self.h.tg.find_sent("👁") == []
+        all_text = "\n".join(m["text"] for m in self.h.tg.sent_messages)
+        assert "OLD history" not in all_text
+
+        # Claude appends real output → streamed from the transcript
+        append(asst({"type": "text", "text": "Working on it"},
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "ls -la"}}))
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        sent = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
+        assert "Working on it" in sent, self.h.dump_timeline()
+        assert "🔧 Bash(ls -la)" in sent, self.h.dump_timeline()
+
+        # No new records → no repeat
+        n = len(self.h.tg.find_sent("👁"))
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        assert len(self.h.tg.find_sent("👁")) == n
+
     def test_smartfocus_clears_on_stop(self):
         """Smartfocus state is cleared when stop signal is processed."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)

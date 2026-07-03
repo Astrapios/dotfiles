@@ -879,7 +879,7 @@ def _compute_new_lines(old_lines: list[str], new_lines: list[str]) -> list[str]:
     if equal_count == 0:
         return new_lines
     new = []
-    for tag, i1, i2, j1, j2 in opcodes:
+    for tag, _i1, _i2, j1, j2 in opcodes:
         if tag in ("insert", "replace"):
             # Emit ALL new-side lines of the op. A replace's new side is the
             # current version of that region — emitting it in full never drops

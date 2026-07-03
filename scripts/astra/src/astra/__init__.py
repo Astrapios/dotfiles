@@ -66,6 +66,7 @@ from .state import (
     _is_local_suppress_enabled, _set_local_suppress,
     _is_autofocus_enabled, _set_autofocus,
     _save_session_name, _clear_session_name, _load_session_names,
+    _save_transcript_path, _load_transcript_path,
     _resolve_name, _wid_label,
     _save_queued_msg, _load_queued_msgs, _pop_queued_msgs, _remove_queued_msg_at,
     _save_prompt_text, _pop_prompt_text,

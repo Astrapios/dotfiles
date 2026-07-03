@@ -79,6 +79,17 @@ def cmd_hook():
     except json.JSONDecodeError:
         return
 
+    # Cache the Claude session transcript path (every hook payload carries it)
+    # so focus can tail the structured JSONL instead of scraping the pane.
+    _tpath = data.get("transcript_path")
+    if _tpath:
+        _twid = tmux.get_window_id() or "unknown"
+        if _twid != "unknown":
+            try:
+                state._save_transcript_path(_twid, _tpath)
+            except OSError:
+                pass
+
     event = data.get("hook_event_name", "")
     tool = data.get("tool_name", "")
 

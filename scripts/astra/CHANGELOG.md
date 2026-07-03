@@ -5,6 +5,14 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.38.0
+
+- **Focus/smartfocus now stream from Claude's structured session transcript (JSONL) instead of scraping the pane — the robust fix the multi-agent review converged on.** Claude Code appends one JSON record per event to `~/.claude/projects/<cwd-slug>/<sessionId>.jsonl`; that append-only file is the ground truth the TUI renders *from*, with no spinners, timers, wrapping, bullet animation, or torn frames. Tailing it by byte offset makes focus repeat-free and omit-free **by construction** — the entire 0.36.x/0.37.x pane-diff failure class becomes structurally impossible, and future Claude UI restyles can't break focus.
+  - New `src/astra/transcript.py`: `resolve_transcript(wid)`, `TranscriptTail` (offset tail with partial-line buffering + truncation/rotation reset + `seed()` to skip history), and `render_record` (assistant text + `🔧 Tool(arg)`; skips thinking, user prompts, sidechains, meta, and — for focus — tool-result bodies).
+  - The transcript path is captured for free: every Claude hook payload carries `transcript_path`; `cmd_hook` now persists it per-wid (`_transcript_<wid>.json`, preserved across signal cleanup) and `resolve_transcript` reads it (trying the full wid and the bare `wN` the hook records).
+  - **Graceful fallback:** when no transcript is resolvable (Gemini, or before the session's first hook fires) focus uses the existing pane-diff pipeline unchanged, and it upgrades to the transcript automatically as soon as the path is known. So this can only improve, never regress, current behavior. deepfocus keeps the pane path for now.
+- Verified live (transcript path cached from real hooks; resolve+tail against the real 4.8 MB transcript renders clean) and covered by unit tests (`tests/test_transcript.py`) + a sim integration test.
+
 ## 0.37.3
 
 - **Focus omit/repeat fixes surfaced by a multi-agent review of the focus pipeline** (targeted fixes on the pane-diff path; a larger transcript-based rework is planned separately):

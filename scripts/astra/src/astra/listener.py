@@ -7,7 +7,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from astra import config, telegram, tmux, tmux_send, state, content, commands, signals, routing, profiles
+from astra import config, telegram, tmux, tmux_send, state, content, commands, signals, routing, profiles, transcript
 
 # Notification category constants (see state._NOTIFICATION_CATEGORIES)
 _CAT_PERMISSION = 1
@@ -28,6 +28,24 @@ _RESCAN_INTERVAL = 60
 # window loses fast-scrolling output (e.g. god-mode tool bursts) between ticks —
 # the captured tail must be deep enough to span a burst before it scrolls off.
 _FOCUS_CAPTURE_LINES = 1000
+
+
+def _resolve_focus_tail(wid: str, cli: str, include_results: bool = False):
+    """Return a seeded ``transcript.TranscriptTail`` for a Claude session whose
+    transcript path is known, else None (→ caller uses the pane-diff path).
+    Seeding skips existing history so activation doesn't dump the whole session.
+
+    Reading the structured JSONL instead of scraping the pane makes focus
+    repeat/omit-free by construction; the pane path remains the fallback for
+    Gemini and for sessions whose transcript hasn't been discovered yet."""
+    if cli != "claude":
+        return None
+    path = transcript.resolve_transcript(wid)
+    if not path:
+        return None
+    tail = transcript.TranscriptTail(path, include_tool_results=include_results)
+    tail.seed()
+    return tail
 
 
 def _resolve_caption_target(caption: str, sessions: dict,
@@ -161,6 +179,7 @@ class _ListenerState:
     focus_prev_lines: list = field(default_factory=list)
     focus_last_sent: str = ""
     focus_seeded: bool = False
+    focus_tail: object = None  # transcript.TranscriptTail when using JSONL source
     deepfocus_target_wid: str | None = None
     deepfocus_pane_width: int = 0
     deepfocus_prev_lines: list = field(default_factory=list)
@@ -173,6 +192,7 @@ class _ListenerState:
     smartfocus_has_sent: bool = False
     smartfocus_last_sent: str = ""
     smartfocus_seeded: bool = False
+    smartfocus_tail: object = None  # transcript.TranscriptTail when using JSONL
     compact_notified: set = field(default_factory=set)
     last_interrupt_check: float = 0
     interrupted_notified: set = field(default_factory=set)
@@ -241,6 +261,7 @@ def _listen_tick(s):
                 s.focus_pane_width = 0
                 s.focus_prev_lines = []
                 s.focus_seeded = False
+                s.focus_tail = None
                 s.deepfocus_target_wid = None
                 s.deepfocus_pane_width = 0
                 s.deepfocus_prev_lines = []
@@ -252,6 +273,7 @@ def _listen_tick(s):
                 s.smartfocus_prev_lines = []
                 s.smartfocus_seeded = False
                 s.smartfocus_has_sent = False
+                s.smartfocus_tail = None
                 statuses = routing._get_session_statuses(s.sessions)
                 s.interrupted_notified = {idx for idx, st in statuses.items() if st == "interrupted"}
                 resume_viewed = tmux._get_locally_viewed_windows() if state._is_local_suppress_enabled() else set()
@@ -559,6 +581,7 @@ def _listen_tick(s):
             s.focus_prev_lines = []
             s.focus_seeded = False
             s.focus_last_sent = ""
+            s.focus_tail = None
         fp, fproj = focus_state["pane"], focus_state["project"]
         if fw not in s.sessions:
             s.sessions = tmux.scan_claude_sessions()
@@ -570,26 +593,42 @@ def _listen_tick(s):
                 focus_state = None
         if focus_state:
             _finfo = s.sessions.get(fw)
-            _fprofile = profiles.get_profile(_finfo.cli) if _finfo and hasattr(_finfo, 'cli') else None
-            # Refresh width each tick: a stale width rewraps every line after a
-            # pane resize, making the whole buffer look new (a full repeat).
-            s.focus_pane_width = tmux._get_pane_width(fp)
-            raw = tmux._capture_pane(fp, _FOCUS_CAPTURE_LINES)
-            canon = content._focus_canonical_lines(raw, s.focus_pane_width, profile=_fprofile)
-            if s.focus_seeded:
-                new = content._compute_new_lines(s.focus_prev_lines, canon)
+            _fcli = _finfo.cli if _finfo and hasattr(_finfo, 'cli') else "claude"
+            _fprofile = profiles.get_profile(_fcli)
+            # Prefer the structured transcript (repeat/omit-free); upgrade to it
+            # as soon as the session's transcript path is discovered.
+            if s.focus_tail is None:
+                s.focus_tail = _resolve_focus_tail(fw, _fcli)
+            if s.focus_tail is not None:
+                new = s.focus_tail.poll()
                 if new:
                     new_text = "\n".join(new).strip()
-                    if new_text and new_text != s.focus_last_sent:
-                        config._log("focus", f"sending {len(new)} new lines for {fw}")
+                    if new_text:
+                        config._log("focus", f"sending {len(new)} new lines for {fw} (transcript)")
                         header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
                         telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
-                        s.focus_last_sent = new_text
-            s.focus_prev_lines = canon
-            s.focus_seeded = True
+            else:
+                # Fallback: pane-diff (Gemini, or transcript not yet known).
+                # Refresh width each tick: a stale width rewraps every line
+                # after a pane resize, making the buffer look new (a repeat).
+                s.focus_pane_width = tmux._get_pane_width(fp)
+                raw = tmux._capture_pane(fp, _FOCUS_CAPTURE_LINES)
+                canon = content._focus_canonical_lines(raw, s.focus_pane_width, profile=_fprofile)
+                if s.focus_seeded:
+                    new = content._compute_new_lines(s.focus_prev_lines, canon)
+                    if new:
+                        new_text = "\n".join(new).strip()
+                        if new_text and new_text != s.focus_last_sent:
+                            config._log("focus", f"sending {len(new)} new lines for {fw}")
+                            header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
+                            telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+                            s.focus_last_sent = new_text
+                s.focus_prev_lines = canon
+                s.focus_seeded = True
     elif s.focus_target_wid:
         s.focus_target_wid = None
         s.focus_seeded = False
+        s.focus_tail = None
 
     # --- Smart focus monitoring (auto-activated on message send) ---
     # Same pipeline as focus above — smartfocus is just automatic activation.
@@ -607,6 +646,7 @@ def _listen_tick(s):
                 s.smartfocus_seeded = False
                 s.smartfocus_has_sent = False
                 s.smartfocus_last_sent = ""
+                s.smartfocus_tail = None
             sfp, sfproj = smartfocus_state["pane"], smartfocus_state["project"]
             if sfw not in s.sessions:
                 s.sessions = tmux.scan_claude_sessions()
@@ -616,46 +656,51 @@ def _listen_tick(s):
                     s.smartfocus_target_wid = None
                     s.smartfocus_prev_lines = []
                     s.smartfocus_seeded = False
+                    s.smartfocus_tail = None
                     smartfocus_state = None
             if smartfocus_state:
                 _sfinfo = s.sessions.get(sfw)
-                _sfprofile = profiles.get_profile(_sfinfo.cli) if _sfinfo and hasattr(_sfinfo, 'cli') else None
-                # Refresh width each tick (see focus block) to avoid a
-                # resize rewrapping the whole buffer into a spurious repeat.
-                s.smartfocus_pane_width = tmux._get_pane_width(sfp)
-                raw = tmux._capture_pane(sfp, _FOCUS_CAPTURE_LINES)
-                canon = content._focus_canonical_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
-                _sf_debug = config._is_debug_enabled()
-                if _sf_debug:
-                    config._debug_log(f"[sf:{sfw}] canon={len(canon)} prev={len(s.smartfocus_prev_lines)} seeded={s.smartfocus_seeded}")
-                    config._debug_log(f"[sf:{sfw}] canon_tail: {canon[-5:]}")
-                if s.smartfocus_seeded:
-                    new = content._compute_new_lines(s.smartfocus_prev_lines, canon)
+                _sfcli = _sfinfo.cli if _sfinfo and hasattr(_sfinfo, 'cli') else "claude"
+                _sfprofile = profiles.get_profile(_sfcli)
+                if s.smartfocus_tail is None:
+                    s.smartfocus_tail = _resolve_focus_tail(sfw, _sfcli)
+                if s.smartfocus_tail is not None:
+                    new = s.smartfocus_tail.poll()
                     if new:
                         new_text = "\n".join(new).strip()
-                        if _sf_debug:
-                            config._debug_log(f"[sf:{sfw}] delta={len(new)}: {new[:10]}")
-                        # Skip trivial deltas (just emoji/symbols, no real text)
-                        if new_text and not re.search(r'[a-zA-Z0-9]{2,}', new_text):
-                            if _sf_debug:
-                                config._debug_log(f"[sf:{sfw}] trivial skip: {new_text[:200]}")
-                            new_text = ""
                         if new_text and new_text != s.smartfocus_last_sent:
-                            config._log("smartfocus", f"sending {len(new)} new lines for {sfw}")
+                            config._log("smartfocus", f"sending {len(new)} new lines for {sfw} (transcript)")
                             header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
                             telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                             s.smartfocus_has_sent = True
                             s.smartfocus_last_sent = new_text
-                        elif _sf_debug and new_text:
-                            config._debug_log(f"[sf:{sfw}] dedup skip: {new_text[:200]}")
-                s.smartfocus_prev_lines = canon
-                s.smartfocus_seeded = True
+                else:
+                    # Fallback: pane-diff (Gemini, or transcript not yet known).
+                    s.smartfocus_pane_width = tmux._get_pane_width(sfp)
+                    raw = tmux._capture_pane(sfp, _FOCUS_CAPTURE_LINES)
+                    canon = content._focus_canonical_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
+                    if s.smartfocus_seeded:
+                        new = content._compute_new_lines(s.smartfocus_prev_lines, canon)
+                        if new:
+                            new_text = "\n".join(new).strip()
+                            # Skip trivial deltas (just emoji/symbols, no real text)
+                            if new_text and not re.search(r'[a-zA-Z0-9]{2,}', new_text):
+                                new_text = ""
+                            if new_text and new_text != s.smartfocus_last_sent:
+                                config._log("smartfocus", f"sending {len(new)} new lines for {sfw}")
+                                header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
+                                telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
+                                s.smartfocus_has_sent = True
+                                s.smartfocus_last_sent = new_text
+                    s.smartfocus_prev_lines = canon
+                    s.smartfocus_seeded = True
     elif s.smartfocus_target_wid:
         s.smartfocus_target_wid = None
         s.smartfocus_prev_lines = []
         s.smartfocus_seeded = False
         s.smartfocus_has_sent = False
         s.smartfocus_last_sent = ""
+        s.smartfocus_tail = None
 
     # --- Deep focus monitoring (streams all output) ---
     if deepfocus_state:
