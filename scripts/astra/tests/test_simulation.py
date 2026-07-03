@@ -415,8 +415,9 @@ class TestSmartfocusAcrossTicks(SimTestBase):
 
     def test_smartfocus_bullet_toggle_not_resent(self):
         """The reported w2 flood: a RUNNING Bash tool whose leading bullet
-        toggles ●↔blank while its timer ticks was re-sent every ~5s poll. The
-        in-progress tool is now suppressed → it never streams."""
+        toggles ●↔blank while its timer ticks was re-sent every ~5s poll.
+        Canonicalization makes it one stable 🔧 header → sent once, never
+        churns (no repeats, no in/out oscillation)."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
         self.h.tg.inject_text_message("w4a run it")
@@ -433,49 +434,44 @@ class TestSmartfocusAcrossTicks(SimTestBase):
             self.h.clock.advance(3)  # next poll tick each frame
             self.h.tick(s)
 
-        assert len(self.h.tg.find_sent("👁")) == 0, \
-            f"in-progress tool streamed: {self.h.dump_timeline()}"
+        eye = self.h.tg.find_sent("👁")
+        assert len(eye) <= 1, f"tool header churned: {self.h.dump_timeline()}"
+        # The whole-run history shows the header at most once.
+        joined = "\n".join(m["text"] for m in eye)
+        assert joined.count("Bash(run the whole suite)") <= 1, self.h.dump_timeline()
 
-    def test_smartfocus_completed_tool_sent_once(self):
-        """A tool is suppressed while running, then its completion + the
-        narration after it is streamed exactly once (not repeatedly)."""
+    def test_smartfocus_running_tool_shown_once_stable(self):
+        """A tool appears once as a stable 🔧 header and is not re-sent as it
+        runs to completion (no oscillation → no repeat/omit)."""
         self.h.tmux.add_session("4", "%20", "myproject", idle=True)
         s = self.h.make_listener_state()
         self.h.tg.inject_text_message("w4a build")
         self.h.tick(s)
         state._clear_busy("w4a")
 
-        # Some narration exists above the tool from the start (the baseline).
         base = "● Building the project now.\n"
         self.h.tmux.set_pane_content("4", base)
         self.h.clock.advance(3)
         self.h.tick(s)
         self.h.tg.clear_sent()
 
-        # Tool runs across several polls — suppressed.
-        for t in ("2s", "7s", "12s"):
-            self.h.tmux.set_pane_content("4",
-                base + f"● Bash(make all)\n  ⎿  Running… ({t})\n")
+        # Tool runs across several polls (timer ticks), then completes + narrates.
+        seq = [
+            base + "● Bash(make all)\n  ⎿  Running… (2s)\n",
+            base + "● Bash(make all)\n  ⎿  Running… (7s)\n",
+            base + "● Bash(make all)\n  ⎿  Running… (12s)\n",
+            base + "● Bash(make all)\n  ⎿  Build OK\n● The build succeeded.\n",
+            base + "● Bash(make all)\n  ⎿  Build OK\n● The build succeeded.\n",
+        ]
+        for content_str in seq:
+            self.h.tmux.set_pane_content("4", content_str)
             self.h.clock.advance(3)
             self.h.tick(s)
-        assert len(self.h.tg.find_sent("👁")) == 0, "running tool should be suppressed"
 
-        # Completes + Claude narrates.
-        done = base + "● Bash(make all)\n  ⎿  Build OK\n● The build succeeded.\n"
-        self.h.tmux.set_pane_content("4", done)
-        self.h.clock.advance(1)
-        self.h.tick(s)
-        self.h.clock.advance(3)
-        self.h.tick(s)
-        after_complete = len(self.h.tg.find_sent("👁"))
-        assert after_complete >= 1, f"completion not sent: {self.h.dump_timeline()}"
-
-        # Keep polling the unchanged completed pane — no further sends.
-        for _ in range(3):
-            self.h.clock.advance(3)
-            self.h.tick(s)
-        assert len(self.h.tg.find_sent("👁")) == after_complete, \
-            f"completed tool re-sent: {self.h.dump_timeline()}"
+        joined = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
+        # Tool header and the narration each appear exactly once — no repeats.
+        assert joined.count("Bash(make all)") == 1, self.h.dump_timeline()
+        assert joined.count("The build succeeded") == 1, self.h.dump_timeline()
 
     def test_smartfocus_clears_on_stop(self):
         """Smartfocus state is cleared when stop signal is processed."""

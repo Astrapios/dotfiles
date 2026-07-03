@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.37.2
+
+- **Remove in-progress-tool suppression (0.37.0 Layer 3) — it caused the repeats/omits, not fixed them.** Live debug on a running tool showed canon oscillating `224 → 223 → 224`: `_running_tool_cut` classifies a tool as "running" inconsistently across its lifecycle (no `⎿ Running…` marker at start, present mid-run, gone at completion), so the collapsed `🔧 header` flips in and out of the diff baseline each tick — reappearing = a **repeat**, disappearing = an **omit**. The suppression can't be made stable from a single capture. Removed it. Canonicalization (Layer 1) already makes a running tool a single **stable** `🔧 Name(args)` line (bullet-toggle normalized, `⎿ Running…`/timer body filtered and collapsed away), so a tool now appears **exactly once** when it starts and never churns — the actual "no repeats" goal, without the oscillation. Verified live: canon holds steady across ticks on the fixed build where the old build flip-flopped. Focus is now just: canonicalize-before-diff + immediate per-poll send. (Removes `_running_tool_cut`/`_region_is_running`/`_is_tool_header_line`.)
+
 ## 0.37.1
 
 - **Remove the focus settle-debounce added in 0.37.0 — it made focus feel broken (laggy/stalled).** The debounce held every focus/smartfocus update until the pane was stable ~2s, and up to 15s during continuous work, so updates arrived in delayed batches instead of streaming. It was defense-in-depth that wasn't needed: **canonicalize-before-diff (Layer 1) already eliminates the repeat churn on its own** — a toggling bullet / ticking timer produces an identical canonical line tick-to-tick, so the diff yields nothing regardless of timing. Focus/smartfocus now send immediately again (per poll), while staying repeat-free (canonicalize) and free of in-progress-tool churn (suppression, Layer 3, retained). deepfocus keeps its own debounce (unchanged). The single-slot `last_sent` still guards immediate full-block repeats.

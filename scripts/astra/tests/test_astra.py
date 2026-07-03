@@ -8852,31 +8852,6 @@ class TestCollapseBulletStates:
         assert astra._collapse_tool_calls(["● Frobnicate(y)"]) == ["🔧 Frobnicate(y)"]
 
 
-class TestRunningToolCut:
-    """_running_tool_cut drops an in-progress tool at the bottom of the pane."""
-
-    def test_cuts_foreground_running(self):
-        lines = ["● Bash(run suite)", "  ⎿  Running… (1m 5s)"]
-        assert astra._running_tool_cut(lines, None) == 0
-
-    def test_cuts_background_running_with_timer(self):
-        lines = ["● Bash(run x)", "  ⎿  Running in the background (↓ to manage)", "     (1m 37s)"]
-        assert astra._running_tool_cut(lines, None) == 0
-
-    def test_keeps_completed_tool(self):
-        lines = ["● Bash(run suite)", "  ⎿  160 passed in 3s"]
-        assert astra._running_tool_cut(lines, None) == len(lines)
-
-    def test_keeps_completed_bg_with_trailing_timeout(self):
-        # a settled background tool shows "⎿ (timeout 10m)" but is complete
-        lines = ["● Bash(run x)", "  ⎿  launched", "  ⎿  (timeout 10m)"]
-        assert astra._running_tool_cut(lines, None) == len(lines)
-
-    def test_no_tool_no_cut(self):
-        lines = ["● Some plain response", "more text"]
-        assert astra._running_tool_cut(lines, None) == len(lines)
-
-
 class TestFocusCanonicalStable:
     """The whole point: cosmetic churn produces no diff once canonicalized."""
 
@@ -8888,13 +8863,23 @@ class TestFocusCanonicalStable:
         assert a == b
         assert astra._compute_new_lines(a, b) == []
 
-    def test_running_tool_absent_until_complete(self):
+    def test_tool_header_stable_running_vs_complete(self):
+        # A tool collapses to the SAME stable header whether running or done,
+        # so it never oscillates in/out of canon (the repeat/omit cause).
         running = "● Prev text\n● Bash(run x)\n  ⎿  Running… (1m 2s)\n❯ "
         complete = "● Prev text\n● Bash(run x)\n  ⎿  done\n❯ "
         can_run = astra._focus_canonical_lines(running, 0, None)
         can_done = astra._focus_canonical_lines(complete, 0, None)
-        assert "🔧 Bash(run x)" not in can_run   # suppressed while running
-        assert "🔧 Bash(run x)" in can_done       # appears once complete
+        assert "🔧 Bash(run x)" in can_run
+        assert "🔧 Bash(run x)" in can_done
+        # identical canon → no delta as the tool transitions running→complete
+        assert astra._compute_new_lines(can_run, can_done) == []
+
+    def test_timer_tick_yields_no_delta(self):
+        # the elapsed timer ticking must not produce a delta
+        a = astra._focus_canonical_lines("● Bash(run x)\n  ⎿  Running… (1m 2s)\n❯ ", 0, None)
+        b = astra._focus_canonical_lines("● Bash(run x)\n  ⎿  Running… (1m 7s)\n❯ ", 0, None)
+        assert astra._compute_new_lines(a, b) == []
 
 
 if __name__ == "__main__":

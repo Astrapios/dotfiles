@@ -19,9 +19,6 @@ _SURVEY_MARKER = 'How is Claude doing'
 # "(1m 31s · timeout 10m)", "(2m 4s · ↓ 6.1k tokens)". Shared by _filter_noise
 # (whole-line filter) and running-tool detection.
 _ELAPSED_TIMER_LINE_RE = re.compile(r'^\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\b.*\)$')
-# Live tool-execution marker under a tool header, e.g. "⎿ Running…",
-# "⎿ Running in the background". \s matches the NBSP these lines use.
-_RUNNING_MARKER_RE = re.compile(r'^⎿\s*Running\b')
 
 # Leading glyphs Claude cycles for the response/tool bullet while a line is
 # rendering/animating (settled ●, plus spinner/star frames). A torn repaint
@@ -61,58 +58,11 @@ def _match_claude_tool(s: str) -> str | None:
     return None
 
 
-def _is_tool_header_line(s: str, profile) -> bool:
-    """True if stripped line ``s`` starts a tool call for this profile."""
-    if profile is not None and profile.name == "gemini":
-        return s.startswith("╭")
-    return _match_claude_tool(s) is not None
-
-
-def _region_is_running(body_lines: list[str], profile) -> bool:
-    """Given the lines below a tool header, decide whether that tool is still
-    executing. A tool is running when its own body (up to the next bullet/
-    header) ends in a live marker: ``⎿ Running…`` or a bare ticking timer.
-    A settled result line (``⎿ 160 passed``, ``⎿ (timeout 10m)`` after output)
-    means complete."""
-    bullet = profile.response_bullet if profile else "●"
-    region = []
-    for ln in body_lines:
-        t = ln.strip()
-        if _is_tool_header_line(t, profile) or (bullet and t.startswith(bullet)):
-            break
-        region.append(t)
-    for t in reversed(region):
-        if not t:
-            continue
-        return bool(_RUNNING_MARKER_RE.match(t) or _ELAPSED_TIMER_LINE_RE.match(t))
-    return False
-
-
-def _running_tool_cut(raw_lines: list[str], profile) -> int:
-    """Return an index to truncate ``raw_lines`` at so an in-progress tool call
-    at the bottom is dropped entirely (header + body). If the trailing tool is
-    complete (or there is none), returns ``len(raw_lines)`` (no cut).
-
-    Cutting the running tool from the RAW capture — before filtering strips its
-    ``Running…``/timer markers — is Layer 3: in-progress tools never stream;
-    they appear once, when complete."""
-    hdr = None
-    for i in range(len(raw_lines) - 1, -1, -1):
-        if _is_tool_header_line(raw_lines[i].strip(), profile):
-            hdr = i
-            break
-    if hdr is None:
-        return len(raw_lines)
-    if _region_is_running(raw_lines[hdr + 1:], profile):
-        return hdr
-    return len(raw_lines)
-
-
 def _canonicalize_lines(lines: list[str]) -> list[str]:
     """Normalize cosmetic per-capture variation that would otherwise churn the
     diff, WITHOUT dropping or merging lines: NBSP→space and rstrip. (Bullet/
     tool-header normalization happens in _collapse_tool_calls; volatile status
-    lines are removed by _filter_noise or cut by _running_tool_cut.)"""
+    lines are removed by _filter_noise.)"""
     return [ln.replace("\u00a0", " ").rstrip() for ln in lines]
 
 
@@ -738,15 +688,15 @@ def _focus_canonical_lines(raw: str, pane_width: int = 0, profile=None) -> list[
     toggling bullet, or a ticking timer produces no delta.
 
       1. strip from the last prompt line to end (content boundary)
-      2. cut an in-progress tool call off the bottom (Layer 3 — never stream a
-         tool while it runs; it appears once, when complete)
-      3. _filter_noise (spinners/timers/chrome) + _join_wrapped_lines
-      4. _strip_dialog (permission overlay never becomes "new content")
-      5. _collapse_tool_calls (every bullet state → one 🔧 header)
-      6. _canonicalize_lines (NBSP/rstrip)
+      2. _filter_noise (spinners/timers/chrome) + _join_wrapped_lines
+      3. _strip_dialog (permission overlay never becomes "new content")
+      4. _collapse_tool_calls (every bullet state → one 🔧 header)
+      5. _canonicalize_lines (NBSP/rstrip)
 
-    Callers store the RESULT as their diff baseline (prev_lines), so a stable
-    tool header compares equal tick-over-tick.
+    A tool call collapses to a single stable ``🔧 Name(args)`` header whether
+    it is running or complete (its body/timer are filtered/collapsed away), so
+    it appears exactly once and never churns. Callers store the RESULT as their
+    diff baseline (prev_lines), so a stable line compares equal tick-over-tick.
     """
     if profile is None:
         from astra import profiles
@@ -757,7 +707,6 @@ def _focus_canonical_lines(raw: str, pane_width: int = 0, profile=None) -> list[
         if raw_lines[i].strip().startswith(prompt_char):
             raw_lines = raw_lines[:i]
             break
-    raw_lines = raw_lines[:_running_tool_cut(raw_lines, profile)]
     lines = _filter_noise("\n".join(raw_lines), profile=profile)
     if pane_width:
         lines = tmux._join_wrapped_lines(lines, pane_width)
