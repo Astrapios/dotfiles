@@ -73,16 +73,26 @@ def md_to_telegram_html(text: str) -> str:
 
     Fenced ``` code → <pre>; inline `code` → <code>; **/__ → bold; */_ → italic;
     ~~ → strike; [t](u) → link; #-headings → bold; -/*/+ bullets → •; and the
-    ``🔧 Name(args)`` tool-header lines → ``🔧 <b>Name</b> <code>args</code>``.
+    ``🔧 Name(args)`` tool lines are wrapped in a monospace code block
+    (``<pre>``) — runs of consecutive tool calls coalesce into one block — so
+    tool usage is visually distinct from prose, which stays formatted.
     """
     out: list[str] = []
+    tool_buf: list[str] = []
     in_fence = False
     fence_buf: list[str] = []
     fence_lang = ""
+
+    def _flush_tools():
+        if tool_buf:
+            out.append(f"<pre>{chr(10).join(tool_buf)}</pre>")
+            tool_buf.clear()
+
     for line in text.split("\n"):
         st = line.strip()
         fence = re.match(r"^```(\w*)\s*$", st)
         if fence and not in_fence:
+            _flush_tools()
             in_fence, fence_buf, fence_lang = True, [], fence.group(1)
             continue
         if in_fence:
@@ -94,11 +104,11 @@ def md_to_telegram_html(text: str) -> str:
             continue
         tm = _TOOL_LINE_RE.match(line)
         if tm:
-            name = _html.escape(tm.group(1))
-            arg = _html.escape(tm.group(2))
             icon = _tool_icon(tm.group(1))
-            out.append(f"{icon} <b>{name}</b> <code>{arg}</code>" if arg else f"{icon} <b>{name}</b>")
+            sig = f"{tm.group(1)}({tm.group(2)})" if tm.group(2) else tm.group(1)
+            tool_buf.append(_html.escape(f"{icon} {sig}"))
             continue
+        _flush_tools()  # a non-tool line ends the current tool-call run
         h = re.match(r"^(#{1,6})\s+(.*)$", line)
         if h:
             out.append(f"<b>{_render_inline_html(h.group(2))}</b>")
@@ -108,6 +118,7 @@ def md_to_telegram_html(text: str) -> str:
             out.append(f"{lm.group(1)}• {_render_inline_html(lm.group(2))}")
             continue
         out.append(_render_inline_html(line))
+    _flush_tools()
     if in_fence and fence_buf:  # unterminated fence
         out.append(_render_code_block(chr(10).join(fence_buf), fence_lang))
     return "\n".join(out)

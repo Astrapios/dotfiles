@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.39.2
+
+- **Tool calls now render inside a monospace code block, set apart from prose.** A focus message's tool usage (`🔧 Name(args)`) is wrapped in `<pre>` — and runs of consecutive tool calls coalesce into one block — so tool activity reads as a distinct boxed unit (with Telegram's copy button), while regular prose keeps its normal formatting (bold/lists/links). The per-tool emoji from 0.39.1 stays as the in-block marker (`<pre>💻 Bash(pytest -q)</pre>`).
+
 ## 0.39.1
 
 - **Color-code focus messages by type so tools and code stand out.** Telegram message text has no color API, so distinction is done with emoji + structure: each tool call now gets a **distinct icon by type** instead of a generic 🔧 — 💻 Bash, 📖 Read, ✏️ Edit, 🖊️ Write, 🔎 Grep/Search, 🗂️ Glob, 🌐 WebFetch/WebSearch, 🤖 Task, ☑️ TodoWrite, 📓 NotebookEdit, 📋 plan, ❓ AskUserQuestion (MCP tools key off their trailing segment; unknown tools keep 🔧). Fenced code blocks with a language now render as `<pre><code class="language-…">`, which Telegram shows as a distinct, language-labeled block with a copy button. (`content._tool_icon`, `content._render_code_block`.)

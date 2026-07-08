@@ -39,14 +39,15 @@ class TestMdToHtml:
 
     def test_tool_header_styled(self):
         assert content.md_to_telegram_html("🔧 Bash(ls | grep x)") == \
-            "💻 <b>Bash</b> <code>ls | grep x</code>"
+            "<pre>💻 Bash(ls | grep x)</pre>"
 
     def test_tool_header_no_args(self):
-        assert content.md_to_telegram_html("🔧 AskUserQuestion()") == "❓ <b>AskUserQuestion</b>"
+        assert content.md_to_telegram_html("🔧 AskUserQuestion()") == "<pre>❓ AskUserQuestion</pre>"
 
     def test_per_tool_icons(self):
         def icon(line):
-            return content.md_to_telegram_html(line).split(" ", 1)[0]
+            html = content.md_to_telegram_html(line)
+            return html.removeprefix("<pre>").split(" ", 1)[0]
         assert icon("🔧 Bash(x)") == "💻"
         assert icon("🔧 Read(x)") == "📖"
         assert icon("🔧 Edit(x)") == "✏️"
