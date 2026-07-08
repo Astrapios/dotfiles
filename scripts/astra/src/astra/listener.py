@@ -30,6 +30,14 @@ _RESCAN_INTERVAL = 60
 _FOCUS_CAPTURE_LINES = 1000
 
 
+def _focus_header_html(icon: str, wid: str, proj: str) -> str:
+    """Build a focus message header as Telegram HTML (the body is rendered as
+    HTML too, via telegram._send_long_html)."""
+    import html as _h
+    label = state._wid_label(wid).replace("`", "")
+    return f"{icon} <b>{_h.escape(label)}</b> (<code>{_h.escape(proj)}</code>):\n\n"
+
+
 def _resolve_focus_tail(wid: str, cli: str, include_results: bool = False):
     """Return a seeded ``transcript.TranscriptTail`` for a Claude session whose
     transcript path is known, else None (→ caller uses the pane-diff path).
@@ -605,8 +613,8 @@ def _listen_tick(s):
                     new_text = "\n".join(new).strip()
                     if new_text:
                         config._log("focus", f"sending {len(new)} new lines for {fw} (transcript)")
-                        header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
-                        telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+                        header = _focus_header_html("🔍", fw, fproj)
+                        telegram._send_long_html(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
             else:
                 # Fallback: pane-diff (Gemini, or transcript not yet known).
                 # Refresh width each tick: a stale width rewraps every line
@@ -620,8 +628,8 @@ def _listen_tick(s):
                         new_text = "\n".join(new).strip()
                         if new_text and new_text != s.focus_last_sent:
                             config._log("focus", f"sending {len(new)} new lines for {fw}")
-                            header = f"🔍 {state._wid_label(fw)} (`{fproj}`):\n\n"
-                            telegram._send_long_message(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+                            header = _focus_header_html("🔍", fw, fproj)
+                            telegram._send_long_html(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
                             s.focus_last_sent = new_text
                 s.focus_prev_lines = canon
                 s.focus_seeded = True
@@ -670,8 +678,8 @@ def _listen_tick(s):
                         new_text = "\n".join(new).strip()
                         if new_text and new_text != s.smartfocus_last_sent:
                             config._log("smartfocus", f"sending {len(new)} new lines for {sfw} (transcript)")
-                            header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                            telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
+                            header = _focus_header_html("👁", sfw, sfproj)
+                            telegram._send_long_html(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                             s.smartfocus_has_sent = True
                             s.smartfocus_last_sent = new_text
                 else:
@@ -688,8 +696,8 @@ def _listen_tick(s):
                                 new_text = ""
                             if new_text and new_text != s.smartfocus_last_sent:
                                 config._log("smartfocus", f"sending {len(new)} new lines for {sfw}")
-                                header = f"👁 {state._wid_label(sfw)} (`{sfproj}`):\n\n"
-                                telegram._send_long_message(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
+                                header = _focus_header_html("👁", sfw, sfproj)
+                                telegram._send_long_html(header, new_text, sfw, silent=state._is_silent(_CAT_MONITOR))
                                 s.smartfocus_has_sent = True
                                 s.smartfocus_last_sent = new_text
                     s.smartfocus_prev_lines = canon

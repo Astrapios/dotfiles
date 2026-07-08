@@ -619,12 +619,18 @@ def _debug_tick():
 
     collected: list[dict] = []
 
-    def fake_tg_send(text, chat_id="", reply_markup=None, silent=False):
-        collected.append({"type": "send", "text": text, "reply_markup": reply_markup, "silent": silent})
+    def fake_tg_send(text, chat_id="", reply_markup=None, silent=False, parse_mode="Markdown"):
+        collected.append({"type": "send", "text": text, "reply_markup": reply_markup,
+                          "silent": silent, "parse_mode": parse_mode})
         return len(collected)
 
     def fake_send_long(header, body, wid="", reply_markup=None, footer="", silent=False):
         collected.append({"type": "long", "header": header, "body": body, "footer": footer,
+                          "reply_markup": reply_markup, "silent": silent})
+        return len(collected)
+
+    def fake_send_long_html(header, body, wid="", reply_markup=None, silent=False):
+        collected.append({"type": "long", "header": header, "body": body, "footer": "",
                           "reply_markup": reply_markup, "silent": silent})
         return len(collected)
 
@@ -633,6 +639,7 @@ def _debug_tick():
 
     with mock_patch.object(telegram, "tg_send", side_effect=fake_tg_send), \
          mock_patch.object(telegram, "_send_long_message", side_effect=fake_send_long), \
+         mock_patch.object(telegram, "_send_long_html", side_effect=fake_send_long_html), \
          mock_patch.object(telegram, "_poll_updates", return_value=(None, 0)), \
          mock_patch.object(telegram, "_fire_and_forget", side_effect=fake_fire_and_forget), \
          mock_patch.object(telegram, "_answer_callback_query"), \

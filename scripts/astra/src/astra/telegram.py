@@ -83,19 +83,30 @@ class TelegramClient:
 _default_client = TelegramClient()
 
 
+def _strip_html_tags(text: str) -> str:
+    """Best-effort plain-text from Telegram HTML (for the 400 fallback)."""
+    import html as _html
+    return _html.unescape(re.sub(r"<[^>]+>", "", text))
+
+
 def tg_send(text: str, chat_id: str = "", reply_markup: dict | None = None,
-            silent: bool = False) -> int:
-    """Send a message to Telegram. Returns message_id."""
+            silent: bool = False, parse_mode: str = "Markdown") -> int:
+    """Send a message to Telegram. Returns message_id.
+
+    parse_mode is "Markdown" (default) or "HTML". On a 400 (bad entities), it
+    retries as plain text — stripping HTML tags first when parse_mode="HTML"
+    so the fallback never shows raw markup."""
     chat_id = chat_id or config.CHAT_ID
     text = text.strip()[:config.TG_MAX] or "(empty)"
-    payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     if silent:
         payload["disable_notification"] = True
     r = _default_client.api("POST", "sendMessage", json=payload, timeout=30)
     if r.status_code == 400:
-        payload_plain: dict = {"chat_id": chat_id, "text": text}
+        plain = _strip_html_tags(text) if parse_mode == "HTML" else text
+        payload_plain: dict = {"chat_id": chat_id, "text": plain}
         if reply_markup is not None:
             payload_plain["reply_markup"] = reply_markup
         if silent:
@@ -172,6 +183,65 @@ def _send_long_message(header: str, body: str, wid: str = "",
         config._render_bodies[last_msg_id] = raw_body
     if chunks:
         config._save_last_msg(wid, f"{header}```\n{chunks[0]}\n```")
+    return last_msg_id
+
+
+def _chunk_html(body_html: str, limit: int) -> list[str]:
+    """Chunk pre-rendered Telegram HTML to fit ``limit``. Each ``<pre>…</pre>``
+    block is an atomic unit (never split, so tags stay balanced); other content
+    packs by line. An oversized single unit is hard-truncated (rare)."""
+    parts = re.split(r"(<pre>.*?</pre>)", body_html, flags=re.DOTALL)
+    units: list[str] = []
+    for p in parts:
+        if not p:
+            continue
+        if p.startswith("<pre>"):
+            units.append(p)
+        else:
+            units.extend(p.split("\n"))
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for u in units:
+        ulen = len(u) + 1
+        if ulen > limit:
+            if cur:
+                chunks.append("\n".join(cur))
+                cur, cur_len = [], 0
+            chunks.append(u[:limit])
+            continue
+        if cur and cur_len + ulen > limit:
+            chunks.append("\n".join(cur))
+            cur, cur_len = [], 0
+        cur.append(u)
+        cur_len += ulen
+    if cur:
+        chunks.append("\n".join(cur))
+    return chunks or [""]
+
+
+def _send_long_html(header_html: str, body_md: str, wid: str = "",
+                    reply_markup: dict | None = None, silent: bool = False) -> int:
+    """Render Markdown-ish ``body_md`` to Telegram HTML and send it (chunked if
+    over the limit), with ``header_html`` (already HTML) on the first message.
+    Used by focus/smartfocus/deepfocus so prose reads normally and only real
+    code stays monospace."""
+    body_html = _content_mod.md_to_telegram_html(body_md)
+    has_table = _content_mod._has_table(body_md)
+    limit = config.TG_MAX - len(header_html) - 64
+    chunks = _chunk_html(body_html, limit)
+    last_msg_id = 0
+    total = len(chunks)
+    for i, chunk in enumerate(chunks):
+        label = header_html if i == 0 else f"(cont. {i + 1}/{total})\n"
+        is_last = i == total - 1
+        kb = _maybe_add_render_button(reply_markup, has_table) if is_last else None
+        last_msg_id = tg_send(f"{label}{chunk}", reply_markup=kb, silent=silent,
+                              parse_mode="HTML")
+    if has_table and last_msg_id:
+        config._render_bodies[last_msg_id] = body_md
+    if chunks:
+        config._save_last_msg(wid, f"{header_html}{chunks[0]}")
     return last_msg_id
 
 

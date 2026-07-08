@@ -32,7 +32,8 @@ class FakeTelegram:
 
     # --- I/O fakes ---
 
-    def tg_send(self, text, chat_id="", reply_markup=None, silent=False):
+    def tg_send(self, text, chat_id="", reply_markup=None, silent=False,
+                parse_mode="Markdown"):
         msg_id = self._next_msg_id
         self._next_msg_id += 1
         self.sent_messages.append({
@@ -40,6 +41,7 @@ class FakeTelegram:
             "text": text,
             "reply_markup": reply_markup,
             "silent": silent,
+            "parse_mode": parse_mode,
         })
         return msg_id
 

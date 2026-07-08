@@ -2,6 +2,7 @@
 
 Signal files live in config.SIGNAL_DIR as ``*.json`` (state files use ``_`` prefix).
 """
+import html as _html
 import json
 import os
 import re
@@ -16,6 +17,14 @@ _CAT_PERMISSION = 1
 _CAT_STOP = 2
 _CAT_QUESTION = 3
 _CAT_CONFIRM = 7
+
+
+def _finished_header_html(wid: str, project: str, dn: str = "") -> str:
+    """HTML header for the '✅ finished' stop message (body sent as HTML too)."""
+    lbl = state._wid_label(wid).replace("`", "") if wid else ""
+    lblh = f" <b>{_html.escape(lbl)}</b>" if lbl else ""
+    dnh = f" {_html.escape(dn)}" if dn else ""
+    return f"✅{lblh}{dnh} (<code>{_html.escape(project)}</code>) finished:\n\n"
 
 
 def _read_latest_plan() -> str:
@@ -212,7 +221,7 @@ def process_signals(focused_wids: set[str] | None = None,
                     collapsed = "\n".join(content._collapse_tool_calls(
                         cleaned.splitlines(), profile=profile)).strip()
                     if collapsed:
-                        header = f"✅{tag} (`{project}`) finished:\n\n"
+                        header = _finished_header_html(wid, project)
                         _stop_send_args = ("long", header, collapsed, wid, stop_kb, _stop_silent)
                     else:
                         _stop_send_args = ("short", f"✅{tag} (`{project}`) finished.", stop_kb, _stop_silent)
@@ -235,7 +244,7 @@ def process_signals(focused_wids: set[str] | None = None,
                     if not cleaned:
                         config._debug_log(f"[stop:{wid}] raw_tail: {raw.splitlines()[-10:] if raw else '(none)'}")
                 collapsed = "\n".join(content._collapse_tool_calls(cleaned.splitlines(), profile=profile)).strip() if cleaned else cleaned
-                header = f"✅{tag} {dn} (`{project}`) finished:\n\n"
+                header = _finished_header_html(wid, project, dn)
                 _stop_send_args = ("long", header, collapsed or cleaned, wid, stop_kb, state._is_silent(_CAT_STOP))
 
             # Extract suggestion text from prompt (before fire-and-forget)
@@ -265,7 +274,7 @@ def process_signals(focused_wids: set[str] | None = None,
                                _sug=_sug, _sug_wid=_sug_wid, _sug_tag=_sug_tag):
                     if _sa:
                         if _sa[0] == "long":
-                            telegram._send_long_message(_sa[1], _sa[2], _sa[3], reply_markup=_sa[4], silent=_sa[5])
+                            telegram._send_long_html(_sa[1], _sa[2], _sa[3], reply_markup=_sa[4], silent=_sa[5])
                         else:
                             telegram.tg_send(_sa[1], reply_markup=_sa[2], silent=_sa[3])
                     if _qp:

@@ -2,9 +2,89 @@
 from __future__ import annotations
 
 import difflib
+import html as _html
 import re
 
 from astra import tmux
+
+
+# --- Markdown → Telegram HTML rendering (for focus messages) ---------------
+# Telegram HTML supports a small tag set: b, i, u, s, code, pre, a, blockquote.
+# Converting Claude's Markdown to it (instead of dumping everything in one ```
+# block) makes focus messages readable: prose renders, only real code stays
+# monospace. HTML escaping is clean (only < > &), and tags are always balanced
+# by construction here, so output is valid; the send path still falls back to
+# plain text on any 400.
+
+def _render_inline_html(s: str) -> str:
+    """Render inline Markdown spans in one line to Telegram HTML."""
+    # Protect inline code spans first so their contents aren't mangled.
+    codes: list[str] = []
+
+    def _stash(m):
+        codes.append(m.group(1))
+        return f"\x00{len(codes) - 1}\x00"
+
+    s = re.sub(r"`([^`]+)`", _stash, s)
+    s = _html.escape(s)
+    # Links [text](url)
+    s = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)",
+               lambda m: f'<a href="{_html.escape(m.group(2), quote=True)}">{m.group(1)}</a>', s)
+    # Bold, then italic, then strikethrough. Markers survive html.escape.
+    s = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"__([^_\n]+)__", r"<b>\1</b>", s)
+    s = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?!\w)", r"<i>\1</i>", s)
+    s = re.sub(r"(?<![_\w])_([^_\n]+)_(?!\w)", r"<i>\1</i>", s)
+    s = re.sub(r"~~([^~\n]+)~~", r"<s>\1</s>", s)
+    for i, c in enumerate(codes):
+        s = s.replace(f"\x00{i}\x00", f"<code>{_html.escape(c)}</code>")
+    return s
+
+
+_TOOL_LINE_RE = re.compile(r"^🔧 (\S+?)\((.*)\)$")
+
+
+def md_to_telegram_html(text: str) -> str:
+    """Convert Claude's Markdown-ish text to Telegram HTML.
+
+    Fenced ``` code → <pre>; inline `code` → <code>; **/__ → bold; */_ → italic;
+    ~~ → strike; [t](u) → link; #-headings → bold; -/*/+ bullets → •; and the
+    ``🔧 Name(args)`` tool-header lines → ``🔧 <b>Name</b> <code>args</code>``.
+    """
+    out: list[str] = []
+    in_fence = False
+    fence_buf: list[str] = []
+    for line in text.split("\n"):
+        st = line.strip()
+        fence = re.match(r"^```(\w*)\s*$", st)
+        if fence and not in_fence:
+            in_fence, fence_buf = True, []
+            continue
+        if in_fence:
+            if st == "```":
+                out.append(f"<pre>{_html.escape(chr(10).join(fence_buf))}</pre>")
+                in_fence, fence_buf = False, []
+            else:
+                fence_buf.append(line)
+            continue
+        tm = _TOOL_LINE_RE.match(line)
+        if tm:
+            name = _html.escape(tm.group(1))
+            arg = _html.escape(tm.group(2))
+            out.append(f"🔧 <b>{name}</b> <code>{arg}</code>" if arg else f"🔧 <b>{name}</b>")
+            continue
+        h = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if h:
+            out.append(f"<b>{_render_inline_html(h.group(2))}</b>")
+            continue
+        lm = re.match(r"^(\s*)[-*+]\s+(.*)$", line)
+        if lm:
+            out.append(f"{lm.group(1)}• {_render_inline_html(lm.group(2))}")
+            continue
+        out.append(_render_inline_html(line))
+    if in_fence and fence_buf:  # unterminated fence
+        out.append(f"<pre>{_html.escape(chr(10).join(fence_buf))}</pre>")
+    return "\n".join(out)
 
 
 _BOX_VERT = set("│║")

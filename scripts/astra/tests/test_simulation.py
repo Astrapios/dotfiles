@@ -470,7 +470,8 @@ class TestSmartfocusAcrossTicks(SimTestBase):
 
         joined = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
         # Tool header and the narration each appear exactly once — no repeats.
-        assert joined.count("Bash(make all)") == 1, self.h.dump_timeline()
+        # (tool header rendered as Telegram HTML)
+        assert joined.count("<b>Bash</b> <code>make all</code>") == 1, self.h.dump_timeline()
         assert joined.count("The build succeeded") == 1, self.h.dump_timeline()
 
     def test_smartfocus_uses_transcript_when_available(self):
@@ -506,7 +507,8 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         self.h.tick(s)
         sent = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
         assert "Working on it" in sent, self.h.dump_timeline()
-        assert "🔧 Bash(ls -la)" in sent, self.h.dump_timeline()
+        # rendered as Telegram HTML (styled tool header)
+        assert "🔧 <b>Bash</b> <code>ls -la</code>" in sent, self.h.dump_timeline()
 
         # No new records → no repeat
         n = len(self.h.tg.find_sent("👁"))

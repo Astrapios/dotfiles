@@ -778,8 +778,8 @@ class TestProcessSignals(unittest.TestCase):
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         self.assertIn("finished", msg)
-        self.assertIn("`test_project`", msg)
-        self.assertIn("```", msg)  # content in pre block
+        self.assertIn("<code>test_project</code>", msg)  # HTML header
+        self.assertIn("Here is the answer", msg)  # content rendered (no code fence here)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.tmux, "get_pane_project", return_value="test_proj")
@@ -3634,7 +3634,7 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         mock_send.assert_called_once()
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  42\n❯ prompt"))
@@ -3652,7 +3652,7 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         self.assertIsNone(astra.state._load_smartfocus_state())
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n  line2\n  new stuff\n❯ prompt"))
@@ -3672,7 +3672,7 @@ class TestProcessSignalsFocusedWids(unittest.TestCase):
         self.assertIn("line1", body)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
@@ -3737,7 +3737,7 @@ class TestProcessSignalsWithNames(unittest.TestCase):
         self._write_signal("stop")
         astra.process_signals()
         msg = mock_send.call_args[0][0]
-        self.assertIn("`w4a [auth]`", msg)
+        self.assertIn("<b>w4a [auth]</b>", msg)  # HTML header
 
 
 class TestHelpIncludesNewCommands(unittest.TestCase):
@@ -7111,7 +7111,7 @@ class TestSmartfocusColdStart(unittest.TestCase):
             json.dump(signal, f)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  the full response\n❯ prompt"))
@@ -7129,7 +7129,7 @@ class TestSmartfocusColdStart(unittest.TestCase):
         self.assertIn("the full response", body)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
@@ -7146,7 +7146,7 @@ class TestSmartfocusColdStart(unittest.TestCase):
         self.assertIn("line1", body)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Answer\n  line1\n❯ prompt"))
@@ -7164,7 +7164,7 @@ class TestSmartfocusColdStart(unittest.TestCase):
 
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    @patch.object(astra.telegram, "_send_long_message")
+    @patch.object(astra.telegram, "_send_long_html")
     @patch.object(astra.telegram, "_build_inline_keyboard", return_value=None)
     @patch.object(astra.tmux, "get_pane_project", return_value="proj")
     @patch("subprocess.run", return_value=MagicMock(stdout="● Here is my analysis of the images:\n  Image 1 shows a dog.\n  Image 2 shows a cat.\n❯ prompt"))

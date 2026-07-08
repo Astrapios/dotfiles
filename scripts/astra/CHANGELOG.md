@@ -5,6 +5,13 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.39.0
+
+- **Focus messages are now formatted, not dumped in a raw code block.** Previously every focus/smartfocus and "✅ finished" message wrapped its whole body in one ``` block, so Claude's Markdown (`**bold**`, `- lists`, `## headings`, `` `code` ``) showed as literal characters in monospace. They now render as **Telegram HTML**: prose reads normally, bullets/headings/bold/italic/links render, tool calls show as `🔧 <b>Name</b> <code>args</code>`, and only real fenced code stays monospace (`<pre>`).
+  - New `content.md_to_telegram_html()` converts Claude's Markdown to Telegram's HTML subset (protects code spans, escapes `< > &`, then applies bold/italic/strike/links/headings/bullets). Tags are balanced by construction, so output is valid; `tg_send(parse_mode="HTML")` still falls back to tag-stripped plain text on any 400.
+  - New `telegram._send_long_html()` renders + chunks (keeping `<pre>` blocks atomic across splits) and is used by focus/smartfocus and the stop "finished" message. `tg_send` gained a `parse_mode` argument.
+  - Scope: focus family + the finished message (all Claude-response content). deepfocus (a raw pane firehose) stays monospace; permission dialogs / `/status` / routing receipts keep the audited Markdown path unchanged.
+
 ## 0.38.0
 
 - **Focus/smartfocus now stream from Claude's structured session transcript (JSONL) instead of scraping the pane — the robust fix the multi-agent review converged on.** Claude Code appends one JSON record per event to `~/.claude/projects/<cwd-slug>/<sessionId>.jsonl`; that append-only file is the ground truth the TUI renders *from*, with no spinners, timers, wrapping, bullet animation, or torn frames. Tailing it by byte offset makes focus repeat-free and omit-free **by construction** — the entire 0.36.x/0.37.x pane-diff failure class becomes structurally impossible, and future Claude UI restyles can't break focus.
