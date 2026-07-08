@@ -43,6 +43,30 @@ def _render_inline_html(s: str) -> str:
 
 _TOOL_LINE_RE = re.compile(r"^🔧 (\S+?)\((.*)\)$")
 
+# Distinct colored emoji per tool type so a tool call is recognizable at a
+# glance (Telegram message text has no real color; the emoji is the "color").
+# Matched case-insensitively on the tool name; MCP names use their suffix.
+_TOOL_ICONS = {
+    "bash": "💻", "bashoutput": "💻", "killshell": "💻", "killbash": "💻",
+    "read": "📖", "edit": "✏️", "multiedit": "✏️", "update": "✏️",
+    "write": "🖊️", "notebookedit": "📓",
+    "glob": "🗂️", "grep": "🔎", "search": "🔎",
+    "webfetch": "🌐", "fetch": "🌐", "websearch": "🌐",
+    "task": "🤖", "todowrite": "☑️",
+    "enterplanmode": "📋", "exitplanmode": "📋", "askuserquestion": "❓",
+    "skill": "⚡", "slashcommand": "⚡",
+}
+
+
+def _tool_icon(name: str) -> str:
+    """Pick a distinct emoji for a tool name (falls back to 🔧)."""
+    key = name.lower()
+    if key in _TOOL_ICONS:
+        return _TOOL_ICONS[key]
+    # MCP tools render as mcp__server__tool — key off the trailing segment.
+    tail = key.rsplit("__", 1)[-1]
+    return _TOOL_ICONS.get(tail, "🔧")
+
 
 def md_to_telegram_html(text: str) -> str:
     """Convert Claude's Markdown-ish text to Telegram HTML.
@@ -54,16 +78,17 @@ def md_to_telegram_html(text: str) -> str:
     out: list[str] = []
     in_fence = False
     fence_buf: list[str] = []
+    fence_lang = ""
     for line in text.split("\n"):
         st = line.strip()
         fence = re.match(r"^```(\w*)\s*$", st)
         if fence and not in_fence:
-            in_fence, fence_buf = True, []
+            in_fence, fence_buf, fence_lang = True, [], fence.group(1)
             continue
         if in_fence:
             if st == "```":
-                out.append(f"<pre>{_html.escape(chr(10).join(fence_buf))}</pre>")
-                in_fence, fence_buf = False, []
+                out.append(_render_code_block(chr(10).join(fence_buf), fence_lang))
+                in_fence, fence_buf, fence_lang = False, [], ""
             else:
                 fence_buf.append(line)
             continue
@@ -71,7 +96,8 @@ def md_to_telegram_html(text: str) -> str:
         if tm:
             name = _html.escape(tm.group(1))
             arg = _html.escape(tm.group(2))
-            out.append(f"🔧 <b>{name}</b> <code>{arg}</code>" if arg else f"🔧 <b>{name}</b>")
+            icon = _tool_icon(tm.group(1))
+            out.append(f"{icon} <b>{name}</b> <code>{arg}</code>" if arg else f"{icon} <b>{name}</b>")
             continue
         h = re.match(r"^(#{1,6})\s+(.*)$", line)
         if h:
@@ -83,8 +109,18 @@ def md_to_telegram_html(text: str) -> str:
             continue
         out.append(_render_inline_html(line))
     if in_fence and fence_buf:  # unterminated fence
-        out.append(f"<pre>{_html.escape(chr(10).join(fence_buf))}</pre>")
+        out.append(_render_code_block(chr(10).join(fence_buf), fence_lang))
     return "\n".join(out)
+
+
+def _render_code_block(code: str, lang: str = "") -> str:
+    """Render a fenced code block as Telegram HTML. A language tag uses
+    ``<pre><code class="language-x">`` so Telegram shows it as a distinct,
+    language-labeled block with a copy button."""
+    body = _html.escape(code)
+    if lang:
+        return f'<pre><code class="language-{_html.escape(lang)}">{body}</code></pre>'
+    return f"<pre>{body}</pre>"
 
 
 _BOX_VERT = set("│║")

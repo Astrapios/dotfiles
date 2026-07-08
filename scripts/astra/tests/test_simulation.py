@@ -508,7 +508,7 @@ class TestSmartfocusAcrossTicks(SimTestBase):
         sent = "\n".join(m["text"] for m in self.h.tg.find_sent("👁"))
         assert "Working on it" in sent, self.h.dump_timeline()
         # rendered as Telegram HTML (styled tool header)
-        assert "🔧 <b>Bash</b> <code>ls -la</code>" in sent, self.h.dump_timeline()
+        assert "💻 <b>Bash</b> <code>ls -la</code>" in sent, self.h.dump_timeline()
 
         # No new records → no repeat
         n = len(self.h.tg.find_sent("👁"))

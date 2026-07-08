@@ -35,14 +35,24 @@ class TestMdToHtml:
 
     def test_fenced_with_language_marker(self):
         out = content.md_to_telegram_html("```python\nprint(1)\n```")
-        assert out == "<pre>print(1)</pre>"
+        assert out == '<pre><code class="language-python">print(1)</code></pre>' 
 
     def test_tool_header_styled(self):
         assert content.md_to_telegram_html("🔧 Bash(ls | grep x)") == \
-            "🔧 <b>Bash</b> <code>ls | grep x</code>"
+            "💻 <b>Bash</b> <code>ls | grep x</code>"
 
     def test_tool_header_no_args(self):
-        assert content.md_to_telegram_html("🔧 AskUserQuestion()") == "🔧 <b>AskUserQuestion</b>"
+        assert content.md_to_telegram_html("🔧 AskUserQuestion()") == "❓ <b>AskUserQuestion</b>"
+
+    def test_per_tool_icons(self):
+        def icon(line):
+            return content.md_to_telegram_html(line).split(" ", 1)[0]
+        assert icon("🔧 Bash(x)") == "💻"
+        assert icon("🔧 Read(x)") == "📖"
+        assert icon("🔧 Edit(x)") == "✏️"
+        assert icon("🔧 WebFetch(x)") == "🌐"
+        assert icon("🔧 mcp__srv__grep(x)") == "🔎"   # MCP suffix mapped
+        assert icon("🔧 Frobnicate(x)") == "🔧"       # unknown → default wrench
 
     def test_stray_markers_literal(self):
         # unpaired * / _ stay literal (don't produce dangling tags)

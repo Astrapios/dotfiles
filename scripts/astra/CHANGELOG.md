@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.39.1
+
+- **Color-code focus messages by type so tools and code stand out.** Telegram message text has no color API, so distinction is done with emoji + structure: each tool call now gets a **distinct icon by type** instead of a generic 🔧 — 💻 Bash, 📖 Read, ✏️ Edit, 🖊️ Write, 🔎 Grep/Search, 🗂️ Glob, 🌐 WebFetch/WebSearch, 🤖 Task, ☑️ TodoWrite, 📓 NotebookEdit, 📋 plan, ❓ AskUserQuestion (MCP tools key off their trailing segment; unknown tools keep 🔧). Fenced code blocks with a language now render as `<pre><code class="language-…">`, which Telegram shows as a distinct, language-labeled block with a copy button. (`content._tool_icon`, `content._render_code_block`.)
+
 ## 0.39.0
 
 - **Focus messages are now formatted, not dumped in a raw code block.** Previously every focus/smartfocus and "✅ finished" message wrapped its whole body in one ``` block, so Claude's Markdown (`**bold**`, `- lists`, `## headings`, `` `code` ``) showed as literal characters in monospace. They now render as **Telegram HTML**: prose reads normally, bullets/headings/bold/italic/links render, tool calls show as `🔧 <b>Name</b> <code>args</code>`, and only real fenced code stays monospace (`<pre>`).
