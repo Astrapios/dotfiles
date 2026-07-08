@@ -4124,6 +4124,30 @@ class TestPaneIdleState(unittest.TestCase):
         self.assertEqual(typed, "")
 
     @patch.object(astra.tmux, "_capture_pane")
+    def test_idle_with_git_branch_footer(self, mock_capture):
+        """Claude's footer status bar (git branch "● main", background-agent
+        line) below the prompt must not read as output → pane is idle."""
+        mock_capture.return_value = (
+            "● Here is the result.\n"
+            "───────────────────────────\n"
+            "❯ \n"
+            "───────────────────────────\n"
+            "  ⏵⏵ accept edits on (shift+tab to cycle) · ← for agents\n"
+            "  ● main\n"
+            "  ◐ sar-physics-reviewer  review branch    9m 46s · ↓ 79.6k tokens\n"
+        )
+        is_idle, typed = astra._pane_idle_state("0:0.0")
+        self.assertTrue(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
+    def test_git_branch_not_confused_with_response_bullet(self, mock_capture):
+        """A real ●-response bullet above a bottom prompt still means busy
+        (branch heuristic must not over-match multi-word bullets)."""
+        mock_capture.return_value = "❯ old\n● Here is my ongoing response text\n  more\n"
+        is_idle, _ = astra._pane_idle_state("0:0.0")
+        self.assertFalse(is_idle)
+
+    @patch.object(astra.tmux, "_capture_pane")
     def test_idle_with_ui_chrome_below(self, mock_capture):
         """❯ prompt followed by separator and hint lines should be idle."""
         mock_capture.return_value = (

@@ -101,6 +101,13 @@ def _is_ui_chrome(s: str, profile=None) -> bool:
     # Shell management hint: "1 shell · ↓ to manage"
     if re.match(r'^\d+ shells? ', s) and '↓' in s:
         return True
+    # Git-branch indicator in Claude's footer status bar: "● main",
+    # "● jisu/dof*". A single branch-like token after the bullet (no spaces)
+    # distinguishes it from a real response bullet ("● Here is …"), which the
+    # idle scan must NOT skip. Without this the branch line reads as output
+    # content and an idle pane is reported busy.
+    if re.match(r'^● [\w][\w./+-]*\*?$', s):
+        return True
     # Status bar with text: ────text──── pattern (dashes on both sides)
     if re.match(r'^[─━]{2,}.+[─━]{2,}$', s):
         return True

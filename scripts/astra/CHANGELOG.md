@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.39.4
+
+- **Fix idle sessions reported as busy.** Claude Code's newer footer status bar shows a git-branch line (`● main`) below the input prompt. The idle detector (`routing._pane_idle_state`) scans bottom-up and treats any `●`-prefixed line as response output, so it hit `● main` and returned "busy" before reaching the `❯` prompt. `_is_ui_chrome` now recognizes the branch line — a bullet followed by a single branch-like token with no spaces (`● main`, `● jisu/dof*`) — as footer chrome, while real response bullets (`● Here is …`) and tool calls (`● Bash(…)`) are still treated as content. (The background-agent footer line was already handled via its timing.)
+
 ## 0.39.3
 
 - **Fix tool calls escaping the code block / appearing dropped.** Tool-line detection required the line to end in `)`, so a tool with a multi-line argument (a wrapped Bash command) or a trailing bit (an `Update(file)` line with a `⎿ result` / "with N additions" tail) failed to match and rendered as prose *outside* the block — or, on the pane path, got mangled so the tool looked missing. Two fixes: (1) the transcript renderer collapses a tool's summary to a single line (and caps its length), so `🔧 Name(…)` never splits; (2) `md_to_telegram_html` now detects a tool line by its `🔧 Name(` prefix only (not a trailing `)`) and renders the rest verbatim, so truncated/tailed headers still land inside the tool block.

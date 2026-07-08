@@ -161,8 +161,8 @@ packages:
   timestamp: 1770939786096
 - pypi: ./
   name: astra
-  version: 0.39.3
-  sha256: 1a2f984292d6ebe5d997e73329280d46ec3c0a26303a7518ce450c1e7d66ee6b
+  version: 0.39.4
+  sha256: e760ae5ebc8328479667caadb3b484d3017d0d63ca4fee19c6a1689fa06c4677
   requires_dist:
   - requests>=2.28
   requires_python: '>=3.11'
