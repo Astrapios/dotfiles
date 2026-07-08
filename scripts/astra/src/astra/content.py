@@ -41,7 +41,11 @@ def _render_inline_html(s: str) -> str:
     return s
 
 
-_TOOL_LINE_RE = re.compile(r"^🔧 (\S+?)\((.*)\)$")
+# Detect a tool line by its "🔧 Name(" prefix only — NOT requiring a closing
+# ")" at end — so a truncated/multi-part header (e.g. a wrapped command, or an
+# Update line with a trailing "⎿ result") still renders inside the tool block
+# instead of escaping to prose.
+_TOOL_LINE_RE = re.compile(r"^🔧 (\S+?)\(")
 
 # Distinct colored emoji per tool type so a tool call is recognizable at a
 # glance (Telegram message text has no real color; the emoji is the "color").
@@ -105,7 +109,9 @@ def md_to_telegram_html(text: str) -> str:
         tm = _TOOL_LINE_RE.match(line)
         if tm:
             icon = _tool_icon(tm.group(1))
-            sig = f"{tm.group(1)}({tm.group(2)})" if tm.group(2) else tm.group(1)
+            sig = line[2:]  # everything after "🔧 " → "Name(args)" (verbatim)
+            if sig.endswith("()"):
+                sig = sig[:-2]
             tool_buf.append(_html.escape(f"{icon} {sig}"))
             continue
         _flush_tools()  # a non-tool line ends the current tool-call run

@@ -30,6 +30,20 @@ class TestRenderRecord:
             [{"type": "tool_use", "name": "Read", "input": {"file_path": "/a/b.py"}}]))
         assert r == ["🔧 Read(/a/b.py)"]
 
+    def test_multiline_command_single_lined(self):
+        # a multi-line Bash command must collapse to one line so the
+        # "🔧 Name(...)" line doesn't split and break tool-block rendering
+        r = transcript.render_record(_assistant(
+            [{"type": "tool_use", "name": "Bash",
+              "input": {"command": "cd /foo &&\n  pytest -q &&\n  echo done"}}]))
+        assert r == ["🔧 Bash(cd /foo && pytest -q && echo done)"]
+        assert "\n" not in r[0]
+
+    def test_long_summary_truncated(self):
+        r = transcript.render_record(_assistant(
+            [{"type": "tool_use", "name": "Bash", "input": {"command": "x" * 500}}]))
+        assert len(r[0]) < 220 and r[0].endswith("…)")
+
     def test_thinking_skipped(self):
         r = transcript.render_record(_assistant([{"type": "thinking", "thinking": "hmm"}]))
         assert r == []

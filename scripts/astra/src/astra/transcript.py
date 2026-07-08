@@ -25,16 +25,22 @@ from astra import state
 def _tool_summary(name: str, tool_input: dict) -> str:
     if not isinstance(tool_input, dict):
         return ""
+    val = ""
     for key in ("command", "file_path", "notebook_path", "path", "url",
                 "query", "pattern", "description", "prompt"):
-        val = tool_input.get(key)
-        if val:
-            return str(val)
-    # Fall back to the first scalar value
-    for val in tool_input.values():
-        if isinstance(val, (str, int, float)):
-            return str(val)
-    return ""
+        if tool_input.get(key):
+            val = tool_input[key]
+            break
+    else:
+        # Fall back to the first scalar value
+        for v in tool_input.values():
+            if isinstance(v, (str, int, float)):
+                val = v
+                break
+    # Collapse to a single line (a multi-line command would otherwise split the
+    # "🔧 Name(...)" line and break tool-block rendering) and cap the length.
+    s = " ".join(str(val).split())
+    return s[:197] + "…" if len(s) > 198 else s
 
 
 def render_record(rec: dict, include_tool_results: bool = False) -> list[str]:

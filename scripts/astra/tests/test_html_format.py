@@ -55,6 +55,16 @@ class TestMdToHtml:
         assert icon("🔧 mcp__srv__grep(x)") == "🔎"   # MCP suffix mapped
         assert icon("🔧 Frobnicate(x)") == "🔧"       # unknown → default wrench
 
+    def test_tool_line_with_result_tail_stays_in_block(self):
+        # a header with trailing text (e.g. "⎿ result") must not escape to prose
+        out = content.md_to_telegram_html("🔧 Update(foo.py) ⎿  6 lines")
+        assert out == "<pre>✏️ Update(foo.py) ⎿  6 lines</pre>"
+
+    def test_truncated_tool_line_stays_in_block(self):
+        # a wrapped/truncated header (no closing paren) still renders in-block
+        out = content.md_to_telegram_html("🔧 Bash(cd /foo &&")
+        assert out == "<pre>💻 Bash(cd /foo &amp;&amp;</pre>"
+
     def test_stray_markers_literal(self):
         # unpaired * / _ stay literal (don't produce dangling tags)
         out = content.md_to_telegram_html("2 * 3 = 6 and a_variable_name")
