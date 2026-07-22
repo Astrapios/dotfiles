@@ -1830,6 +1830,17 @@ class TestHandleCommand(unittest.TestCase):
 
     def setUp(self):
         self.sessions = {"w4a": ("0:4.0", "myproj"), "w5a": ("0:5.0", "other")}
+        # Isolate SIGNAL_DIR: the no-session paths now save "unrouted" state,
+        # which must not touch the live /tmp/astra_signals.
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp(prefix="astra_hc_")
+        self._sigpatch = patch.object(astra.config, "SIGNAL_DIR", self._tmpdir)
+        self._sigpatch.start()
+
+    def tearDown(self):
+        self._sigpatch.stop()
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_help_command(self, mock_send):
@@ -2046,11 +2057,12 @@ class TestHandleCommand(unittest.TestCase):
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_no_prefix_multiple_sessions_no_last(self, mock_send):
-        """Multiple sessions, no last — asks user to specify."""
+        """Multiple sessions, no last — ambiguous, so saved for /saved."""
         action, _, _ = astra._handle_command(
             "hello", self.sessions, None)
         msg = mock_send.call_args[0][0]
-        self.assertIn("Multiple sessions", msg)
+        self.assertIn("saved", msg.lower())
+        self.assertEqual([m["text"] for m in astra._load_queued_msgs("unrouted")], ["hello"])
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent")
@@ -2084,18 +2096,23 @@ class TestHandleCommand(unittest.TestCase):
         mock_route.assert_called_once_with("0:4.0", "w4a", "focus on API", force=True)
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_no_sessions(self, mock_send):
-        action, _, _ = astra._handle_command(
-            "hello", {}, None)
+    def test_no_sessions_saves_unrouted(self, mock_send):
+        """With no session the message is saved (not discarded) for /saved."""
+        action, _, _ = astra._handle_command("hello", {}, None)
         msg = mock_send.call_args[0][0]
-        self.assertIn("No CLI sessions", msg)
+        self.assertIn("saved", msg.lower())
+        self.assertIn("/saved", msg)
+        self.assertEqual([m["text"] for m in astra._load_queued_msgs("unrouted")], ["hello"])
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
-    def test_wn_nonexistent_session(self, mock_send):
+    def test_wn_nonexistent_session_saves_unrouted(self, mock_send):
         action, _, _ = astra._handle_command(
-            "w99 hello", self.sessions, "4")
+            "w99 hello there", self.sessions, "4")
         msg = mock_send.call_args[0][0]
-        self.assertIn("No session at `w99`", msg)
+        self.assertIn("w99", msg)
+        self.assertIn("saved", msg.lower())
+        self.assertEqual(
+            [m["text"] for m in astra._load_queued_msgs("unrouted")], ["hello there"])
 
 
 class TestComputeNewLinesEdgeCases(unittest.TestCase):
@@ -3954,11 +3971,11 @@ class TestNamePrefixRouting(unittest.TestCase):
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     def test_unknown_word_falls_through(self, mock_send):
-        """Unknown first word with multiple sessions asks to specify."""
+        """Unknown first word with multiple sessions is ambiguous → saved."""
         action, _, _ = astra._handle_command(
             "randomword hello", self.sessions, None)
         msg = mock_send.call_args[0][0]
-        self.assertIn("Multiple sessions", msg)
+        self.assertIn("saved", msg.lower())
 
     @patch.object(astra.telegram, "tg_send", return_value=1)
     @patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4a`:\n`hello`")

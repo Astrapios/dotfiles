@@ -5,6 +5,12 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.40.0
+
+- **Messages sent with no routable session are now saved, not discarded — and can be directed to a session from `/saved`.** Previously a `wN …` to a nonexistent session, a message when no sessions exist, or an ambiguous unprefixed message (multiple sessions, no last-used) just got an error and was lost. Now the text is saved to an "unrouted" bucket with a `💾 … saved — send /saved to direct it` notice.
+  - **`/saved`** lists the unrouted bucket (`📥 unsent (no session)`) alongside per-session queues, and every saved message gets a **➡️ button** that opens a session-picker; tapping a session sends that message there and removes it from the bucket. Works for session-queued messages too (redirect to a different session).
+  - Implementation: unrouted messages reuse the existing queue store under a reserved `unrouted` key (persisted across restarts like other queues). New callbacks `svpick_{bucket}_{i}` (show picker) and `svto_{bucket}_{i}_{wid}` (send); the per-message/bulk callbacks now accept any bucket, not just a `wN`. New helpers `content`-side: `_bucket_label`, `_direct_pick_keyboard`, `_save_unrouted`.
+
 ## 0.39.4
 
 - **Fix idle sessions reported as busy.** Claude Code's newer footer status bar shows a git-branch line (`● main`) below the input prompt. The idle detector (`routing._pane_idle_state`) scans bottom-up and treats any `●`-prefixed line as response output, so it hit `● main` and returned "busy" before reaching the `❯` prompt. `_is_ui_chrome` now recognizes the branch line — a bullet followed by a single branch-like token with no spaces (`● main`, `● jisu/dof*`) — as footer chrome, while real response bullets (`● Here is …`) and tool calls (`● Bash(…)`) are still treated as content. (The background-agent footer line was already handled via its timing.)

@@ -143,7 +143,7 @@ Once the listener is running, send these from Telegram:
 | `/re wN` | Redirect the last message to `wN` — interrupts the window it was wrongly sent to (and unqueues it there), then resends the same text to `wN` |
 | `/keys wN key...` | Send keys (e.g. `/keys w4 down`, `/keys w4 shift+tab`); bare `/keys wN` shows a nav keypad (↑ ↓ Enter Esc Tab …) |
 | `/new [dir]` | Start a new Claude session |
-| `/saved [wN]` | Review queued messages; tap to send or delete each one individually, or send/discard all |
+| `/saved [wN]` | Review saved messages; tap to send/delete each, or **➡️ direct one to any session** via a session-picker. Messages sent when no session is active (or ambiguous) are saved here instead of being discarded. |
 | `/last [wN]` | Re-send last Telegram message |
 | `/kill wN` | Exit a Claude session (Ctrl+C) |
 | `/notification [digits\|all\|off]` | Control which alerts buzz your phone |

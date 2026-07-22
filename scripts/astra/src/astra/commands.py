@@ -241,41 +241,88 @@ def _maybe_activate_smartfocus(win_idx: str, pane: str, project: str, confirm: s
     state._save_smartfocus_state(win_idx, pane, project)
 
 
-def _saved_keyboard(idx: str, count: int):
-    """Build the inline keyboard for a session's saved messages.
+# Bucket for messages that arrived with no routable session (discarded before).
+# They are saved here and directed to a session later via /saved.
+_UNROUTED = "unrouted"
 
-    With multiple messages, offer a per-message send/delete row for each plus
-    a send-all/discard-all row; with a single message, just send/discard."""
+
+def _bucket_label(bucket: str) -> str:
+    """Human label for a saved-message bucket (a wid, or the unrouted bucket)."""
+    if bucket == _UNROUTED:
+        return "📥 unsent (no session)"
+    return state._wid_label(bucket)
+
+
+def _save_unrouted(text: str, reason: str):
+    """Save a message that had no routable session (instead of discarding it),
+    and tell the user how to direct it later."""
+    text = text.strip()
+    if not text:
+        telegram.tg_send(f"⚠️ {reason}.", silent=state._is_silent(_CAT_ERROR))
+        return
+    state._save_queued_msg(_UNROUTED, text)
+    n = len(state._load_queued_msgs(_UNROUTED))
+    telegram.tg_send(
+        f"💾 {reason} — saved ({n} unsent). Send `/saved` to direct it to a session.",
+        silent=state._is_silent(_CAT_CONFIRM))
+
+
+def _saved_keyboard(bucket: str, count: int):
+    """Build the inline keyboard for a bucket's saved messages.
+
+    Each message gets a ``➡️`` button that opens a session picker (direct it to
+    a chosen session). Session buckets also get ``✉️`` (send to that session)
+    and a send-all/discard-all row; the unrouted bucket has no default target,
+    so it only offers direct + delete (and discard-all)."""
     rows = []
+    unrouted = bucket == _UNROUTED
     if count > 1:
         for i in range(count):
-            rows.append([
-                (f"✉️ {i + 1}", f"saved_sendone_{idx}_{i}"),
-                (f"\U0001f5d1 {i + 1}", f"saved_delone_{idx}_{i}"),
-            ])
-        rows.append([
-            ("✉️ Send all", f"saved_send_{idx}"),
-            ("\U0001f5d1 Discard all", f"saved_discard_{idx}"),
-        ])
+            row = []
+            if not unrouted:
+                row.append((f"✉️ {i + 1}", f"saved_sendone_{bucket}_{i}"))
+            row.append((f"➡️ {i + 1}", f"svpick_{bucket}_{i}"))
+            row.append((f"\U0001f5d1 {i + 1}", f"saved_delone_{bucket}_{i}"))
+            rows.append(row)
+        last = []
+        if not unrouted:
+            last.append(("✉️ Send all", f"saved_send_{bucket}"))
+        last.append(("\U0001f5d1 Discard all", f"saved_discard_{bucket}"))
+        rows.append(last)
     else:
-        rows.append([
-            ("✉️ Send", f"saved_send_{idx}"),
-            ("\U0001f5d1 Discard", f"saved_discard_{idx}"),
-        ])
+        row = []
+        if not unrouted:
+            row.append(("✉️ Send", f"saved_send_{bucket}"))
+        row.append(("➡️ To…", f"svpick_{bucket}_0"))
+        row.append(("\U0001f5d1 Discard", f"saved_discard_{bucket}"))
+        rows.append(row)
     return telegram._build_inline_keyboard(rows)
 
 
-def _show_saved(idx: str) -> bool:
-    """Send the saved-messages list + action keyboard for one session.
+def _direct_pick_keyboard(bucket: str, index: int, sessions: dict):
+    """Session-picker keyboard: one button per session that directs saved
+    message ``index`` of ``bucket`` to that session."""
+    names = state._load_session_names()
+    rows = []
+    for wid in tmux._sort_session_keys(sessions):
+        disp = tmux._display_wid(wid, sessions)
+        name = names.get(wid, "") or names.get(disp, "")
+        label = f"{disp} [{name}]" if name else disp
+        rows.append([(label[:24], f"svto_{bucket}_{index}_{disp}")])
+    return telegram._build_inline_keyboard(rows) if rows else None
+
+
+def _show_saved(bucket: str) -> bool:
+    """Send the saved-messages list + action keyboard for one bucket.
 
     Returns True if there were saved messages to show, False otherwise."""
-    queued = state._load_queued_msgs(idx)
+    queued = state._load_queued_msgs(bucket)
     if not queued:
         return False
     preview_lines = [f"{i}. `{m_q['text'][:100]}`" for i, m_q in enumerate(queued, 1)]
     telegram.tg_send(
-        f"💾 {len(queued)} saved message(s) for {state._wid_label(idx)}:\n" + "\n".join(preview_lines),
-        reply_markup=_saved_keyboard(idx, len(queued)),
+        f"💾 {len(queued)} saved message(s) for {_bucket_label(bucket)}:\n" + "\n".join(preview_lines),
+        reply_markup=_saved_keyboard(bucket, len(queued)),
     )
     return True
 
@@ -309,7 +356,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             "`/focus wN` — watch completed responses",
             "`/deepfocus wN` — stream all output in real-time",
             "`/unfocus` — stop monitoring",
-            "`/saved [wN]` — review saved messages (send/delete individually)",
+            "`/saved [wN]` — review saved messages; ➡️ directs one to any session (messages sent with no active session are saved here)",
             "`/last [wN]` — re-send last Telegram message",
             "",
             "*Settings:*",
@@ -1076,8 +1123,8 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             if not _show_saved(idx):
                 telegram.tg_send(f"No saved messages for {state._wid_label(idx)}.")
         else:
-            # Scan all sessions for queued messages
-            found_any = False
+            # Scan the unrouted bucket + all sessions for queued messages
+            found_any = _show_saved(_UNROUTED)
             for idx in tmux._sort_session_keys(sessions):
                 if _show_saved(idx):
                     found_any = True
@@ -1107,9 +1154,7 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
             _maybe_activate_smartfocus(resolved, pane, project, confirm)
             return None, sessions, resolved
         else:
-            telegram.tg_send(f"⚠️ No session at `{wid}`.\n{tmux.format_sessions_message(sessions)}",
-                             reply_markup=tmux._sessions_keyboard(sessions),
-                             silent=state._is_silent(_CAT_ERROR))
+            _save_unrouted(prompt, f"No session `{wid}`")
             return None, sessions, last_win_idx
 
     # Name prefix: first word matches a known session name
@@ -1144,12 +1189,9 @@ def _handle_command(text: str, sessions: dict, last_win_idx: str | None) -> tupl
         _maybe_activate_smartfocus(target_idx, pane, project, confirm)
         return None, sessions, target_idx
     elif len(sessions) == 0:
-        telegram.tg_send("⚠️ No CLI sessions found. Send `/sessions` to rescan.",
-                         silent=state._is_silent(_CAT_ERROR))
+        _save_unrouted(text, "No active session")
     else:
-        telegram.tg_send(f"⚠️ Multiple sessions — prefix with `wN`.\n{tmux.format_sessions_message(sessions)}",
-                         reply_markup=tmux._sessions_keyboard(sessions),
-                         silent=state._is_silent(_CAT_ERROR))
+        _save_unrouted(text, "Ambiguous (multiple sessions, no wN prefix)")
 
     return None, sessions, last_win_idx
 
@@ -1282,16 +1324,59 @@ def _handle_callback(callback: dict, sessions: dict,
             cmd_text, sessions, last_win_idx)
         return sessions, last_win_idx, None
 
-    # Per-message saved callbacks: saved_sendone_{wid}_{i}, saved_delone_{wid}_{i}
-    m = re.match(r"^saved_(sendone|delone)_(w\d+[a-z]?)_(\d+)$", cb_data)
+    # Direct a saved message to a session — step 1: svpick_{bucket}_{i} shows a
+    # session picker; step 2: svto_{bucket}_{i}_{wid} sends it there.
+    m = re.match(r"^svpick_([\w-]+?)_(\d+)$", cb_data)
     if m:
-        action_type, wid, index = m.group(1), m.group(2), int(m.group(3))
-        removed = state._remove_queued_msg_at(wid, index)
+        bucket, index = m.group(1), int(m.group(2))
+        msgs = state._load_queued_msgs(bucket)
+        if index >= len(msgs):
+            telegram.tg_send("⚠️ That saved message is no longer there.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return sessions, last_win_idx, None
+        sessions = tmux.scan_claude_sessions()
+        kb = _direct_pick_keyboard(bucket, index, sessions)
+        if not kb:
+            telegram.tg_send("⚠️ No sessions to send to — start one, then `/saved`.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return sessions, last_win_idx, None
+        telegram.tg_send(f"➡️ Send to which session?\n`{msgs[index]['text'][:100]}`",
+                         reply_markup=kb)
+        return sessions, last_win_idx, None
+
+    m = re.match(r"^svto_([\w-]+?)_(\d+)_(w\d+[a-z]?)$", cb_data)
+    if m:
+        bucket, index, target = m.group(1), int(m.group(2)), m.group(3)
+        resolved = tmux.resolve_session_id(target, sessions)
+        if not resolved:
+            telegram.tg_send(f"⚠️ Session `{target}` no longer active.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return sessions, last_win_idx, None
+        removed = state._remove_queued_msg_at(bucket, index)
+        if not removed:
+            telegram.tg_send("⚠️ That saved message is no longer there.",
+                             silent=state._is_silent(_CAT_ERROR))
+            return sessions, last_win_idx, None
+        pane, project = sessions[resolved]
+        _clear_suggestion_keyboard(resolved)
+        confirm = routing.route_to_pane(pane, resolved, removed["text"])
+        telegram.tg_send_receipt(confirm, silent=state._is_silent(_CAT_CONFIRM))
+        _record_routed(resolved, removed["text"], confirm)
+        _maybe_activate_smartfocus(resolved, pane, project, confirm)
+        last_win_idx = resolved
+        _show_saved(bucket)  # re-display remaining in that bucket, if any
+        return sessions, last_win_idx, None
+
+    # Per-message saved callbacks: saved_sendone_{bucket}_{i}, saved_delone_{bucket}_{i}
+    m = re.match(r"^saved_(sendone|delone)_([\w-]+?)_(\d+)$", cb_data)
+    if m:
+        action_type, bucket, index = m.group(1), m.group(2), int(m.group(3))
+        removed = state._remove_queued_msg_at(bucket, index)
         if not removed:
             telegram.tg_send("⚠️ That saved message is no longer there.",
                              silent=state._is_silent(_CAT_ERROR))
         elif action_type == "sendone":
-            resolved = tmux.resolve_session_id(wid, sessions)
+            resolved = tmux.resolve_session_id(bucket, sessions)
             if resolved:
                 pane, project = sessions[resolved]
                 confirm = routing.route_to_pane(pane, resolved, removed["text"])
@@ -1299,23 +1384,23 @@ def _handle_callback(callback: dict, sessions: dict,
                 _maybe_activate_smartfocus(resolved, pane, project, confirm)
                 last_win_idx = resolved
             else:
-                telegram.tg_send(f"⚠️ Session `{wid}` no longer active.",
+                telegram.tg_send(f"⚠️ Session `{bucket}` no longer active.",
                                  silent=state._is_silent(_CAT_ERROR))
         else:  # delone
             telegram.tg_send(
-                f"🗑 Deleted saved message {index + 1} for {state._wid_label(wid)}:\n`{removed['text'][:100]}`",
+                f"🗑 Deleted saved message {index + 1} for {_bucket_label(bucket)}:\n`{removed['text'][:100]}`",
                 silent=state._is_silent(_CAT_CONFIRM))
         # Re-display whatever remains so the keyboard stays current
-        _show_saved(wid)
+        _show_saved(bucket)
         return sessions, last_win_idx, None
 
-    # Saved message callbacks: saved_send_{wid}, saved_discard_{wid}
-    m = re.match(r"^saved_(send|discard)_(w\d+[a-z]?)$", cb_data)
+    # Saved message callbacks: saved_send_{bucket}, saved_discard_{bucket}
+    m = re.match(r"^saved_(send|discard)_([\w-]+?)$", cb_data)
     if m:
-        action_type, wid = m.group(1), m.group(2)
+        action_type, bucket = m.group(1), m.group(2)
         if action_type == "send":
-            msgs = state._pop_queued_msgs(wid)
-            resolved = tmux.resolve_session_id(wid, sessions)
+            msgs = state._pop_queued_msgs(bucket)
+            resolved = tmux.resolve_session_id(bucket, sessions)
             if msgs and resolved:
                 combined = "\n".join(m_q["text"] for m_q in msgs)
                 pane, project = sessions[resolved]
@@ -1324,13 +1409,13 @@ def _handle_callback(callback: dict, sessions: dict,
                 _maybe_activate_smartfocus(resolved, pane, project, confirm)
                 last_win_idx = resolved
             elif msgs:
-                telegram.tg_send(f"⚠️ Session `{wid}` no longer active.",
+                telegram.tg_send(f"⚠️ Session `{bucket}` no longer active.",
                                  silent=state._is_silent(_CAT_ERROR))
             else:
                 telegram.tg_send("No saved messages to send.")
         else:  # discard
-            state._pop_queued_msgs(wid)
-            telegram.tg_send(f"🗑 Discarded saved messages for {state._wid_label(wid)}.",
+            state._pop_queued_msgs(bucket)
+            telegram.tg_send(f"🗑 Discarded saved messages for {_bucket_label(bucket)}.",
                              silent=state._is_silent(_CAT_CONFIRM))
         return sessions, last_win_idx, None
 

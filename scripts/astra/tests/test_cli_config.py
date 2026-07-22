@@ -508,6 +508,23 @@ class TestSavedCallbacks:
         route.assert_called_once_with("%5", "w4a", "a\nb")
         assert state._load_queued_msgs("w4a") == []
 
+    def test_direct_unrouted_to_session(self, patched):
+        """svpick shows a session picker; svto routes the saved message there
+        and removes it from the unrouted bucket."""
+        state._save_queued_msg("unrouted", "route me please")
+        sessions = self._sessions()
+        with patch.object(astra.tmux, "scan_claude_sessions", return_value=sessions):
+            astra.commands._handle_callback(
+                {"id": "cb", "data": "svpick_unrouted_0", "message_id": 1}, sessions, None)
+        assert any("which session" in (s or "").lower() for s in patched)
+        # picker offered a session button
+        with patch.object(astra.routing, "route_to_pane", return_value="📨 Sent to `w4`") as route:
+            _, last, _ = astra.commands._handle_callback(
+                {"id": "cb", "data": "svto_unrouted_0_w4", "message_id": 2}, sessions, None)
+        route.assert_called_once_with("%5", "w4a", "route me please")
+        assert last == "w4a"
+        assert state._load_queued_msgs("unrouted") == []
+
     def test_keyboard_per_message_rows_when_multiple(self, monkeypatch):
         monkeypatch.setattr(astra.telegram, "_build_inline_keyboard", lambda rows: rows)
         rows = astra.commands._saved_keyboard("w4a", 2)
@@ -523,7 +540,18 @@ class TestSavedCallbacks:
         rows = astra.commands._saved_keyboard("w4a", 1)
         assert len(rows) == 1
         cb = [btn[1] for row in rows for btn in row]
-        assert cb == ["saved_send_w4a", "saved_discard_w4a"]
+        # send / direct-to-session (➡️) / discard
+        assert cb == ["saved_send_w4a", "svpick_w4a_0", "saved_discard_w4a"]
+
+    def test_keyboard_unrouted_has_no_send_only_direct(self, monkeypatch):
+        monkeypatch.setattr(astra.telegram, "_build_inline_keyboard", lambda rows: rows)
+        rows = astra.commands._saved_keyboard("unrouted", 2)
+        cb = [btn[1] for row in rows for btn in row]
+        # unrouted has no default target: direct (➡️) + delete per msg, discard-all
+        assert "svpick_unrouted_0" in cb and "svpick_unrouted_1" in cb
+        assert "saved_delone_unrouted_1" in cb
+        assert "saved_discard_unrouted" in cb
+        assert not any(c.startswith("saved_send") or c.startswith("saved_sendone") for c in cb)
 
     def test_stale_index_reports_gone(self, patched):
         state._save_queued_msg("w4a", "a")
