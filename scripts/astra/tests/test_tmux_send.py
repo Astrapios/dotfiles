@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import shlex
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import astra
 from astra import tmux_send
@@ -102,6 +102,38 @@ class TestSelectOption:
         cmd = _captured_bash_cmd(mock_run)
         assert "Down Down" in cmd
         assert cmd.endswith("Enter")
+
+
+class TestSelectRelative:
+    """Cursor-relative menu navigation: Down for +delta, Up for -delta,
+    plain Enter for 0. Fixes /model, whose ❯ cursor opens on the currently
+    selected model rather than on option 1."""
+
+    def test_positive_delta_downs(self, monkeypatch):
+        run = Mock()
+        monkeypatch.setattr(tmux_send.subprocess, "run", run)
+        tmux_send.select_relative("%30", 2)
+        cmd = _captured_bash_cmd(run)
+        assert "Down Down" in cmd
+        assert "Up" not in cmd
+        assert "sleep 0.1" in cmd
+        assert cmd.rstrip().endswith("Enter")
+
+    def test_negative_delta_ups(self, monkeypatch):
+        run = Mock()
+        monkeypatch.setattr(tmux_send.subprocess, "run", run)
+        tmux_send.select_relative("%30", -2)
+        cmd = _captured_bash_cmd(run)
+        assert "Up Up" in cmd
+        assert "Down" not in cmd
+        assert cmd.rstrip().endswith("Enter")
+
+    def test_zero_delta_just_enter(self, monkeypatch):
+        run = Mock()
+        monkeypatch.setattr(tmux_send.subprocess, "run", run)
+        tmux_send.select_relative("%30", 0)
+        cmd = _captured_bash_cmd(run)
+        assert cmd == "tmux send-keys -t %30 Enter"
 
 
 @patch.object(tmux_send.subprocess, "run")
@@ -217,6 +249,7 @@ class TestInterrupt:
 def test_module_exposes_expected_api():
     """Sanity check that all planned API functions exist."""
     for name in ("type_text", "press_key", "press_keys", "select_option",
-                 "submit_text", "inject_busy", "navigate_then_submit",
-                 "triple_ctrl_c", "clear_typed", "interrupt"):
+                 "select_relative", "submit_text", "inject_busy",
+                 "navigate_then_submit", "triple_ctrl_c", "clear_typed",
+                 "interrupt"):
         assert hasattr(tmux_send, name), f"tmux_send missing {name}"

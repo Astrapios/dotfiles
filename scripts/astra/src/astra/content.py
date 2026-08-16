@@ -425,6 +425,28 @@ _MENU_OPTION_RE = re.compile(r'^\s*[❯>●○✔\s]*(\d+)\.\s+(.+)')
 # footer alone.
 _MENU_POINTER_RE = re.compile(r'^\s*[❯>›]\s+\d+\.\s')
 
+# Same cursor, but capturing the option NUMBER it points at. Claude Code
+# menus open with the ❯ cursor on the *currently-selected* option (e.g.
+# /model highlights the active model), NOT on option 1 — so navigation must
+# be relative to this, not to a fixed option-1 origin.
+_MENU_CURSOR_RE = re.compile(r'^\s*[❯>›]\s+(\d+)\.\s')
+
+
+def _menu_cursor_option(raw: str) -> int | None:
+    """Return the option number under the ❯ selection cursor, or None.
+
+    Used to navigate a menu relative to where its cursor currently sits.
+    Returns the bottom-most match so a stale menu higher in the scrollback
+    can't win over the live one.
+    """
+    cursor = None
+    for line in raw.splitlines():
+        m = _MENU_CURSOR_RE.match(line)
+        if m:
+            cursor = int(m.group(1))
+    return cursor
+
+
 # Claude's working indicator — never appears in a real menu; a hard guard
 # against treating a mid-work frame as a menu.
 _WORKING_RE = re.compile(r'(?i)esc to interr')

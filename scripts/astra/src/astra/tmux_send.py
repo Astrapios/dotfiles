@@ -80,6 +80,29 @@ def select_option(pane: str, n: int) -> None:
     _run(cmd)
 
 
+def select_relative(pane: str, delta: int) -> None:
+    """Move the menu cursor by `delta` then press Enter.
+
+    delta > 0 → Down*delta, delta < 0 → Up*|delta|, delta == 0 → Enter only.
+    Unlike `select_option` (which assumes the cursor starts at option 1),
+    this navigates relative to wherever the cursor currently sits — Claude
+    Code menus open with it on the current selection, not option 1.
+    """
+    p = shlex.quote(pane)
+    if delta > 0:
+        nav = " ".join(["Down"] * delta)
+    elif delta < 0:
+        nav = " ".join(["Up"] * (-delta))
+    else:
+        nav = ""
+    if nav:
+        cmd = (f"tmux send-keys -t {p} {nav} && sleep {_BETWEEN_KEYS} && "
+               f"tmux send-keys -t {p} Enter")
+    else:
+        cmd = f"tmux send-keys -t {p} Enter"
+    _run(cmd)
+
+
 def submit_text(pane: str, text: str, settle: float = _AFTER_TYPE) -> None:
     """Type text + sleep(settle) + Enter. Strips newlines.
 

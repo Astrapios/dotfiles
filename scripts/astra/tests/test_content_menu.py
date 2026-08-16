@@ -6,10 +6,26 @@ snapshots from Claude Code v2.1.x.
 from __future__ import annotations
 
 import os
+from unittest.mock import Mock
 
-from astra import content
+from astra import content, routing
 
 _FIX = os.path.join(os.path.dirname(__file__), "fixtures", "menus")
+
+# A real /model capture where the active model is option 2 (Opus) — the ❯
+# cursor opens on the current selection, NOT on option 1. This is the layout
+# that broke tap-to-select (every tap landed at current+n-1).
+_MODEL_MENU_CURSOR_2 = (
+    "  Select model\n"
+    "  Switch between Claude models. Your pick becomes the default.\n"
+    "    1. Default (recommended)  Opus 4.8 with 1M context\n"
+    "  ❯ 2. Opus ✔                 Opus 4.8 with 1M context\n"
+    "    3. Fable                  Fable 5\n"
+    "    4. Sonnet                 Sonnet 5\n"
+    "    5. Haiku                  Haiku 4.5\n"
+    "  ● High effort (default) ←/→ to adjust\n"
+    "  Enter to set as default · s to use this session only · Esc to cancel\n"
+)
 
 
 def _load(name: str) -> str:
@@ -110,6 +126,77 @@ class TestDetectInteractiveMenu:
     def test_empty_input(self):
         assert content._detect_interactive_menu("") is None
         assert content._detect_interactive_menu("\n\n\n") is None
+
+
+class TestMenuCursorOption:
+    """The ❯ cursor marks the menu's *current* selection; navigation must be
+    relative to it, so we need to read which option number it points at."""
+
+    def test_cursor_on_current_model(self):
+        assert content._menu_cursor_option(_MODEL_MENU_CURSOR_2) == 2
+
+    def test_cursor_on_option_1_fixture(self):
+        # In this older fixture the active model IS option 1.
+        assert content._menu_cursor_option(_load("model_menu.txt")) == 1
+
+    def test_no_cursor_returns_none(self):
+        assert content._menu_cursor_option("  1. Alpha\n  2. Beta\n") is None
+
+    def test_bottom_most_cursor_wins(self):
+        """A stale menu higher in scrollback must not beat the live one."""
+        raw = "  ❯ 1. Old\n────\n  Select model\n  ❯ 3. Live\n"
+        assert content._menu_cursor_option(raw) == 3
+
+
+class TestSelectOptionCursorRelative:
+    """routing._select_option navigates relative to the ❯ cursor, fixing the
+    /model bug where taps landed at (current_position + n - 1)."""
+
+    def test_tap_below_cursor_moves_down(self, monkeypatch):
+        # cursor on option 2; tap "4. Sonnet" → Down exactly 2 (4-2), not 3.
+        monkeypatch.setattr(routing.tmux, "_capture_pane",
+                            lambda *a, **k: _MODEL_MENU_CURSOR_2)
+        rel = Mock()
+        monkeypatch.setattr(routing.tmux_send, "select_relative", rel)
+        routing._select_option("%2", 4)
+        rel.assert_called_once_with("%2", 2)
+
+    def test_tap_on_cursor_is_zero_delta(self, monkeypatch):
+        # cursor on option 2; tap "2. Opus" → Enter only (delta 0).
+        monkeypatch.setattr(routing.tmux, "_capture_pane",
+                            lambda *a, **k: _MODEL_MENU_CURSOR_2)
+        rel = Mock()
+        monkeypatch.setattr(routing.tmux_send, "select_relative", rel)
+        routing._select_option("%2", 2)
+        rel.assert_called_once_with("%2", 0)
+
+    def test_tap_above_cursor_moves_up(self, monkeypatch):
+        # cursor on option 2; tap "1. Default" → Up 1 (delta -1).
+        monkeypatch.setattr(routing.tmux, "_capture_pane",
+                            lambda *a, **k: _MODEL_MENU_CURSOR_2)
+        rel = Mock()
+        monkeypatch.setattr(routing.tmux_send, "select_relative", rel)
+        routing._select_option("%2", 1)
+        rel.assert_called_once_with("%2", -1)
+
+    def test_no_cursor_falls_back_to_option1_origin(self, monkeypatch):
+        # Permission dialogs reliably open at option 1; without a detectable
+        # cursor we preserve the old Down*(n-1) behaviour.
+        monkeypatch.setattr(routing.tmux, "_capture_pane",
+                            lambda *a, **k: "no menu on screen")
+        rel = Mock()
+        monkeypatch.setattr(routing.tmux_send, "select_relative", rel)
+        routing._select_option("%2", 3)
+        rel.assert_called_once_with("%2", 2)
+
+    def test_capture_failure_falls_back(self, monkeypatch):
+        def _boom(*a, **k):
+            raise OSError("no pane")
+        monkeypatch.setattr(routing.tmux, "_capture_pane", _boom)
+        rel = Mock()
+        monkeypatch.setattr(routing.tmux_send, "select_relative", rel)
+        routing._select_option("%2", 2)
+        rel.assert_called_once_with("%2", 1)
 
 
 class TestDetectPermissionDialog:

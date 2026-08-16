@@ -4,12 +4,28 @@ from __future__ import annotations
 import re
 import time
 
-from astra import config, telegram, state, signals, tmux, tmux_send
+from astra import config, telegram, state, signals, tmux, tmux_send, content
 
 
 def _select_option(pane: str, n: int):
-    """Navigate to option n (1-based) and press Enter in a tmux pane."""
-    tmux_send.select_option(pane, n)
+    """Select option n (1-based) in a tmux menu and press Enter.
+
+    Claude Code menus open with the ❯ cursor on the *currently-selected*
+    option (e.g. /model highlights the active model), not on option 1. We
+    re-capture the pane, find where the cursor actually sits, and move
+    relative to it — so a tap lands on the intended option regardless of
+    where the menu opened. Falls back to an option-1 origin when no cursor
+    is visible (plain permission dialogs already open at option 1, so this
+    is behaviour-preserving for them)."""
+    cursor = 1
+    try:
+        raw = tmux._capture_pane(pane, 40)
+        found = content._menu_cursor_option(raw)
+        if found is not None:
+            cursor = found
+    except Exception:
+        pass
+    tmux_send.select_relative(pane, n - cursor)
 
 
 _ANSI_STRIP_RE = re.compile(r'\033\[[0-9;]*m')

@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.40.1
+
+- **Fix `/model` (and any menu) tap-to-select landing on the wrong option.** Claude Code menus open with the `❯` cursor on the *currently-selected* option (e.g. `/model` highlights the active model), not on option 1. Selection sent `Down×(n-1)` from an assumed option-1 origin, so every tap landed at `current_position + n − 1` — which drifted as the current model changed and often resolved to Sonnet regardless of the button pressed. Selection now re-captures the pane, reads where the cursor actually sits, and moves relative to it (`Down` below, `Up` above, plain `Enter` when already on it). Permission dialogs (which do open at option 1) are unaffected. Applies to both tapped buttons and typed numeric replies.
+
 ## 0.40.0
 
 - **Messages sent with no routable session are now saved, not discarded — and can be directed to a session from `/saved`.** Previously a `wN …` to a nonexistent session, a message when no sessions exist, or an ambiguous unprefixed message (multiple sessions, no last-used) just got an error and was lost. Now the text is saved to an "unrouted" bucket with a `💾 … saved — send /saved to direct it` notice.
