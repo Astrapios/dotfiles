@@ -1,4 +1,8 @@
 {
+  "env": {
+    "CLAUDE_CODE_DISABLE_MOUSE": "1"
+  },
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "Notification": [
       {
@@ -134,8 +138,5 @@
     ]
   },
   "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true,
-  "env": {
-    "CLAUDE_CODE_DISABLE_MOUSE": "1"
-  }
+  "skipDangerousModePermissionPrompt": true
 }

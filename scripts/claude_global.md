@@ -6,9 +6,14 @@
 
 ## Working Style
 
+- **Simplest solution first.** Implement the simplest design that satisfies the actual requirement, and quantify the driving numbers before adding machinery (check whether the "problem" the complexity would solve is real at the relevant scale). If a more complex approach seems necessary, say so explicitly, explain why the simple one fails, and ask for confirmation before building it. (Lesson 2026-07-14: a per-pulse "facility-tracking" range crop was built where a constant window sufficed — the target moved only meters relative to the deskewed sample grid vs. km absolute — and the unnecessary tracking violated a BP kernel phase assumption, corrupting a branch's worth of products.)
 - NEVER ask the user to test speculative fixes. Investigate and verify logic yourself first.
 - When dealing with terminal UI interactions (tmux send-keys), capture the actual pane content at each step to understand the UI state before writing key sequences.
 - Think through the full execution path before making changes — trace through the code, consider timing, and verify assumptions.
+- **Narrate while working:** before each edit or command, state briefly what is being changed and why (which file, which problem it addresses, what the expected effect is). Never silently apply batches of edits without giving the user context to follow along and object.
+- **Long-running processes:** for any background process expected to take more than ~10 minutes (multi-collect re-runs, large sims, deck builds, PDF conversions, etc.), proactively check and report progress **at least every 10 minutes** — don't go silent waiting for the completion notification. Use `ScheduleWakeup` (~570s) to self-pace the check-ins, and report which step/collect is done, timestamps, and any errors.
+- **Always report times in Pacific time** (the user's timezone), never UTC — progress updates, ETAs, log timestamps, and dates in summaries. The machine clock is UTC, so convert with `TZ=America/Los_Angeles date` instead of applying the offset by hand (PDT/UTC−7 in summer, PST/UTC−8 in winter), and include the zone label.
+- **Use 12-hour AM/PM time, never 24-hour** — write "2:45 PM PDT", not "14:45 PDT". Format with `TZ=America/Los_Angeles date "+%-I:%M %p %Z"`. Applies to every user-facing time: progress updates, ETAs, quoted log timestamps, and summaries.
 
 ## Resource Limits
 
