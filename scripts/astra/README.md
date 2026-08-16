@@ -137,7 +137,7 @@ Once the listener is running, send these from Telegram:
 | `/clear [wN]` | Reset transient state (prompts, busy, focus) |
 | `/god [wN\|all\|off]` | Auto-accept permissions (god mode) |
 | `/autofocus` | Toggle auto-monitor on message send |
-| `/local [on\|off]` | Suppress Telegram when viewing locally in tmux |
+| `/local [on\|off]` | Suppress Telegram when viewing locally in tmux (signals and focus/deepfocus streams; typing in tmux re-engages it, a Telegram message overrides it) |
 | `/name wN label` | Name a session for easier routing |
 | `/interrupt wN` | Interrupt current task (Esc) |
 | `/re wN` | Redirect the last message to `wN` — interrupts the window it was wrongly sent to (and unqueues it there), then resends the same text to `wN` |

@@ -1102,6 +1102,180 @@ class TestAutoLocalDetection(SimTestBase):
         self.h.assert_not_sent("interrupted")
 
 
+class TestLocalSuppressMonitorStreams(SimTestBase):
+    """Monitor streams (focus/smartfocus/deepfocus) respect local suppress.
+
+    Viewing the window in tmux with keyboard activity newer than the last
+    Telegram interaction pauses the stream; interacting via Telegram again
+    resumes it. Reproduces: 'interacting directly in tmux doesn't trigger
+    local on/off' — the monitor send sites ignored locally_viewed.
+    """
+
+    def _local(self):
+        from unittest.mock import patch as _patch
+        return _patch.object(state, "_is_local_suppress_enabled", return_value=True)
+
+    def test_smartfocus_muted_while_viewed_locally(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        with self._local():
+            # Activate smartfocus from Telegram (user is remote)
+            self.h.tg.inject_text_message("w4a do something")
+            self.h.tick(s)
+            state._clear_busy("w4a")
+            # _mark_remote stamps real wall-clock (function-local time import
+            # the harness can't patch); normalize to the fake clock so the
+            # marks can expire against fake client_activity
+            config._remote_sessions["4"] = self.h.clock.time()
+            config._last_tg_activity = self.h.clock.time()
+
+            # Baseline content
+            self.h.tmux.set_pane_content("4", "● Working on it...\nfirst line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)
+
+            # User sits at the terminal: views w4, types (newer than TG activity)
+            self.h.tmux.set_locally_viewed("4")
+            self.h.clock.advance(5)
+            self.h.tmux.set_client_activity(self.h.clock.time())
+
+            self.h.tmux.set_pane_content("4",
+                "● Working on it...\nfirst line\nsecret local line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)
+            self.h.assert_not_sent("secret local line")
+
+            # User interacts via Telegram again → stream resumes
+            self.h.clock.advance(5)
+            self.h.tg.inject_text_message("w4a keep going")
+            self.h.tick(s)
+            state._clear_busy("w4a")
+            self.h.tmux.set_pane_content("4",
+                "● Working on it...\nfirst line\nsecret local line\nremote visible line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)
+            self.h.assert_sent("remote visible line")
+            # The locally-viewed lines were dropped, not queued for later
+            self.h.assert_not_sent("secret local line")
+
+    def test_focus_muted_while_viewed_locally(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        state._save_focus_state("w4a", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        with self._local():
+            self.h.tmux.set_pane_content("4", "● Response\nbase line\n")
+            self.h.tick(s)  # seed baseline
+
+            self.h.tmux.set_locally_viewed("4")
+            self.h.tmux.set_client_activity(self.h.clock.time())
+            self.h.tmux.set_pane_content("4",
+                "● Response\nbase line\nsecret local line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)
+            self.h.assert_not_sent("secret local line")
+
+            # Telegram interaction newer than keyboard → remote → resumes
+            config._last_tg_activity = self.h.clock.time() + 1
+            self.h.tmux.set_pane_content("4",
+                "● Response\nbase line\nsecret local line\nremote visible line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)
+            self.h.assert_sent("remote visible line")
+
+    def test_deepfocus_flush_muted_while_viewed_locally(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        state._save_deepfocus_state("w4a", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        with self._local():
+            self.h.tmux.set_pane_content("4", "some baseline output\n")
+            self.h.tick(s)  # seed prev_lines
+
+            self.h.tmux.set_locally_viewed("4")
+            self.h.tmux.set_client_activity(self.h.clock.time())
+
+            self.h.tmux.set_pane_content("4",
+                "some baseline output\nsecret local line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)  # captures pending
+            self.h.clock.advance(4)
+            self.h.tick(s)  # debounce elapsed → flush point (suppressed)
+            self.h.assert_not_sent("secret local line")
+
+            # Telegram interaction newer than keyboard → remote → resumes
+            config._last_tg_activity = self.h.clock.time() + 1
+            self.h.tmux.set_pane_content("4",
+                "some baseline output\nsecret local line\nremote visible line\n")
+            self.h.clock.advance(1)
+            self.h.tick(s)
+            self.h.clock.advance(4)
+            self.h.tick(s)
+            self.h.assert_sent("remote visible line")
+            self.h.assert_not_sent("secret local line")
+
+
+class TestFocusTailReresolve(SimTestBase):
+    """A session restart/clear writes a NEW transcript file. A focus tail
+    cached on the old path goes silent forever — and because stop signals
+    for a focused window are suppressed (the stream replaces them), the
+    window goes completely dark. The tail must re-resolve on path change."""
+
+    def _append(self, path, text):
+        import json
+        with open(path, "a") as f:
+            f.write(json.dumps({"type": "assistant",
+                                "message": {"content": [{"type": "text", "text": text}]}}) + "\n")
+
+    def test_focus_tail_follows_transcript_path_change(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True, cli="claude")
+        state._save_focus_state("w4a", "%20", "myproject")
+        s = self.h.make_listener_state()
+
+        pa = os.path.join(self.h._tmpdir, "sess_a.jsonl")
+        pb = os.path.join(self.h._tmpdir, "sess_b.jsonl")
+        self._append(pa, "OLD history to skip")
+        state._save_transcript_path("w4a", pa)
+        self.h.tick(s)  # resolve + seed tail on A
+
+        self._append(pa, "line from session A")
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.assert_sent("line from session A")  # sanity: stream works on A
+
+        # Session restart: hooks record a new transcript path
+        self._append(pb, "line from session B")
+        state._save_transcript_path("w4a", pb)
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.assert_sent("line from session B")
+
+    def test_smartfocus_tail_follows_transcript_path_change(self):
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True, cli="claude")
+        s = self.h.make_listener_state()
+
+        pa = os.path.join(self.h._tmpdir, "sess_a.jsonl")
+        pb = os.path.join(self.h._tmpdir, "sess_b.jsonl")
+        self._append(pa, "OLD history to skip")
+        state._save_transcript_path("w4a", pa)
+
+        self.h.tg.inject_text_message("w4a go")
+        self.h.tick(s)  # activate smartfocus
+        state._clear_busy("w4a")
+        self.h.tick(s)  # resolve + seed the tail on A
+
+        self._append(pb, "line from session B")
+        state._save_transcript_path("w4a", pb)
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.clock.advance(1)
+        self.h.tick(s)
+        self.h.assert_sent("line from session B")
+
+
 class TestReplyRouting(SimTestBase):
     """Reply-to-message routing resolves wid correctly."""
 

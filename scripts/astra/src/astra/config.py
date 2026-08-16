@@ -32,6 +32,10 @@ DOC_CHAT_ID = os.environ.get("TELEGRAM_DOC_CHAT_ID", "") or _creds.get("TELEGRAM
 TG_HOOKS_ENABLED = os.environ.get("NO_ASTRA", "0") == "0"
 TG_MAX = 4096  # Telegram message character limit
 SIGNAL_DIR = "/tmp/astra_signals"
+# Persistent preference toggles (god quiet, local suppress, autofocus).
+# SIGNAL_DIR is wiped on reboot — session-bound state belongs there,
+# user preferences do not.
+PREF_DIR = os.path.expanduser("~/.config/astra")
 
 _god_new = os.path.expanduser("~/.config/astra_god_mode.json")
 _god_old = os.path.expanduser("~/.config/tg_hook_god_mode.json")

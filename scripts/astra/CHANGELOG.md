@@ -5,6 +5,22 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.40.5
+
+- **Fix a focused window going completely dark after a session restart/clear.** Focus and smartfocus resolve the Claude transcript tail once and cache it. When the session restarts (or `/clear`s), Claude Code writes a *new* transcript JSONL — the cached tail polls the dead file forever, so the 🔍/👁 stream falls silent. And since stop signals for a focused window are suppressed by design (the stream replaces them), the window produces *nothing* on Telegram until focus is manually cancelled. Both tails now re-resolve whenever the hook-recorded transcript path changes, replaying the new session file from its start (it's young, and its content is genuinely unseen).
+
+## 0.40.4
+
+- **Fix preference toggles not surviving reboot.** `/god quiet`, `/local off`, and `/autofocus off` were marker files in `SIGNAL_DIR` (`/tmp/astra_signals`), which is wiped on reboot — so god-quiet silently reverted to loud and the off-toggles reverted to on. They now live in a persistent `config.PREF_DIR` (`~/.config/astra/`), joining the already-persistent god-mode and notification configs. Session-bound state (prompts, busy flags, focus, queues) intentionally stays in `SIGNAL_DIR`; `astra debug` stays transient by design. Tests isolate `PREF_DIR` the same way as `SIGNAL_DIR` (conftest + sim harness).
+
+## 0.40.3
+
+- **`astra.service`: `OOMScoreAdjust=0`.** User-manager services default to `oom_score_adj=200`, which made the ~50 MB listener one of the kernel's *first* victims in any global OOM caused by compute in the panes it monitors (killed this way 2026-08-10 and 2026-07-08). At 0 it's judged purely by its own memory use. (Part of a wider OOM hardening: `user@1000.service` drop-in at −400 + auto-restart, `tmux-main.service` at 0 — see dotfiles `installers/install_ttyd.zsh`.)
+
+## 0.40.2
+
+- **Fix focus/smartfocus/deepfocus streams ignoring local suppress.** With `/local on`, working directly in tmux muted stop/permission/menu *signals* for the viewed window, but the monitor streams kept flooding Telegram — so sitting at the terminal never appeared to "trigger local on/off". All five monitor send sites (focus transcript + pane-diff, smartfocus transcript + pane-diff, deepfocus flush) now consult the same arbitrated `locally_viewed` set as the signal path: tmux keyboard activity newer than the last Telegram interaction pauses the stream for the viewed window; any Telegram interaction resumes it. Suppressed lines are dropped (you were watching them locally), not queued — diff state still advances so nothing floods on resume.
+
 ## 0.40.1
 
 - **Fix `/model` (and any menu) tap-to-select landing on the wrong option.** Claude Code menus open with the `❯` cursor on the *currently-selected* option (e.g. `/model` highlights the active model), not on option 1. Selection sent `Down×(n-1)` from an assumed option-1 origin, so every tap landed at `current_position + n − 1` — which drifted as the current model changed and often resolved to Sonnet regardless of the button pressed. Selection now re-captures the pane, reads where the cursor actually sits, and moves relative to it (`Down` below, `Up` above, plain `Enter` when already on it). Permission dialogs (which do open at option 1) are unaffected. Applies to both tapped buttons and typed numeric replies.

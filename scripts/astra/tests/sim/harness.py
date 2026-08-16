@@ -34,6 +34,8 @@ class SimulationHarness:
 
         # --- Patch config ---
         self._patches.append(patch.object(config, "SIGNAL_DIR", self._signal_dir))
+        self._patches.append(patch.object(config, "PREF_DIR",
+                                          os.path.join(self._tmpdir, "prefs")))
         self._patches.append(patch.object(config, "CHAT_ID", "123"))
         self._patches.append(patch.object(config, "BOT", "fake_bot_token"))
 

@@ -30,6 +30,18 @@ _RESCAN_INTERVAL = 60
 _FOCUS_CAPTURE_LINES = 1000
 
 
+def _viewed_locally(wid: str, locally_viewed: set[str]) -> bool:
+    """True when wid's window is viewed in tmux and local suppress applies.
+
+    locally_viewed already carries the auto-local arbitration from the tick
+    (empty when the user's last Telegram interaction is newer than tmux
+    keyboard activity), so a bare membership test is all that's left."""
+    if not locally_viewed or not wid:
+        return False
+    m = re.match(r'^w?(\d+)', wid)
+    return bool(m and m.group(1) in locally_viewed)
+
+
 def _focus_header_html(icon: str, wid: str, proj: str) -> str:
     """Build a focus message header as Telegram HTML (the body is rendered as
     HTML too, via telegram._send_long_html)."""
@@ -607,14 +619,25 @@ def _listen_tick(s):
             # as soon as the session's transcript path is discovered.
             if s.focus_tail is None:
                 s.focus_tail = _resolve_focus_tail(fw, _fcli)
+            else:
+                # Session restart/clear writes a NEW transcript file; a tail
+                # cached on the old path polls a dead file forever — and since
+                # stops for a focused window are suppressed, it goes dark.
+                _cur = transcript.resolve_transcript(fw)
+                if _cur and _cur != s.focus_tail.path:
+                    config._log("focus", f"transcript changed for {fw} — re-tailing")
+                    s.focus_tail = transcript.TranscriptTail(_cur)
             if s.focus_tail is not None:
                 new = s.focus_tail.poll()
                 if new:
-                    new_text = "\n".join(new).strip()
-                    if new_text:
-                        config._log("focus", f"sending {len(new)} new lines for {fw} (transcript)")
-                        header = _focus_header_html("🔍", fw, fproj)
-                        telegram._send_long_html(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
+                    if _viewed_locally(fw, locally_viewed):
+                        config._log("local", f"suppressed focus lines for {fw} (viewed locally)")
+                    else:
+                        new_text = "\n".join(new).strip()
+                        if new_text:
+                            config._log("focus", f"sending {len(new)} new lines for {fw} (transcript)")
+                            header = _focus_header_html("🔍", fw, fproj)
+                            telegram._send_long_html(header, new_text, fw, silent=state._is_silent(_CAT_MONITOR))
             else:
                 # Fallback: pane-diff (Gemini, or transcript not yet known).
                 # Refresh width each tick: a stale width rewraps every line
@@ -624,7 +647,9 @@ def _listen_tick(s):
                 canon = content._focus_canonical_lines(raw, s.focus_pane_width, profile=_fprofile)
                 if s.focus_seeded:
                     new = content._compute_new_lines(s.focus_prev_lines, canon)
-                    if new:
+                    if new and _viewed_locally(fw, locally_viewed):
+                        config._log("local", f"suppressed focus lines for {fw} (viewed locally)")
+                    elif new:
                         new_text = "\n".join(new).strip()
                         if new_text and new_text != s.focus_last_sent:
                             config._log("focus", f"sending {len(new)} new lines for {fw}")
@@ -672,9 +697,17 @@ def _listen_tick(s):
                 _sfprofile = profiles.get_profile(_sfcli)
                 if s.smartfocus_tail is None:
                     s.smartfocus_tail = _resolve_focus_tail(sfw, _sfcli)
+                else:
+                    # Same re-resolve as focus: follow transcript path changes
+                    _cur = transcript.resolve_transcript(sfw)
+                    if _cur and _cur != s.smartfocus_tail.path:
+                        config._log("smartfocus", f"transcript changed for {sfw} — re-tailing")
+                        s.smartfocus_tail = transcript.TranscriptTail(_cur)
                 if s.smartfocus_tail is not None:
                     new = s.smartfocus_tail.poll()
-                    if new:
+                    if new and _viewed_locally(sfw, locally_viewed):
+                        config._log("local", f"suppressed smartfocus lines for {sfw} (viewed locally)")
+                    elif new:
                         new_text = "\n".join(new).strip()
                         if new_text and new_text != s.smartfocus_last_sent:
                             config._log("smartfocus", f"sending {len(new)} new lines for {sfw} (transcript)")
@@ -689,7 +722,9 @@ def _listen_tick(s):
                     canon = content._focus_canonical_lines(raw, s.smartfocus_pane_width, profile=_sfprofile)
                     if s.smartfocus_seeded:
                         new = content._compute_new_lines(s.smartfocus_prev_lines, canon)
-                        if new:
+                        if new and _viewed_locally(sfw, locally_viewed):
+                            config._log("local", f"suppressed smartfocus lines for {sfw} (viewed locally)")
+                        elif new:
                             new_text = "\n".join(new).strip()
                             # Skip trivial deltas (just emoji/symbols, no real text)
                             if new_text and not re.search(r'[a-zA-Z0-9]{2,}', new_text):
@@ -760,13 +795,16 @@ def _listen_tick(s):
         max_delay_ok = s.deepfocus_pending and s.deepfocus_first_new_ts and (now - s.deepfocus_first_new_ts >= 15)
 
         if debounce_ok or max_delay_ok:
-            _df_reason = "debounce" if debounce_ok else "max_delay"
-            chunk = "\n".join(s.deepfocus_pending).strip()
-            if chunk:
-                config._log("deepfocus", f"flush({_df_reason}) {len(s.deepfocus_pending)} lines for {dfw}")
-                msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
-                telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
-                config._save_last_msg(dfw, msg)
+            if _viewed_locally(dfw, locally_viewed):
+                config._log("local", f"suppressed deepfocus flush for {dfw} (viewed locally)")
+            else:
+                _df_reason = "debounce" if debounce_ok else "max_delay"
+                chunk = "\n".join(s.deepfocus_pending).strip()
+                if chunk:
+                    config._log("deepfocus", f"flush({_df_reason}) {len(s.deepfocus_pending)} lines for {dfw}")
+                    msg = f"🔬 {state._wid_label(dfw)} (`{dfproj}`):\n```\n{chunk[:3500]}\n```"
+                    telegram.tg_send(msg, silent=state._is_silent(_CAT_MONITOR))
+                    config._save_last_msg(dfw, msg)
             s.deepfocus_pending = []
             s.deepfocus_last_new_ts = 0
             s.deepfocus_first_new_ts = 0

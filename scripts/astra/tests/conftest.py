@@ -30,4 +30,5 @@ def _isolate_runtime_state(tmp_path, monkeypatch):
     sig.mkdir()
     monkeypatch.setattr(config, "SIGNAL_DIR", str(sig))
     monkeypatch.setattr(config, "GOD_MODE_PATH", str(sig / "_god_mode.json"))
+    monkeypatch.setattr(config, "PREF_DIR", str(tmp_path / "prefs"))
     yield

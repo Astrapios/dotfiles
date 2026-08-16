@@ -218,13 +218,13 @@ def _clear_smartfocus_state():
 
 def _is_local_suppress_enabled() -> bool:
     """Check if local view suppression is enabled (on by default)."""
-    return not os.path.exists(os.path.join(config.SIGNAL_DIR, "_local_suppress_off.json"))
+    return not os.path.exists(os.path.join(config.PREF_DIR, "_local_suppress_off.json"))
 
 
 def _set_local_suppress(enabled: bool):
     """Enable or disable local view suppression."""
-    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
-    path = os.path.join(config.SIGNAL_DIR, "_local_suppress_off.json")
+    os.makedirs(config.PREF_DIR, exist_ok=True)
+    path = os.path.join(config.PREF_DIR, "_local_suppress_off.json")
     if enabled:
         try:
             os.remove(path)
@@ -237,13 +237,13 @@ def _set_local_suppress(enabled: bool):
 
 def _is_autofocus_enabled() -> bool:
     """Check if autofocus is enabled (on by default)."""
-    return not os.path.exists(os.path.join(config.SIGNAL_DIR, "_autofocus_off.json"))
+    return not os.path.exists(os.path.join(config.PREF_DIR, "_autofocus_off.json"))
 
 
 def _set_autofocus(enabled: bool):
     """Enable or disable autofocus."""
-    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
-    path = os.path.join(config.SIGNAL_DIR, "_autofocus_off.json")
+    os.makedirs(config.PREF_DIR, exist_ok=True)
+    path = os.path.join(config.PREF_DIR, "_autofocus_off.json")
     if enabled:
         try:
             os.remove(path)
@@ -694,13 +694,13 @@ def _cleanup_stale_god_mode(sessions: dict):
 
 def _is_god_quiet() -> bool:
     """Check if god mode receipts are suppressed."""
-    return os.path.exists(os.path.join(config.SIGNAL_DIR, "_god_quiet.json"))
+    return os.path.exists(os.path.join(config.PREF_DIR, "_god_quiet.json"))
 
 
 def _set_god_quiet(quiet: bool):
     """Enable or disable god mode receipt suppression."""
-    os.makedirs(config.SIGNAL_DIR, exist_ok=True)
-    path = os.path.join(config.SIGNAL_DIR, "_god_quiet.json")
+    os.makedirs(config.PREF_DIR, exist_ok=True)
+    path = os.path.join(config.PREF_DIR, "_god_quiet.json")
     if quiet:
         with open(path, "w") as f:
             json.dump({"ts": time.time()}, f)

@@ -13,6 +13,9 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/ubuntu/.pixi/bin/pixi run -m /home/ubuntu/.dotfiles/scripts/astra/pixi.toml astra listen
 Restart=on-failure
 RestartSec=5
+# Don't be a preferred OOM victim (user-service default is 200): the bridge
+# should outlive memory pressure caused by compute in the panes it watches.
+OOMScoreAdjust=0
 
 [Install]
 WantedBy=default.target
