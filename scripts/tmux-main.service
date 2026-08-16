@@ -1,0 +1,16 @@
+[Unit]
+Description=tmux server (main session), decoupled from ttyd
+
+[Service]
+Type=forking
+ExecStart=/usr/bin/tmux new-session -d -s main
+ExecStop=/usr/bin/tmux kill-server
+# User-manager services default to oom_score_adj=200 — makes the tiny tmux
+# server a preferred OOM victim over the runaway pane process causing the
+# pressure. 0 = judged purely by its (tiny) memory use.
+OOMScoreAdjust=0
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
