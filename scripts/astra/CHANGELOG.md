@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.40.7
+
+- **README: rewrite the Setup section.** Step-by-step BotFather token + chat-ID instructions (including empty-`getUpdates` troubleshooting and group/negative-ID note), document the automated `./install.zsh` path (service install, credential prompt) alongside the manual one, document env-var precedence over `~/.config/astra.env`, start the listener via `astra service` instead of foreground `astra listen`, and note the full `PreToolUse` matcher list in `claude_settings.json` that god mode requires (the inline JSON example is abridged).
+
 ## 0.40.6
 
 - **Fix empty stop messages on Claude Code ≥2.1.x.** Claude Code changed the settled response/tool bullet from `●` (U+25CF) to `⏺` (U+23FA). All pane parsing (`response_bullet`, `tool_header_re`, bullet searches in `clean_pane_content`/`_has_response_start`) keys on `●`, so stop captures found no response and every ✅ finished message arrived with an empty body. Captures are now glyph-normalized (`⏺` → `●`) at the source in `tmux._capture_pane`/`_capture_pane_ansi`, fixing every consumer at once; the sim harness's fake tmux applies the same normalization so tests stay faithful to production.

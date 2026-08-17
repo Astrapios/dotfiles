@@ -29,81 +29,126 @@ CLI hooks ──────────► astra hook ──► signal files �
 
 ## Setup
 
-### 1. Create a Telegram bot
+### 1. Create a Telegram bot and get its token
 
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot`, follow the prompts
-3. Save the bot token
+1. In Telegram, open a chat with [@BotFather](https://t.me/BotFather).
+2. Send `/newbot` and follow the prompts: pick a display name, then a username ending in `bot`.
+3. BotFather replies with a **token** like `123456789:AAH...`. Copy it — this is your `TELEGRAM_BOT_TOKEN`.
+
+To regenerate later: `/mybots` → select your bot → *API Token* → *Revoke current token*.
+
+> Treat the token like a password — anyone who has it can control your bot.
 
 ### 2. Get your chat ID
 
-1. Send any message to your new bot
-2. Visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-3. Find your `chat.id` in the response
+The bot can only message you **after you message it first**.
+
+1. Open your bot (the `t.me/<your_bot>` link from BotFather) and tap **Start**, or send it any message (e.g. `hi`).
+2. Read your chat ID out of the bot's update feed (replace `<TOKEN>`):
+
+   ```bash
+   curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | jq '.result[].message.chat.id'
+   ```
+
+   No `jq`? Open that URL in a browser and look for `"chat":{"id":...}` in the JSON.
+
+The number printed is your `TELEGRAM_CHAT_ID` — a **positive** integer for a personal chat.
+
+**If `getUpdates` returns `{"ok":true,"result":[]}`:**
+- You haven't messaged the bot yet, or a running `astra listen` already consumed the update — send the bot a fresh message and retry.
+- A webhook may be intercepting updates. Clear it, then resend a message:
+  ```bash
+  curl -s "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
+  ```
+
+**Group / channel (optional):** add the bot to the group, send a message there, and re-run `getUpdates` — the `chat.id` will be **negative** (e.g. `-1001234567890`). Use that value.
+
+> Shortcut: message [@userinfobot](https://t.me/userinfobot) to get your personal numeric ID directly.
 
 ### 3. Save credentials
 
-Create `~/.config/astra.env`:
+Store the values from steps 1–2 in `~/.config/astra.env`:
 
 ```
-TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-TELEGRAM_CHAT_ID=your-chat-id
+TELEGRAM_BOT_TOKEN=123456789:AAH...
+TELEGRAM_CHAT_ID=123456789
 
 # Optional: secondary bot for send-doc/send-photo (e.g. Obsidian sync)
-TELEGRAM_DOC_BOT_TOKEN=789012:GHI-JKL...
-TELEGRAM_DOC_CHAT_ID=your-doc-chat-id
+TELEGRAM_DOC_BOT_TOKEN=987654321:AAG...
+TELEGRAM_DOC_CHAT_ID=123456789
 ```
+
+```bash
+chmod 600 ~/.config/astra.env
+```
+
+The same-named **environment variables** also work and take precedence over the file. (The automated installer in step 4 writes this file for you.)
 
 ### 4. Install
 
-Requires [pixi](https://pixi.sh) (conda-based Python environment manager).
+**Automated (recommended)** — from the dotfiles repo root:
 
 ```bash
-cd scripts/astra
-pixi install
+./install.zsh        # add -y for non-interactive
 ```
 
-This installs `astra` as an editable package with its dependencies (Python 3.11+, requests).
+This installs [pixi](https://pixi.sh), installs astra as an editable package, creates the `~/bin/astra` wrapper, symlinks the Claude hooks into `~/.claude/settings.json`, installs the listener as a background service (launchd on macOS, systemd on Linux), and — if `~/.config/astra.env` doesn't already exist — prompts for the token + chat ID from steps 1–2. Then skip to step 5.
 
-### 5. Make `astra` available in PATH
+**Manual** — if you'd rather not run the installer:
 
-Create a wrapper script (e.g. `~/bin/astra`):
+1. Install the package (requires [pixi](https://pixi.sh), Python 3.11+):
 
-```sh
-#!/bin/sh
-exec pixi run -m /path/to/scripts/astra/pixi.toml astra "$@"
+   ```bash
+   cd scripts/astra && pixi install
+   ```
+
+2. Put `astra` on your `PATH` with a wrapper at `~/bin/astra`:
+
+   ```sh
+   #!/bin/sh
+   exec pixi run -m /absolute/path/to/scripts/astra/pixi.toml astra "$@"
+   ```
+
+   ```bash
+   chmod +x ~/bin/astra
+   ```
+
+3. Configure Claude Code hooks — copy or symlink `scripts/claude_settings.json` to `~/.claude/settings.json` (or merge the `hooks` block). Every hook is the same command:
+
+   ```json
+   {
+     "hooks": {
+       "Notification": [
+         { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }
+       ],
+       "Stop": [
+         { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }
+       ],
+       "PreToolUse": [
+         { "matcher": "Bash", "hooks": [{ "type": "command", "command": "astra hook" }] },
+         { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "astra hook" }] }
+       ]
+     }
+   }
+   ```
+
+   The checked-in `claude_settings.json` additionally registers `PreToolUse` matchers for `Edit`, `Write`, `Read`, `WebFetch`, `WebSearch`, `Glob`, `Grep`, `NotebookEdit`, `Task`, and `EnterPlanMode` — required for god mode (`/god`) to see and auto-approve those tools. The abridged block above is the minimum for notifications, stop messages, and Bash permission prompts; use the full file as the source of truth.
+
+### 5. Start the listener
+
+Run it as a managed service (auto-starts on login/boot):
+
+```bash
+astra service start      # manage with: start | stop | restart | status | log [N]
 ```
 
-Make it executable: `chmod +x ~/bin/astra`
-
-### 6. Configure Claude Code hooks
-
-Copy or symlink `claude_settings.json` to `~/.claude/settings.json` (or merge with your existing settings):
-
-```json
-{
-  "hooks": {
-    "Notification": [
-      { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }
-    ],
-    "Stop": [
-      { "matcher": "", "hooks": [{ "type": "command", "command": "astra hook" }] }
-    ],
-    "PreToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "astra hook" }] },
-      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "astra hook" }] }
-    ]
-  }
-}
-```
-
-### 7. Start the listener
+…or run it in the foreground for a quick test:
 
 ```bash
 astra listen
 ```
 
-Run Claude Code in a tmux session. The listener auto-detects Claude panes and starts routing.
+Run Claude Code in a tmux session, then send `/status` to your bot — the listener auto-detects Claude panes and replies with the sessions it sees.
 
 ## CLI commands
 
