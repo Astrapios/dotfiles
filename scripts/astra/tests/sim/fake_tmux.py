@@ -16,6 +16,7 @@ from astra import tmux as _real_tmux
 _orig_join_wrapped_lines = _real_tmux._join_wrapped_lines
 _orig_format_sessions_message = _real_tmux.format_sessions_message
 _orig_sessions_keyboard = _real_tmux._sessions_keyboard
+_orig_normalize_glyphs = _real_tmux._normalize_glyphs
 
 
 @dataclass
@@ -68,7 +69,7 @@ class FakeTmux:
     def _capture_pane(self, pane, num_lines=20):
         for ps in self.panes.values():
             if ps.pane_target == pane:
-                lines = ps.content.split("\n")
+                lines = _orig_normalize_glyphs(ps.content).split("\n")
                 return "\n".join(lines[-num_lines:])
         return ""
 
@@ -76,7 +77,7 @@ class FakeTmux:
         for ps in self.panes.values():
             if ps.pane_target == pane:
                 content = ps.ansi_content or ps.content
-                lines = content.split("\n")
+                lines = _orig_normalize_glyphs(content).split("\n")
                 return "\n".join(lines[-num_lines:])
         return ""
 

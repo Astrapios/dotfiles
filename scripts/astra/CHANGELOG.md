@@ -5,6 +5,10 @@ All notable changes to astra (formerly tg-hook) are documented here.
 Versioning: **MINOR** (0.X.0) for new user-facing features (commands, APIs).
 **PATCH** (0.0.X) for bug fixes, refactors, and test/docs-only changes.
 
+## 0.40.6
+
+- **Fix empty stop messages on Claude Code ≥2.1.x.** Claude Code changed the settled response/tool bullet from `●` (U+25CF) to `⏺` (U+23FA). All pane parsing (`response_bullet`, `tool_header_re`, bullet searches in `clean_pane_content`/`_has_response_start`) keys on `●`, so stop captures found no response and every ✅ finished message arrived with an empty body. Captures are now glyph-normalized (`⏺` → `●`) at the source in `tmux._capture_pane`/`_capture_pane_ansi`, fixing every consumer at once; the sim harness's fake tmux applies the same normalization so tests stay faithful to production.
+
 ## 0.40.5
 
 - **Fix a focused window going completely dark after a session restart/clear.** Focus and smartfocus resolve the Claude transcript tail once and cache it. When the session restarts (or `/clear`s), Claude Code writes a *new* transcript JSONL — the cached tail polls the dead file forever, so the 🔍/👁 stream falls silent. And since stop signals for a focused window are suppressed by design (the stream replaces them), the window produces *nothing* on Telegram until focus is manually cancelled. Both tails now re-resolve whenever the hook-recorded transcript path changes, replaying the new session file from its start (it's young, and its content is genuinely unseen).

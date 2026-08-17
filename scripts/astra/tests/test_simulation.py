@@ -759,6 +759,47 @@ class TestStopSignalCliField(SimTestBase):
         self.h.assert_sent("analysis is complete")
 
 
+class TestNewBulletGlyph(SimTestBase):
+    """Claude Code ≥2.1.x renders the settled bullet as ⏺ (U+23FA), not ●
+    (U+25CF). Captures are normalized at the tmux layer so all downstream
+    parsing keeps working. Regression for empty stop messages on 2.1.x."""
+
+    def test_normalize_glyphs_maps_new_bullet(self):
+        from astra import tmux
+        self.assertEqual(tmux._normalize_glyphs("⏺ Bash(ls)\n⏺ Done."),
+                         "● Bash(ls)\n● Done.")
+
+    def test_stop_captures_response_with_new_bullet(self):
+        """Stop capture extracts the response from a 2.1.x-style pane."""
+        self.h.tmux.add_session("4", "%20", "myproject", idle=True)
+        s = self.h.make_listener_state()
+
+        # Realistic Claude Code 2.1.x pane: ⏺ for both tool and text bullets
+        self.h.tmux.set_pane_content("4",
+            "⏺ Bash(python3 check.py | tail -5)\n"
+            "  ⎿ all identities verified\n"
+            "\n"
+            "⏺ The identity check passed on every branch.\n"
+            "\n"
+            "❯ "
+        )
+
+        self.h.inject_signal("stop", "w4", pane="%20", project="myproject", cli="claude")
+        self.h.tick(s)
+
+        # Response text must be captured — not an empty "finished" header
+        self.h.assert_sent("identity check passed")
+
+    def test_has_response_start_after_normalization(self):
+        """_has_response_start sees a normalized 2.1.x capture as a response."""
+        from astra import content, tmux
+        raw = tmux._normalize_glyphs(
+            "⏺ Restarted the service.\n"
+            "❯ \n"
+        )
+        self.assertTrue(content._has_response_start(raw))
+
+
 class TestStartupDialogDetection(SimTestBase):
     """Scenario: Startup dialog detection (e.g. Gemini trust folder).
 

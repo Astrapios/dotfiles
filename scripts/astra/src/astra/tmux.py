@@ -167,6 +167,18 @@ def _join_wrapped_lines(lines: list[str], width: int) -> list[str]:
     return result
 
 
+def _normalize_glyphs(text: str) -> str:
+    """Normalize CLI glyph variants so downstream parsing sees one alphabet.
+
+    Claude Code ≥2.1.x renders the settled response/tool bullet as ⏺ (U+23FA)
+    where older versions used ● (U+25CF). All content parsing (profiles,
+    bullet searches, tool-header regexes) keys on ●, so captures are
+    normalized at the source. Applied by both capture functions and by the
+    sim harness's fake tmux, keeping tests faithful to production.
+    """
+    return text.replace("⏺", "●")
+
+
 def _capture_pane(pane: str, num_lines: int = 20) -> str:
     """Capture the last num_lines from a tmux pane."""
     try:
@@ -174,7 +186,7 @@ def _capture_pane(pane: str, num_lines: int = 20) -> str:
             ["tmux", "capture-pane", "-t", pane, "-p", "-S", f"-{num_lines}"],
             capture_output=True, text=True, timeout=5,
         )
-        lines = result.stdout.splitlines()
+        lines = _normalize_glyphs(result.stdout).splitlines()
         # Strip trailing empty lines (tall panes have blank lines below content)
         while lines and not lines[-1].strip():
             lines.pop()
@@ -192,7 +204,7 @@ def _capture_pane_ansi(pane: str, num_lines: int = 20) -> str:
             ["tmux", "capture-pane", "-t", pane, "-e", "-p", "-S", f"-{num_lines}"],
             capture_output=True, text=True, timeout=5,
         )
-        lines = result.stdout.splitlines()
+        lines = _normalize_glyphs(result.stdout).splitlines()
         while lines and not lines[-1].strip():
             lines.pop()
         if len(lines) > num_lines:

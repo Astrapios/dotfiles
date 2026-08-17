@@ -51,7 +51,7 @@ from .profiles import (
 # tmux
 from .tmux import (
     get_window_id, get_pane_project, _get_pane_command, _get_pane_cwd, _get_pane_width, _get_cursor_x,
-    _join_wrapped_lines, _capture_pane, _get_client_last_activity, _get_locally_viewed_windows,
+    _join_wrapped_lines, _capture_pane, _normalize_glyphs, _get_client_last_activity, _get_locally_viewed_windows,
     scan_claude_sessions, scan_cli_sessions, SessionInfo, resolve_session_id,
     format_sessions_message, _sessions_keyboard, _command_sessions_keyboard,
 )
