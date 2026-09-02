@@ -1,8 +1,14 @@
 # Global Claude Code Instructions
 
+## Writing Conventions
+
+- **No em/en dashes** in any drafted text (MR descriptions/comments, commit messages, docs, summaries, reports). Use a plain hyphen "-" (or restructure the sentence) instead of "—" or "–".
+- **Copy-paste drafts must be raw markdown in a fenced code block.** When drafting text the user will copy-paste elsewhere (MR/PR comments, descriptions, Slack messages, etc.), wrap the whole draft in a fenced code block so the literal markdown characters (`**bold**`, `` `code` ``, lists) survive the terminal rendering and paste correctly. Never present such drafts as rendered markdown.
+
 ## Git Conventions
 
 - Do NOT add "Co-Authored-By" lines or any Claude/AI attribution to commit messages.
+- **MR titles use commit-message tone**: imperative verb first, stating what it does (e.g. "Implement GPU range compression, add pulse-concatenation operators"), not a noun-phrase summary (e.g. not "GPU range compression and pulse-concatenation operators").
 
 ## Working Style
 
