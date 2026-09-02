@@ -41,49 +41,11 @@ ln -sf $SCRIPT_PATH/code-server/keybindings.json "$CODE_SERVER_USER_DIR/keybindi
 echo Installing Claude Code hooks...
 mkdir -p ~/bin ~/.claude ~/.config
 
-# Pixi + astra
-if ! command -v pixi &> /dev/null; then
-    echo "  installing pixi..."
-    curl -fsSL https://pixi.sh/install.sh | bash
-fi
-echo "  installing astra..."
-(cd $SCRIPT_PATH/scripts/astra && pixi install)
-cat > ~/bin/astra << WRAPPER
-#!/bin/sh
-exec pixi run -m $SCRIPT_PATH/scripts/astra/pixi.toml astra "\$@"
-WRAPPER
-chmod +x ~/bin/astra
-
-# Service for astra listener — systemd (Linux) or launchd (macOS)
-if [[ "$(uname)" == "Darwin" ]]; then
-    echo "  installing astra launchd agent..."
-    mkdir -p ~/Library/LaunchAgents ~/Library/Logs
-    pixi run -m $SCRIPT_PATH/scripts/astra/pixi.toml python -c "
-from astra.service import generate_launchd_plist, LAUNCHD_PLIST
-import os
-plist = generate_launchd_plist('$SCRIPT_PATH')
-with open(LAUNCHD_PLIST, 'w') as f:
-    f.write(plist)
-print(f'  wrote {LAUNCHD_PLIST}')
-"
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.astra.listener.plist 2>/dev/null || \
-        launchctl kickstart -k gui/$(id -u)/io.astra.listener 2>/dev/null || true
-    echo "  astra launchd agent installed (manage with: astra service <start|stop|restart|status>)"
-else
-    echo "  installing astra systemd service..."
-    mkdir -p ~/.config/systemd/user
-    # Template the unit file — repo copy hardcodes /home/ubuntu paths
-    sed -e "s|/home/ubuntu/.pixi/bin/pixi|$(command -v pixi || echo $HOME/.pixi/bin/pixi)|" \
-        -e "s|/home/ubuntu/.dotfiles|$SCRIPT_PATH|" \
-        $SCRIPT_PATH/scripts/astra/astra.service > ~/.config/systemd/user/astra.service
-    systemctl --user daemon-reload
-    systemctl --user enable astra
-    # Keep the user session alive after logout/reboot (without this the
-    # service never starts at boot — bit us after an OOM kill once)
-    sudo loginctl enable-linger $USER 2>/dev/null || \
-        echo "  (run 'sudo loginctl enable-linger $USER' to start astra at boot)"
-    echo "  astra service enabled (manage with: astra service <start|stop|restart|status>)"
-fi
+# astra (the Telegram bridge) now lives in its own repo at ~/src/astra.
+# Install it from there: `git clone git@github.com:Astrapios/astra.git ~/src/astra
+# && cd ~/src/astra && ./install.sh`. The hook symlinks below still wire Claude
+# Code / Gemini to `astra hook` via the ~/bin/astra PATH wrapper its installer
+# creates.
 
 # rtk (Rust Token Killer) — reduces LLM token consumption on CLI output
 if command -v rtk &> /dev/null && rtk gain &> /dev/null; then
