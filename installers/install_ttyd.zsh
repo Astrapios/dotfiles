@@ -6,19 +6,7 @@ YES=false
 [[ "$1" == "-y" ]] && YES=true
 DOTFILES_ROOT=${0:a:h:h}
 
-# 1. Detect Architecture and Latest Version
-ARCH=$(uname -m)
-[[ "$ARCH" == "x86_64" ]] && TTYD_ARCH="x86_64"
-[[ "$ARCH" == "aarch64" ]] && TTYD_ARCH="aarch64"
-
-LATEST_VERSION=$(curl -s https://api.github.com/repos/tsl0922/ttyd/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')
-
-if [[ -z "$LATEST_VERSION" ]]; then
-    echo "❌ Error: Could not fetch ttyd version."
-    exit 1
-fi
-
-# 2. Collect Configuration
+# 1. Collect Configuration
 if $YES; then
     TTYD_PORT=$DEFAULT_PORT
 else
@@ -28,14 +16,16 @@ else
     TTYD_PORT=${TTYD_PORT:-$DEFAULT_PORT}
 fi
 
-# 3. Install Dependencies & ttyd
-echo "--- Installing Dependencies & ttyd $LATEST_VERSION ---"
+# 2. Install Dependencies & ttyd
+# ttyd is built from upstream main + local patches (OSC 52 clipboard, iOS
+# fixes); see installers/ttyd/README.md. The release binary lacks all of it.
+echo "--- Installing Dependencies & building ttyd ---"
 sudo apt update && sudo apt install -y tmux wget curl
-DOWNLOAD_URL="https://github.com/tsl0922/ttyd/releases/download/${LATEST_VERSION}/ttyd.${TTYD_ARCH}"
-sudo wget -qO /usr/local/bin/ttyd "$DOWNLOAD_URL"
-sudo chmod +x /usr/local/bin/ttyd
+"$DOTFILES_ROOT/installers/ttyd/build_ttyd.zsh" --no-install
+TTYD_BIN=$(ls -t ${TTYD_BUILD_DIR:-$HOME/src/build-ttyd}/ttyd-*-patched | head -1)
+sudo install -m755 "$TTYD_BIN" /usr/local/bin/ttyd
 
-# 4. Create Systemd Service
+# 3. Create Systemd Service
 CURRENT_USER=$(whoami)
 SERVICE_FILE="/etc/systemd/system/ttyd.service"
 

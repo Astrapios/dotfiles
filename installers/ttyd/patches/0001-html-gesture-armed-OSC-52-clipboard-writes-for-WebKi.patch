@@ -1,0 +1,253 @@
+From 48974c108ef13c251cdbd897fe0811298405131a Mon Sep 17 00:00:00 2001
+From: Jisu Ryu <jisu.ryu@arraylabs.io>
+Date: Mon, 14 Sep 2026 11:22:45 -0700
+Subject: [PATCH 1/2] html: gesture-armed OSC 52 clipboard writes for WebKit,
+ tap-to-copy fallback
+
+---
+ .../terminal/xterm/addons/clipboard.ts        | 193 ++++++++++++++++++
+ html/src/components/terminal/xterm/index.ts   |   8 +-
+ 2 files changed, 199 insertions(+), 2 deletions(-)
+ create mode 100644 html/src/components/terminal/xterm/addons/clipboard.ts
+
+diff --git a/html/src/components/terminal/xterm/addons/clipboard.ts b/html/src/components/terminal/xterm/addons/clipboard.ts
+new file mode 100644
+index 0000000..300b709
+--- /dev/null
++++ b/html/src/components/terminal/xterm/addons/clipboard.ts
+@@ -0,0 +1,193 @@
++// OSC 52 clipboard provider that also works on WebKit (Safari, every iOS browser).
++//
++// The stock BrowserClipboardProvider calls navigator.clipboard.writeText() when
++// the OSC 52 sequence arrives over the websocket. That is outside any user event
++// handler, which Chrome allows (clipboard-write is auto-granted to the active
++// tab) and Firefox allows within ~5 s of a real key/pointer event (transient
++// activation), but WebKit refuses: it requires navigator.clipboard.write() to be
++// *called* synchronously inside the user gesture. WebKit does accept a
++// ClipboardItem whose payload is a promise, so on WebKit we arm such a write on
++// every gesture in the terminal and resolve it when OSC 52 arrives shortly after.
++// Abandoned arms are rejected; WebKit's ItemWriter then rejects without touching
++// the pasteboard (Clipboard.cpp didSetAllData -> reject() when data is missing).
++//
++// If a write is refused anyway, the text is parked and a "Tap to copy" button is
++// shown; the tap is a gesture, so the write from its handler is allowed.
++import type { IClipboardProvider } from '@xterm/addon-clipboard';
++
++type Armed = {
++    at: number;
++    resolve: (text: string) => void;
++    reject: (err: Error) => void;
++    written: Promise<void>;
++    timer: number;
++};
++
++export function isWebKitEngine(): boolean {
++    const ua = navigator.userAgent;
++    const vendorApple = typeof navigator.vendor === 'string' && navigator.vendor.indexOf('Apple') === 0;
++    const blink = /\b(Chrome|Chromium|Edg|OPR)\//.test(ua);
++    return vendorApple || (/AppleWebKit\//.test(ua) && !blink);
++}
++
++export class GestureClipboardProvider implements IClipboardProvider {
++    private armed?: Armed;
++    private pendingText?: string;
++    private button?: HTMLButtonElement;
++    private buttonTimer?: number;
++    private host?: HTMLElement;
++    private readonly armWindowMs: number;
++    private readonly armOnGesture: boolean;
++
++    constructor(
++        private notify: (msg: string) => void = () => {},
++        armWindowMs = 1500,
++        armOnGesture: boolean = isWebKitEngine()
++    ) {
++        this.armWindowMs = armWindowMs;
++        this.armOnGesture = armOnGesture;
++    }
++
++    /** Call once the terminal is open; `host` is terminal.element. */
++    attach(host: HTMLElement): void {
++        this.host = host;
++        if (!this.armOnGesture) return;
++        if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return;
++        for (const type of ['keydown', 'pointerup', 'mouseup', 'touchend']) {
++            host.addEventListener(type, this.arm, { capture: true, passive: true });
++        }
++    }
++
++    readText(selection: string): Promise<string> {
++        if (selection !== 'c') return Promise.resolve('');
++        return navigator.clipboard.readText();
++    }
++
++    async writeText(selection: string, text: string): Promise<void> {
++        // Accept 'c' (clipboard), '' (xterm default = clipboard + primary) and 'p'.
++        if (selection !== 'c' && selection !== '' && selection !== 'p' && selection !== 's') return;
++
++        const armed = this.takeArmed();
++        if (armed) {
++            armed.resolve(text);
++            try {
++                await armed.written;
++                this.notify('✂ copied');
++                return;
++            } catch {
++                // fall through to the direct attempt, then to the button
++            }
++        }
++        try {
++            await navigator.clipboard.writeText(text);
++            return;
++        } catch {
++            this.pendingText = text;
++            this.showButton();
++        }
++    }
++
++    private arm = (): void => {
++        const now = Date.now();
++        if (this.armed && now - this.armed.at < 150) return; // pointerup + mouseup of one gesture
++        this.disarm();
++        let resolve!: (text: string) => void;
++        let reject!: (err: Error) => void;
++        const payload = new Promise<string>((res, rej) => {
++            resolve = res;
++            reject = rej;
++        });
++        const item = new ClipboardItem({ 'text/plain': payload.then(t => new Blob([t], { type: 'text/plain' })) });
++        let written: Promise<void>;
++        try {
++            written = navigator.clipboard.write([item]); // must be called inside the gesture
++        } catch (e) {
++            reject(e as Error);
++            return;
++        }
++        written.catch(() => {}); // abandoned arms reject; keep them from surfacing as unhandled
++        const timer = window.setTimeout(() => this.disarm(), this.armWindowMs);
++        this.armed = { at: now, resolve, reject, written, timer };
++    };
++
++    private takeArmed(): Armed | undefined {
++        const a = this.armed;
++        if (!a) return undefined;
++        this.armed = undefined;
++        window.clearTimeout(a.timer);
++        if (Date.now() - a.at > this.armWindowMs) {
++            a.reject(new Error('stale'));
++            return undefined;
++        }
++        return a;
++    }
++
++    private disarm(): void {
++        const a = this.armed;
++        if (!a) return;
++        this.armed = undefined;
++        window.clearTimeout(a.timer);
++        a.reject(new Error('no OSC 52 arrived'));
++    }
++
++    private showButton(): void {
++        if (!this.host) return;
++        if (!this.button) {
++            const b = document.createElement('button');
++            b.type = 'button';
++            b.textContent = 'Tap to copy';
++            b.style.cssText = `position: absolute; top: 12px; right: 12px; z-index: 10;
++padding: 0.6em 1.2em; font: inherit; font-size: 16px; border: 0; border-radius: 10px;
++background: #f0f0f0; color: #101010; opacity: 0.92; cursor: pointer;
++-webkit-user-select: none; user-select: none; touch-action: manipulation;`;
++            b.addEventListener('pointerdown', e => e.stopPropagation(), true);
++            b.addEventListener('mousedown', e => e.stopPropagation(), true);
++            b.addEventListener('click', this.onButtonTap);
++            this.button = b;
++        }
++        if (!this.button.parentNode) this.host.appendChild(this.button);
++        if (this.buttonTimer) window.clearTimeout(this.buttonTimer);
++        this.buttonTimer = window.setTimeout(() => this.hideButton(), 20000);
++    }
++
++    private hideButton(): void {
++        if (this.buttonTimer) window.clearTimeout(this.buttonTimer);
++        this.buttonTimer = undefined;
++        this.button?.parentNode?.removeChild(this.button);
++    }
++
++    private onButtonTap = (e: Event): void => {
++        e.preventDefault();
++        e.stopPropagation();
++        const text = this.pendingText;
++        this.pendingText = undefined;
++        this.hideButton();
++        if (text === undefined) return;
++        // Called synchronously inside the tap handler, which every browser allows.
++        navigator.clipboard.writeText(text).then(
++            () => this.notify('✂ copied'),
++            () => {
++                if (this.legacyCopy(text)) this.notify('✂ copied');
++                else this.notify('copy blocked');
++            }
++        );
++    };
++
++    private legacyCopy(text: string): boolean {
++        const ta = document.createElement('textarea');
++        ta.value = text;
++        ta.setAttribute('readonly', '');
++        ta.style.cssText = 'position: fixed; top: 0; left: 0; opacity: 0; pointer-events: none;';
++        document.body.appendChild(ta);
++        ta.select();
++        ta.setSelectionRange(0, text.length);
++        let ok = false;
++        try {
++            ok = document.execCommand('copy');
++        } catch {
++            ok = false;
++        }
++        document.body.removeChild(ta);
++        return ok;
++    }
++}
+diff --git a/html/src/components/terminal/xterm/index.ts b/html/src/components/terminal/xterm/index.ts
+index b332154..8461c8e 100644
+--- a/html/src/components/terminal/xterm/index.ts
++++ b/html/src/components/terminal/xterm/index.ts
+@@ -2,13 +2,14 @@ import { bind } from 'decko';
+ import type { IDisposable, ITerminalOptions } from '@xterm/xterm';
+ import { Terminal } from '@xterm/xterm';
+ import { CanvasAddon } from '@xterm/addon-canvas';
+-import { ClipboardAddon } from '@xterm/addon-clipboard';
++import { Base64, ClipboardAddon } from '@xterm/addon-clipboard';
+ import { WebglAddon } from '@xterm/addon-webgl';
+ import { FitAddon } from '@xterm/addon-fit';
+ import { WebLinksAddon } from '@xterm/addon-web-links';
+ import { ImageAddon } from '@xterm/addon-image';
+ import { Unicode11Addon } from '@xterm/addon-unicode11';
+ import { OverlayAddon } from './addons/overlay';
++import { GestureClipboardProvider } from './addons/clipboard';
+ import { ZmodemAddon } from './addons/zmodem';
+ 
+ import '@xterm/xterm/css/xterm.css';
+@@ -86,7 +87,9 @@ export class Xterm {
+     private terminal: Terminal;
+     private fitAddon = new FitAddon();
+     private overlayAddon = new OverlayAddon();
+-    private clipboardAddon = new ClipboardAddon();
++    private clipboardProvider = new GestureClipboardProvider(msg => this.overlayAddon.showOverlay(msg, 400));
++    // @ts-expect-error addon-clipboard 0.1.0 typings declare (provider?) but the runtime constructor is (base64, provider)
++    private clipboardAddon = new ClipboardAddon(new Base64(), this.clipboardProvider);
+     private webLinksAddon = new WebLinksAddon();
+     private webglAddon?: WebglAddon;
+     private canvasAddon?: CanvasAddon;
+@@ -166,6 +169,7 @@ export class Xterm {
+         terminal.loadAddon(webLinksAddon);
+ 
+         terminal.open(parent);
++        if (terminal.element) this.clipboardProvider.attach(terminal.element);
+         fitAddon.fit();
+     }
+ 
+-- 
+2.43.0
+

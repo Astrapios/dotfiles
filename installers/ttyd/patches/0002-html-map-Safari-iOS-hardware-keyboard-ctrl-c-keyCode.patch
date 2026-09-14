@@ -1,0 +1,41 @@
+From 249fbcf3ed827229f8681bed523d930af70413f1 Mon Sep 17 00:00:00 2001
+From: Jisu Ryu <jisu.ryu@arraylabs.io>
+Date: Mon, 14 Sep 2026 11:30:49 -0700
+Subject: [PATCH 2/2] html: map Safari iOS hardware-keyboard ctrl-c (keyCode
+ 13) to ETX, add ?keydebug overlay
+
+---
+ html/src/components/terminal/xterm/index.ts | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/html/src/components/terminal/xterm/index.ts b/html/src/components/terminal/xterm/index.ts
+index 8461c8e..8c4dff7 100644
+--- a/html/src/components/terminal/xterm/index.ts
++++ b/html/src/components/terminal/xterm/index.ts
+@@ -168,6 +168,23 @@ export class Xterm {
+         terminal.loadAddon(clipboardAddon);
+         terminal.loadAddon(webLinksAddon);
+ 
++        // Safari on iPhone/iPad/Vision Pro with a hardware keyboard delivers ctrl-c
++        // as keyCode 13 (Enter) with key 'c' + ctrlKey; xterm.js < 7 maps it to CR.
++        // Send ETX ourselves and swallow the event (xterm.js issue #5721).
++        // Append ?keydebug to the URL to see the raw shape of modifier/Enter key events.
++        const keyDebug = new URLSearchParams(window.location.search).has('keydebug');
++        terminal.attachCustomKeyEventHandler(ev => {
++            if (keyDebug && ev.type === 'keydown' && (ev.ctrlKey || ev.metaKey || ev.altKey || ev.keyCode === 13)) {
++                const mods = (ev.ctrlKey ? ' ctrl' : '') + (ev.metaKey ? ' meta' : '') + (ev.altKey ? ' alt' : '');
++                this.overlayAddon.showOverlay(`key=${ev.key} code=${ev.code} keyCode=${ev.keyCode}${mods}`, 1500);
++            }
++            if (ev.keyCode === 13 && ev.ctrlKey && (ev.key === 'c' || ev.code === 'KeyC')) {
++                if (ev.type === 'keydown') this.sendData('\x03');
++                return false;
++            }
++            return true;
++        });
++
+         terminal.open(parent);
+         if (terminal.element) this.clipboardProvider.attach(terminal.element);
+         fitAddon.fit();
+-- 
+2.43.0
+

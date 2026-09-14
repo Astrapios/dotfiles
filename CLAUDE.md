@@ -44,6 +44,15 @@ mkdir -p ~/pixi_tools/<tool>
 cd ~/pixi_tools/<tool> && pixi install
 ```
 
+### ttyd (web terminal)
+
+`installers/install_ttyd.zsh` builds ttyd from upstream source via
+`installers/ttyd/build_ttyd.zsh` and applies `installers/ttyd/patches/`
+(OSC 52 clipboard on WebKit/iOS, ctrl-c on iOS hardware keyboards). The
+release binary must not be used: it predates OSC 52 support. The matching
+tmux side (Ms override forcing selection `c`) is in `.tmux.conf`. Rationale
+and update procedure: `installers/ttyd/README.md`.
+
 ### Config Files
 
 - `.tmux.conf` — Prefix is Ctrl+A, smart pane switching with Ctrl+hjkl, `|`/`_` for splits
