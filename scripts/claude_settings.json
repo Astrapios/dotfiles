@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       }
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -77,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -95,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -104,7 +104,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -113,7 +113,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -122,7 +122,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       },
@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "astra hook"
+            "command": "\"$HOME/bin/astra\" hook"
           }
         ]
       }
