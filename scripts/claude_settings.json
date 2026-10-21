@@ -135,6 +135,17 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/bin/astra\" hook"
+          }
+        ]
+      }
     ]
   },
   "effortLevel": "high",
