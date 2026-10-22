@@ -1,0 +1,10 @@
+{
+  "skills": ["mr-review"],
+  "query": "/mr-review jisu/sim_range_cull (MR !664) at the HEAD recorded as 'reviewed' in docs/branches/jisu-sim_range_cull-review.md history before the symmetric-pad fix",
+  "expected_behavior": [
+    "Treats the 'conservative margin' statement in the MR description and in backends.py comments as a CLAIM, not a fact, and lists it for the refuter",
+    "Runs a brute-force numeric counterexample search over pulse geometry and reports which side of the range window the margin leaves exposed",
+    "Reports the asymmetric margin as a bug with a file:line anchor and a figure, not as prose",
+    "Does not pass the margin argument into any domain-agent prompt as verified ground truth"
+  ]
+}

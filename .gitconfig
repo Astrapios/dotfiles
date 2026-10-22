@@ -1,0 +1,16 @@
+# This is Git's per-user configuration file.
+[user]
+# Please adapt and uncomment the following lines:
+	name = Jisu Ryu
+	email = jisu.ryu@arraylabs.io
+[pager]
+	diff = riff
+	show = riff
+	log = riff
+[interactive]
+	diffFilter = riff --color=on
+[spice "forge.gitlab"]
+	url = https://gitlab.gc.arraylabs.net
+[credential "https://gitlab.gc.arraylabs.net"]
+	helper = 
+	helper = !/usr/bin/glab auth git-credential

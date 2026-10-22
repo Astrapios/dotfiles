@@ -1,0 +1,12 @@
+[workspace]
+name = "imgcat"
+version = "0.1.0"
+description = "Render text as PNG images"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.11"
+
+[pypi-dependencies]
+Pillow = ">=10.0"

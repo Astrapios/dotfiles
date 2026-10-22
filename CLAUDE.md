@@ -59,6 +59,14 @@ and update procedure: `installers/ttyd/README.md`.
 - `.zshrc` — Antidote plugin manager, Pure prompt, FZF integration, custom funcs from `zsh_funcs/`
 - `.vimrc` — vim-plug, FZF, ALE linter, quantum theme
 - `code-server/` — VS Code Server settings and keybindings
-- `scripts/claude_global.md`, `scripts/claude_settings.json` — symlinked to `~/.claude/CLAUDE.md` and `~/.claude/settings.json`
-- `scripts/claude/skills/<name>/SKILL.md` — Claude Code skills, each directory symlinked to `~/.claude/skills/<name>` by `install.zsh`
-- `scripts/claude/agents/<name>.md` — Claude Code agent definitions, each symlinked into `~/.claude/agents/`
+- `.gitconfig`, `config/git/ignore` — git user, riff pager, git-spice forge, glab credential helper; global ignore
+- `config/mise/config.toml` — mise tool versions (git-spice via ubi); `install.zsh` runs `mise install`
+- `pixi_tools/<tool>/` — personal pixi tools (`~/pixi_tools` is a symlink to this directory; `.pixi` envs are gitignored and built in place)
+
+### Claude Code (all symlinked by `install.zsh`)
+
+- `scripts/claude_global.md` -> `~/.claude/CLAUDE.md` (always-on rules; procedures live in skills), `scripts/claude_rtk.md` -> `~/.claude/RTK.md` (imported by it)
+- `scripts/claude_settings.json` -> `~/.claude/settings.json` (model, hooks, promoted permissions), `scripts/claude_keybindings.json` -> `~/.claude/keybindings.json`
+- `scripts/claude/skills/<name>/` -> `~/.claude/skills/<name>`: `mr-review` (MR review with glab scripts, references, evals), `html-report` (self-contained dark HTML decks and reports, screenshot self-review), `glb-view` (ECEF GLB to S3 plus viewer link), `long-run` (background compute jobs with check-ins), `deeper`, `resolve-conflicts`, `vault-sync`
+- `scripts/claude/agents/<name>.md` -> `~/.claude/agents/`: `sar-physics-reviewer`
+- `scripts/claude/hooks/*.py|sh` -> `~/.claude/hooks/`: `guard_gitlab_publish.py` (PreToolUse guard: no publishing, plain notes or thread resolution on MRs)

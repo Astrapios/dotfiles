@@ -22,6 +22,36 @@ ln -sf $SCRIPT_PATH/.zsh_plugins.txt ~/.zsh_plugins.txt
 echo Installing vim config...
 ln -sf $SCRIPT_PATH/.vimrc ~/.vimrc
 
+# Git config (riff pager, git-spice forge, glab credential helper) + global ignore
+echo Installing git config...
+mkdir -p ~/.config/git
+ln -sf $SCRIPT_PATH/.gitconfig ~/.gitconfig
+ln -sf $SCRIPT_PATH/config/git/ignore ~/.config/git/ignore
+
+# mise (tool versions: git-spice via ubi)
+echo Installing mise config...
+mkdir -p ~/.config/mise
+ln -sf $SCRIPT_PATH/config/mise/config.toml ~/.config/mise/config.toml
+if command -v mise &> /dev/null; then
+    mise install -y 2>/dev/null || echo "  mise install failed (run it by hand)"
+else
+    echo "  mise not installed: curl https://mise.run | sh   (then rerun to get git-spice)"
+fi
+
+# Personal pixi tools: ~/pixi_tools is a symlink to the tracked directory (manifests,
+# locks, scripts); the .pixi environments are built in place and gitignored.
+# (pixi resolves a symlinked manifest to its real path, so per-file symlinks do not work.)
+echo Installing pixi tools...
+if [ -d ~/pixi_tools ] && [ ! -L ~/pixi_tools ]; then
+    mv ~/pixi_tools ~/pixi_tools.bak.$(date +%Y%m%d%H%M%S) && echo "  moved existing ~/pixi_tools aside"
+fi
+ln -sfn $SCRIPT_PATH/pixi_tools ~/pixi_tools
+for t in $SCRIPT_PATH/pixi_tools/*(/N); do
+    if command -v pixi &> /dev/null && [ ! -d $t/.pixi ]; then
+        (cd $t && pixi install -q) || echo "  pixi install failed for ${t:t}"
+    fi
+done
+
 # Tmux Config
 echo Installing tmux config...
 ln -sf $SCRIPT_PATH/.tmux.conf ~/.tmux.conf
@@ -58,6 +88,12 @@ fi
 # Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md
+ln -sf $SCRIPT_PATH/scripts/claude_rtk.md ~/.claude/RTK.md          # imported by CLAUDE.md (@RTK.md)
+ln -sf $SCRIPT_PATH/scripts/claude_keybindings.json ~/.claude/keybindings.json
+
+# Claude hooks referenced from claude_settings.json (guard_gitlab_publish.sh etc.)
+mkdir -p ~/.claude/hooks
+for f in $SCRIPT_PATH/scripts/claude/hooks/*.(sh|py)(.N); do ln -sf "$f" ~/.claude/hooks/${f:t}; done
 
 # Claude skills and agents: one symlink per skill directory / agent file, so
 # skills Claude Code manages itself (~/.claude/skills/synced, .trash) stay real
@@ -107,10 +143,35 @@ if [ ! -d $HOME/.fzf ]
 then
     git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
 fi
-if ! (grep -q "fzf" $HOME/.zshrc)
+# ~/.fzf.zsh is sourced from the dotfiles .zshrc, so never let the installer edit ~/.zshrc
+if [ ! -f $HOME/.fzf.zsh ]
 then
-    ~/.fzf/install --key-bindings --completion --update-rc
+    ~/.fzf/install --key-bindings --completion --no-update-rc
 fi
+
+################# TOOL CHECK (report only) #################
+echo Checking tools used by the configs...
+for tool in riff glab mise gs pixi conda nvm jq rtk astra claude tmux vim; do
+    if command -v $tool &> /dev/null || type $tool &> /dev/null || { [ $tool = nvm ] && [ -s "$HOME/.nvm/nvm.sh" ]; }; then
+        printf "  %-8s ok\n" $tool
+    else
+        case $tool in
+            riff)  hint="cargo install riffdiff (git pager in .gitconfig)";;
+            glab)  hint="https://gitlab.com/gitlab-org/cli/-/releases, then glab auth login";;
+            mise)  hint="curl https://mise.run | sh";;
+            gs)    hint="installed by mise install (git-spice)";;
+            pixi)  hint="curl -fsSL https://pixi.sh/install.sh | sh";;
+            conda) hint="miniforge3 installer";;
+            nvm)   hint="https://github.com/nvm-sh/nvm";;
+            jq)    hint="apt install jq";;
+            rtk)   hint="installed above";;
+            astra) hint="git clone git@github.com:Astrapios/astra.git ~/src/astra && ~/src/astra/install.sh";;
+            claude) hint="npm install -g @anthropic-ai/claude-code";;
+            *)     hint="apt install $tool";;
+        esac
+        printf "  %-8s MISSING  (%s)\n" $tool "$hint"
+    fi
+done
 
 ################# INSTALL SERVICES #################
 if $YES; then

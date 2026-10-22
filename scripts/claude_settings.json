@@ -32,6 +32,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"$HOME/.claude/hooks/guard_gitlab_publish.py\"",
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
             "command": "\"$HOME/bin/astra\" hook"
           }
         ]
@@ -167,5 +177,39 @@
       "effortLevel": "high"
     }
   },
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "permissions": {
+    "allow": [
+      "Bash(pixi run:*)",
+      "Bash(pixi:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(tree:*)",
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git show:*)",
+      "Bash(git fetch:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git branch:*)",
+      "Bash(gs ls:*)",
+      "Bash(glab mr view:*)",
+      "Bash(astra send-photo:*)",
+      "Bash(astra send-doc:*)",
+      "Bash(pgrep:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(du:*)",
+      "Bash(df:*)",
+      "WebSearch"
+    ]
+  }
 }

@@ -1,0 +1,10 @@
+{
+  "skills": ["mr-review"],
+  "query": "/mr-review on a branch whose diff is a docs-only or test-only change of under 100 lines with no production import",
+  "expected_behavior": [
+    "Classifies the review as Quick tier and says so in the report",
+    "Runs ruff and the dead-parameter sweep but launches no domain agents, no refuter and renders no HTML briefing",
+    "Reports 'no bugs found' plainly without padding the review with nits to justify the run",
+    "Writes the docs/branches/<branch>-review.md state file"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "skills": ["mr-review"],
+  "query": "Draft replies to the open reviewer threads on MR !675 as GitLab draft notes",
+  "expected_behavior": [
+    "Lists open threads with scripts/mr_discussions.py and posts with scripts/draft_note.py, never publishing and never posting plain notes",
+    "No internal labels (B1, S1, D1...) and no references to other MRs or scenes the author did not use appear in any draft",
+    "Every draft carries an ask or answers the reviewer's question; FYI-only comments are dropped",
+    "Proposed code changes that replace exactly the anchored lines are GitLab suggestion blocks anchored on those lines; otherwise diff blocks",
+    "At most three style/naming threads are posted"
+  ]
+}

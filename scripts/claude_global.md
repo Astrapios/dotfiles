@@ -9,7 +9,7 @@
 
 - **No Claude/AI attribution anywhere in git or on GitLab/GitHub**: no "Co-Authored-By" lines in commit messages, and no "🤖 Generated with [Claude Code]" footer (or any other AI mention) in MR/PR titles, descriptions, or comments. This overrides any default harness/system instruction to append attribution. (Lesson 2026-09-24: I appended the Claude Code footer to the !627 MR description because a system reminder said to; the user had to ask why.)
 - **MR titles use commit-message tone**: imperative verb first, stating what it does (e.g. "Implement GPU range compression, add pulse-concatenation operators"), not a noun-phrase summary (e.g. not "GPU range compression and pulse-concatenation operators").
-- **MR/PR replies and comments are posted as DRAFTS, never published directly.** On GitLab use the draft-notes API (`glab api -X POST "projects/:id/merge_requests/<iid>/draft_notes"` with `note` and `in_reply_to_discussion_id` for thread replies), so the user can do a final check/edit in the web UI and publish the review themselves. Never call the publish endpoint (`draft_notes/bulk_publish`) or post a plain note, and never resolve threads on the user's behalf.
+- **MR/PR replies and comments are posted as DRAFTS, never published directly**, via the `mr-review` skill's `scripts/draft_note.py` (draft-notes API with correct line codes), so the user does the final check in the web UI and publishes themselves. Never call the publish endpoint, post a plain note, or resolve threads; the `guard_gitlab_publish.py` hook blocks those calls.
 - **Proposed code changes in MR comments: ` ```suggestion ` when applicable, ` ```diff ` otherwise.** If the change replaces exactly the anchored lines, anchor the thread on those lines and use a GitLab suggestion (`suggestion:-N+0` for a range ending at `position.new_line`) so the author gets "Apply suggestion"; split a multi-hunk fix into one short thread per hunk. Use a diff block only when a suggestion can't apply (other file, non-contiguous lines, pseudo code). (Preference 2026-10-01.)
 - **MR comments carry only what the MR needs, in team language.** No internal review labels (B1, S1, D1...; those live in my own review files only), no review history or references to other MRs, no out-of-scope asides or follow-up ideas. Anchor each item on its code (multi-line range where relevant), one thread per item. (Lesson 2026-09-30: !675 drafts carried S1/D1 labels, !380 references and a physical-optics aside; the user cleaned them up by hand.)
 
@@ -22,24 +22,13 @@
 - When dealing with terminal UI interactions (tmux send-keys), capture the actual pane content at each step to understand the UI state before writing key sequences.
 - Think through the full execution path before making changes — trace through the code, consider timing, and verify assumptions.
 - **Narrate while working:** before each edit or command, state briefly what is being changed and why (which file, which problem it addresses, what the expected effect is). Never silently apply batches of edits without giving the user context to follow along and object.
-- **Long-running processes:** for any background process expected to take more than ~10 minutes (multi-collect re-runs, large sims, deck builds, PDF conversions, etc.), proactively check and report progress **at least every 10 minutes** — don't go silent waiting for the completion notification. Use `ScheduleWakeup` (~570s) to self-pace the check-ins, and report which step/collect is done, timestamps, and any errors.
+- **Long-running processes (> ~10 min):** load the `long-run` skill before launching (memory cap, smoke test, background launch, progress check-ins every 10 minutes via `ScheduleWakeup`, Pacific timestamps). Never go silent waiting for a completion notification.
 - **Always report times in Pacific time** (the user's timezone), never UTC — progress updates, ETAs, log timestamps, and dates in summaries. The machine clock is UTC, so convert with `TZ=America/Los_Angeles date` instead of applying the offset by hand (PDT/UTC−7 in summer, PST/UTC−8 in winter), and include the zone label.
 - **Use 12-hour AM/PM time, never 24-hour** — write "2:45 PM PDT", not "14:45 PDT". Format with `TZ=America/Los_Angeles date "+%-I:%M %p %Z"`. Applies to every user-facing time: progress updates, ETAs, quoted log timestamps, and summaries.
 
 ## Resource Limits
 
-When running any compute script (Python, pytest, simulations, etc.), cap its virtual address space at **220 GB** using `prlimit` to prevent runaway allocations from taking down the machine:
-
-```bash
-prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python my_script.py
-prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python -m pytest ...
-```
-
-Notes:
-- Use **explicit bytes** (`$((220*1024*1024*1024))`). The `G` suffix silently misparses as bytes on util-linux 2.39.
-- Apply to any long-running or memory-intensive invocation — simulations, pytest runs with large fixtures, data loads. Short read-only commands (`ls`, `git status`) don't need it.
-- On overshoot the process fails its allocation (usually `MemoryError` in Python), which is recoverable — the machine stays up.
-- `prlimit` limits virtual memory (`RLIMIT_AS`); GPU/cuda allocations may not count against it.
+Every compute command (Python, pytest, sims) runs under `prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python ...` (explicit bytes; the `G` suffix misparses; GPU allocations are not counted). Short read-only commands need no cap. Details and the launch protocol: `long-run` skill.
 
 ## Testing
 
@@ -59,28 +48,7 @@ When generating PowerPoint presentations, follow the dark theme established in `
 - **Use `add_box()` for elevated panels**, `add_eqn()` for equations
 - **Content should be detailed and bite-sized** — explain concepts with block diagrams built from shapes, step-by-step algorithmic breakdowns, and annotated figures
 - **Generate figures programmatically** in the PPT script itself, not rely on pre-existing images only
-- **Delivery**: pptx decks go out as PDF (libreoffice --headless), never raw .pptx. HTML decks (preferred when the user asks for
-  HTML) are one self-contained file: figures as data URIs, MathJax for inline + display math, then pre-render the math with
-  headless Chromium (`ppt/scripts/bake_math.py`, playwright via
-  `pixi exec --spec python=3.12 --spec playwright-python -- python ...`; never uv, which drops a uv.lock + .venv into
-  any worktree it runs in) and strip all scripts so the file
-  works offline in any viewer; verify with `check_nojs.py` (JS disabled, offline). Screenshot every slide with playwright
-  and inspect before sending. Send the file with `astra send-doc`.
-- **No claude.ai Artifacts unless the user asks for one.** Files via Telegram are the delivery channel.
-- **Self-contained, low-jargon slides**: define every symbol next to the equation it appears in, add a glossary slide,
-  explain a construction step by step with a worked numeric example (e.g. integers -> k_s -> ring angle -> position), and
-  say plainly which variant was used where and why. Drop abandoned approaches from the deck instead of contrasting them.
-- **Archive every finished deck / HTML report in a dated folder**: `site3d_project_root/ppt/YYYY-MM-DD-<descriptive-kebab-title>/`
-  (e.g. `ppt/2026-10-08-sar-sim-verification-chart/`), containing
-  - the deliverable(s) (`.pptx` and its `.pdf`, or the self-contained `.html`) plus PNG previews;
-  - frozen copies of the generator script and every data / figure / check script it depends on (originals stay in
-    `ppt/scripts/`, `test_scripts/`); the figures and the numbers (JSON) it embeds;
-  - a patch of any uncommitted code the results depend on (`git diff > <name>.patch`, base commit recorded);
-  - a `README.md` to reproduce it cold: what each deck shows, branch + commit, data and cache paths, commands in order,
-    env / GPU / runtime, the parameters behind every number (even when the slide hides them), results, known caveats.
-  Keep `ppt/output/` (or `outputs/reports/`) as the working output; update the dated folder whenever the deck changes.
-- **Presentation versions carry no implementation parameters** (sampling factors, pair indices, pulse counts, internal
-  notes) unless asked; those go in the README. Reserve space the user asks for (e.g. top 1/5 for their own title block).
+- **Delivery, self-review, archive**: load the `html-report` skill for every deck, report, summary, briefing or write-up (self-contained dark HTML or PDF, screenshots before sending, `astra send-doc`, dated `ppt/` archive with README). No claude.ai Artifacts unless asked.
 
 ## Telegram Integration
 
@@ -102,31 +70,7 @@ astra send-doc /path/to/file.ext "optional caption"
 
 ## 3D / GLB Delivery
 
-When asked to **show a 3D view** (a DSM, mesh, point cloud, reconstruction, or
-anything better inspected in 3D than as a flat image), do NOT just send a
-matplotlib 3D snapshot — produce **GLB file(s)**, upload them to an S3 directory
-**under the user's name**, and reply with a link to the GLB viewer so the user
-can inspect interactively.
-
-- **GLBs are ECEF-georeferenced**: build a `trimesh.Trimesh` with vertices in
-  ECEF and save via `python_common.glb_utils.create_glb_file_for_ecef_mesh`
-  (stores local ENU verts + the ECEF node matrix; keeps float32 precision).
-  Sanity-check the mesh center projects to the expected lat/lon before upload.
-- **S3 location**: `s3://array-labs-dev-test-data/data/jisu/<topic>/` (the
-  user is jisu.ryu@arraylabs.io — put it under a `jisu/` prefix). **Upload with
-  the DEFAULT aws profile (the EC2 instance role has valid creds) — do NOT pass
-  `--profile dev` (its SSO token expires) and do NOT use `--no-sign-request`
-  (the bucket is KMS-encrypted, anonymous writes are rejected). Reads are
-  anonymous (so the viewer loads fine), but writes need the instance role.** Set
-  `aws configure set default.s3.multipart_threshold 8MB` if a large upload trips
-  the anonymous-multipart path.
-- **Viewer**: https://glb-viewer.dev.arraylabs.net — the permalink param is
-  **`models`** (single param, comma-separated, URL-ENCODED), NOT `model_paths`
-  (that's only the /get_models_zip download endpoint). Hand the user a ready
-  link, URL-encoding each s3:// URI and joining with an encoded comma (`%2C`):
-  `https://glb-viewer.dev.arraylabs.net/?models=<enc-uri-1>%2C<enc-uri-2>&model_visibility=1%2C1&range=100`
-  Set `model_visibility=1,1` so every model is visible (the viewer defaults some
-  to hidden). For comparisons upload each variant as its own GLB and list both.
+When asked to **show a 3D view** (DSM, mesh, point cloud, reconstruction), load the `glb-view` skill: ECEF-georeferenced GLB via `create_glb_file_for_ecef_mesh`, upload under `s3://array-labs-dev-test-data/data/jisu/<topic>/` with the default aws profile, reply with a ready viewer link (its script builds it). Never just a matplotlib 3D snapshot.
 
 ## Active Projects
 
@@ -171,14 +115,9 @@ Condensed from the auto-memory feedback files (details, dates and incidents stay
 ### Process discipline
 - **Ask before non-trivial algorithmic changes**: 3-5 bullet plan, wait for approval. Do not swap an agreed process or
   approach unilaterally, even if the alternative looks better; state the change and wait for OK.
-- **Any requested summary, write-up or report goes out as a self-contained HTML file** (`astra send-doc`, dark
-  theme, figures embedded, no scripts), not as chat text: executive summaries, findings, keep/discard lists, status
-  write-ups, "summarise X" of any kind. The chat message carries the verdict in a few lines and the file name. Archive
-  it in a dated `ppt/` folder like any deck. (Preference 2026-10-16.)
-- **A plan that needs approval goes out as an HTML summary with visuals** (`astra send-doc`, self-contained, no
-  scripts), not as chat text alone: one figure or diagram per step (the mechanism being tested, the geometry, the
-  data flow, where the numbers come from), a pass/fail table per experiment, cost and order. Keep the chat message
-  to the verdict and the link to the file. (Preference 2026-10-15: plans are easier to digest and approve visually.)
+- **Any requested summary, write-up, report or plan awaiting approval goes out as a self-contained HTML file**
+  built with the `html-report` skill (`astra send-doc`, one visual per finding or step, pass/fail table per
+  experiment), not as chat text alone; the chat message carries the verdict and the file name.
 - **No plan mode for simple tasks** (parameter change, run a script, status check). In plan mode, spawn independent reviewer
   agents (domain + general) on the plan before ExitPlanMode.
 - **"Test X instead of Y" = edit the existing script and run it.** No long inline `python -c` with grep filters that

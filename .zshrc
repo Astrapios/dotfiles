@@ -69,3 +69,16 @@ setopt auto_cd
 autoload -Uz fullpath
 
 export PATH="$PATH:$HOME/bin/"
+
+# ---- machine-local toolchains (guarded so the file is harmless where a tool is absent) ----
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+if [ -x "$HOME/miniforge3/bin/conda" ]; then
+    __conda_setup="$("$HOME/miniforge3/bin/conda" 'shell.zsh' 'hook' 2>/dev/null)" && eval "$__conda_setup"
+    unset __conda_setup
+    [ -f "$HOME/miniforge3/etc/profile.d/mamba.sh" ] && . "$HOME/miniforge3/etc/profile.d/mamba.sh"
+fi
+[ -x "$HOME/.local/bin/mise" ] && eval "$("$HOME/.local/bin/mise" activate zsh)"
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+[ -d "$HOME/.pixi/bin" ] && export PATH="$HOME/.pixi/bin:$PATH"
