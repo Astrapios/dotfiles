@@ -59,3 +59,6 @@ and update procedure: `installers/ttyd/README.md`.
 - `.zshrc` — Antidote plugin manager, Pure prompt, FZF integration, custom funcs from `zsh_funcs/`
 - `.vimrc` — vim-plug, FZF, ALE linter, quantum theme
 - `code-server/` — VS Code Server settings and keybindings
+- `scripts/claude_global.md`, `scripts/claude_settings.json` — symlinked to `~/.claude/CLAUDE.md` and `~/.claude/settings.json`
+- `scripts/claude/skills/<name>/SKILL.md` — Claude Code skills, each directory symlinked to `~/.claude/skills/<name>` by `install.zsh`
+- `scripts/claude/agents/<name>.md` — Claude Code agent definitions, each symlinked into `~/.claude/agents/`

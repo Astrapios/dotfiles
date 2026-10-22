@@ -59,6 +59,24 @@ fi
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
 ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md
 
+# Claude skills and agents: one symlink per skill directory / agent file, so
+# skills Claude Code manages itself (~/.claude/skills/synced, .trash) stay real
+# directories next to the tracked ones. A real directory already in place is
+# moved aside, not merged into.
+echo "  installing Claude Code skills and agents..."
+mkdir -p ~/.claude/skills ~/.claude/agents
+for d in $SCRIPT_PATH/scripts/claude/skills/*(/N); do
+    dest=~/.claude/skills/${d:t}
+    if [ -d "$dest" ] && [ ! -L "$dest" ]; then
+        mv "$dest" "$dest.bak.$(date +%Y%m%d%H%M%S)"
+        echo "  moved existing $dest aside"
+    fi
+    ln -sfn "$d" "$dest"
+done
+for f in $SCRIPT_PATH/scripts/claude/agents/*.md(.N); do
+    ln -sf "$f" ~/.claude/agents/${f:t}
+done
+
 # Gemini settings symlink
 echo "  installing Gemini CLI hooks..."
 mkdir -p ~/.gemini
