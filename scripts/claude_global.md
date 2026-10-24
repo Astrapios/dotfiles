@@ -3,6 +3,7 @@
 ## Writing Conventions
 
 - **No em/en dashes** in any drafted text (MR descriptions/comments, commit messages, docs, summaries, reports). Use a plain hyphen "-" (or restructure the sentence) instead of "—" or "–".
+- **US spelling everywhere** (color, meter, center, analyze, gray), in chat, drafts, docs, captions, code comments and figure labels; never British spellings (colour, metre, centre, analyse, grey). (Preference 2026-10-22.)
 - **Copy-paste drafts must be raw markdown in a fenced code block.** When drafting text the user will copy-paste elsewhere (MR/PR comments, descriptions, Slack messages, etc.), wrap the whole draft in a fenced code block so the literal markdown characters (`**bold**`, `` `code` ``, lists) survive the terminal rendering and paste correctly. Never present such drafts as rendered markdown.
 
 ## Git Conventions
@@ -23,6 +24,7 @@
 - Think through the full execution path before making changes — trace through the code, consider timing, and verify assumptions.
 - **Narrate while working:** before each edit or command, state briefly what is being changed and why (which file, which problem it addresses, what the expected effect is). Never silently apply batches of edits without giving the user context to follow along and object.
 - **Long-running processes (> ~10 min):** load the `long-run` skill before launching (memory cap, smoke test, background launch, progress check-ins every 10 minutes via `ScheduleWakeup`, Pacific timestamps). Never go silent waiting for a completion notification.
+- **Context hygiene: clear between tasks, compact within one; the files carry the context.** On every prompt past 20k tokens of context, a hook (`~/.claude/hooks/context_advisor.py`, UserPromptSubmit) hands me the size and asks me to judge the prompt against the task in progress. A different task: open the reply with one line saying so, offer to write the handoff (decisions, state, next steps) into the durable notes (`docs/branches/<branch>.md`, `summary/`, the findings or plan file, memory), recommend `/clear`, and wait for the user's choice before starting it. The same task past 250k: recommend `/compact focus on <decisions, changed files, failing tests, remaining work>` with the focus drafted. Otherwise no comment. Once per task; the user runs `/clear` and `/compact`, never me. Knobs: `CONTEXT_ADVISOR_FLOOR`, `CONTEXT_ADVISOR_COMPACT`, `CONTEXT_ADVISOR_OFF=1`.
 - **Always report times in Pacific time** (the user's timezone), never UTC — progress updates, ETAs, log timestamps, and dates in summaries. The machine clock is UTC, so convert with `TZ=America/Los_Angeles date` instead of applying the offset by hand (PDT/UTC−7 in summer, PST/UTC−8 in winter), and include the zone label.
 - **Use 12-hour AM/PM time, never 24-hour** — write "2:45 PM PDT", not "14:45 PDT". Format with `TZ=America/Los_Angeles date "+%-I:%M %p %Z"`. Applies to every user-facing time: progress updates, ETAs, quoted log timestamps, and summaries.
 
