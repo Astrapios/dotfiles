@@ -50,9 +50,16 @@ def note(tokens: int) -> str:
     large = tokens >= COMPACT
     size = f"~{round(tokens / 1000)}k tokens" + (" (large)" if large else "")
     k = f"~{round(tokens / 1000)}k"
-    compact = ("If it continues the current task: the context is large, so your reply MUST end with this line, the "
-               f"focus drafted for this task: `Context: {k} tokens. Recommend /compact focus on <decisions, changed "
-               "files, failing tests, remaining work>`." if large else
+    compact = ("If it continues the current task: the context is large, so your reply MUST end with the line "
+               f"`Context: {k} tokens. Recommend /compact:` followed by a fenced code block holding ONE line the user "
+               "copies and runs as is: `/compact Keep: ... State: ... Next: ... Drop: ...`. Fill it from this "
+               "conversation, specific enough to resume cold. Keep: the workflow and rules in force (the exact steps "
+               "and commands, user preferences and corrections given in this session, decisions made and why). State: "
+               "exact versions, branches, worktree paths, background agent IDs and what each is doing, running jobs, "
+               "log and output paths, failing tests. Next: the remaining steps in order, including who to tell what. "
+               "Drop: what the summary can lose (per-run logs, superseded attempts, screenshot descriptions, earlier "
+               "histories). Names, paths and IDs, never placeholders or categories; one line, as long as it needs "
+               "(often 100-250 words), no line breaks." if large else
                "If it continues the current task: say nothing about context.")
     return (f"[context-advisor] Context so far: {size}. The user sees only your reply (Astra View, Telegram), never "
             "this note, so a recommendation you leave out is lost. Before answering, judge this prompt against the "
