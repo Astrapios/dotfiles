@@ -18,6 +18,9 @@ dark theme, self-contained, no JS, figures as data URIs.
 ## Page structure (adapt to what the round did)
 
 - Header: MR number, branch, date (Pacific, 12-hour), reviewed and fix commit SHAs, tier.
+- "What this MR does": the first block under the title, ahead of the verdict. Two or three
+  plain sentences on what the MR is trying to achieve (the problem it solves and the approach),
+  from the MR description and the diff, in your own words.
 - A 2-3 line verdict box (what is broken, what holds) and a one-line-per-finding table
   (id, severity pill, title), opening with the count.
 - One card per finding: severity pill and title, the figure, a caption of at most two

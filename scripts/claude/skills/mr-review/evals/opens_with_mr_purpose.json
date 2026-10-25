@@ -1,0 +1,10 @@
+{
+  "skills": ["mr-review"],
+  "query": "/mr-review geoff/formation_timing (MR !730) at head a90fdc7c",
+  "expected_behavior": [
+    "The HTML briefing's first block under the title is 'What this MR does': two or three plain sentences on the problem the MR solves and its approach, ahead of the verdict",
+    "The chat summary opens with the same 'What this MR does' sentences before the verdict or any finding",
+    "The docs/branches/geoff-formation_timing-review.md state file starts with a '## What this MR does' section",
+    "A review that opens with the verdict and never says what the MR is for fails"
+  ]
+}

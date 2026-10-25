@@ -46,7 +46,8 @@ If it exists, read it and review **incrementally**:
 - **Depth tier**, chosen by what the diff touches, never by who wrote it; state it in the report:
   - **Quick** - docs, comments, test-only or config-only changes, renames, additive tooling
     under `experimental/` or `test_scripts/` with no production import. Steps 1-3, step 6
-    (ruff + dead-parameter sweep), short chat summary, step 8. No fan-out, no refuter, no
+    (ruff + dead-parameter sweep), short chat summary opening with "What this MR does"
+    (step 7), step 8. No fan-out, no refuter, no
     figures, no HTML unless a real bug turns up. Do not pad a clean Quick review with nits.
   - **Standard** - ordinary production changes. Full flow, domain agents only for the domains
     actually touched.
@@ -164,8 +165,12 @@ Agent output is a lead, not a finding.
 
 ### 7. Synthesize the review
 
-A concise, skimmable report (never the agents' raw output). The chat summary is one line per
-finding (severity, what breaks, fix); the detail lives in the figures, sent in the same turn.
+A concise, skimmable report (never the agents' raw output). The report and the chat summary
+both open with "What this MR does"; after it, the chat summary is one line per finding
+(severity, what breaks, fix); the detail lives in the figures, sent in the same turn.
+- **What this MR does** - FIRST, before the verdict or any finding: two or three plain
+  sentences on what the MR is trying to achieve (the problem it solves and the approach), from
+  the MR description and the diff, in your own words. Also for a review of the user's own MR.
 - **Summary** - what `main` gains, 2-4 sentences, the code not the refactoring journey.
 - **Soundness & logic** - open with the count ("2 bugs, 1 significant, 3 minor; 2 pre-existing
   kept separate"), then findings de-duplicated across agents, most important first, each with
@@ -182,7 +187,9 @@ finding (severity, what breaks, fix); the detail lives in the figures, sent in t
 
 ### 8. Persist the review state (ALWAYS, before finishing)
 
-Write or update `docs/branches/<branch-with-slashes-as-dashes>-review.md`: reviewed range (MR,
+Write or update `docs/branches/<branch-with-slashes-as-dashes>-review.md`. It starts with a
+`## What this MR does` section (the step 7 sentences, kept current on incremental rounds when
+the MR's scope changes), then: reviewed range (MR,
 merge-base, HEAD, date, tier, fix SHAs); ground-truth facts with `file:line`; findings ledger
 (severity, `file:line`, status open / fixed-in-<sha> / wontfix-with-reason, pre-existing tag);
 reviewer-comment checklist (discussion id, anchor, gist, disposition, draft or posted reply);
