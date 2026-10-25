@@ -2,12 +2,13 @@
 """Screenshot a self-contained HTML deliverable for self-review, with JS disabled and offline.
 
 Usage:
-    pixi exec --spec python=3.12 --spec playwright-python -- python shot_html.py FILE OUTDIR [--width 1280]
+    uv run --no-project --with playwright python shot_html.py FILE OUTDIR [--width 1280]
         [--slides SELECTOR]   screenshot each matching element (e.g. "section.slide") instead of the page
 
 Writes OUTDIR/page_NN.png (viewport-height tiles of the full page) or OUTDIR/slide_NN.png, prints
-the count and the number of <script> tags left (should be 0 for a shipped file). Run it from the
-scratchpad; never `uv run`, which turns a worktree into a uv project.
+the count and the number of <script> tags left (should be 0 for a shipped file). Keep `--no-project`:
+without it `uv run` treats a worktree as a uv project. Not `pixi exec --spec playwright-python`: conda's
+playwright can overwrite its driver in pixi's shared cache (astra 0.194.1).
 """
 import argparse
 import pathlib

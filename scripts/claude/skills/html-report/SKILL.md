@@ -30,9 +30,10 @@ Files here: `assets/theme.css` (inline it), `assets/template.html` (skeleton),
    parameters (sampling factors, pair indices, internal notes) in the deliverable unless asked;
    those go in the README. Reserve space the user asks for (e.g. top fifth for their title block).
 4. Math: write MathJax inline/display math, then
-   `pixi exec --spec python=3.12 --spec playwright-python -- python scripts/bake_math.py in.html out.html`
-   to pre-render it and strip every `<script>`. Never `uv run` (it drops uv.lock and a .venv
-   into whatever worktree it runs in).
+   `uv run --no-project --with playwright python scripts/bake_math.py in.html out.html`
+   to pre-render it and strip every `<script>`. Always with `--no-project` (plain `uv run` drops uv.lock
+   and a .venv into whatever worktree it runs in), and never `pixi exec --spec playwright-python` (conda's
+   playwright can overwrite its driver in pixi's shared cache).
 5. Slide decks use `<section class="slide">` per slide with a slide number bottom-right. pptx
    decks (python-pptx, `~/pixi_tools/ppt`) go out as PDF via `libreoffice --headless`, never raw
    .pptx; the same theme values apply.
