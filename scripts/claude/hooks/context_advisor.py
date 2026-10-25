@@ -76,7 +76,7 @@ def note(tokens: int) -> str:
                "histories). Names, paths and IDs, never placeholders or categories; one line, as long as it needs "
                "(often 100-250 words), no line breaks." if large else
                "If it continues the current task: say nothing about context.")
-    return (f"[context-advisor] Context so far: {size}. The user sees only your reply (Astra View, Telegram), never "
+    return (f"[context-advisor] Context so far: {size}. The user sees only your reply (Astra View), never "
             "this note, so a recommendation you leave out is lost. Before answering, judge this prompt against the "
             "task in progress. A different task means a different feature, bug, repo area or question whose answer "
             "does not need this conversation's reasoning; a follow-up, a fix or a refinement of the current work is "
