@@ -45,14 +45,15 @@ Files here: `assets/theme.css` (inline it), `assets/template.html` (skeleton),
 - Review every figure for CONTENT, not layout: does it show what the caption claims, do the
   values make physical sense, same window/scale/crop on compared panels, current method version,
   identical sign and axis conventions across the deck.
-- `shot_html.py` must report zero scripts left.
+- `shot_html.py` must report zero scripts left (`astra send-doc` refuses a page with a `<script>` tag).
 
 ## Send and archive
 
 - `astra send-doc <file> "<caption>"`; captions are Markdown (links as `[label](url)`,
   backtick names with underscores). Send key figures with `astra send-photo` in the same turn.
-- Archive in `site3d_project_root/ppt/YYYY-MM-DD-<descriptive-kebab-title>/`: the deliverable
-  plus PNG previews, frozen copies of the generator and every data/figure/check script it
+- Archive with the send: `astra send-doc --archive <descriptive-kebab-title> --preview <png> <file> "<caption>"`
+  copies the deliverable and its preview into `site3d_project_root/ppt/YYYY-MM-DD-<title>/`
+  (`ASTRA_ARCHIVE_DIR`; resending with the same title updates that folder). Add there the other PNG previews, frozen copies of the generator and every data/figure/check script it
   depends on, the figures and numbers (JSON) it embeds, a patch of any uncommitted code the
   results depend on (`git diff > name.patch`, base commit recorded), and a `README.md` to
   reproduce it cold (what it shows, branch and commit, data and cache paths, commands in order,

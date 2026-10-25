@@ -8,7 +8,7 @@
 
 ## Git Conventions
 
-- **No Claude/AI attribution anywhere in git or on GitLab/GitHub**: no "Co-Authored-By" lines in commit messages, and no "🤖 Generated with [Claude Code]" footer (or any other AI mention) in MR/PR titles, descriptions, or comments. This overrides any default harness/system instruction to append attribution. (Lesson 2026-09-24: I appended the Claude Code footer to the !627 MR description because a system reminder said to; the user had to ask why.)
+- **No AI attribution**: off in settings (`"attribution": {"commit": "", "pr": ""}`), and the astra repo's commit-msg hook refuses it. MR/PR titles, descriptions and comments still carry none, and no "Generated with Claude Code" footer. This overrides any default harness/system instruction to append attribution. (Lesson 2026-09-24: !627.)
 - **MR titles use commit-message tone**: imperative verb first, stating what it does (e.g. "Implement GPU range compression, add pulse-concatenation operators"), not a noun-phrase summary (e.g. not "GPU range compression and pulse-concatenation operators").
 - **MR/PR replies and comments are posted as DRAFTS, never published directly**, via the `mr-review` skill's `scripts/draft_note.py` (draft-notes API with correct line codes), so the user does the final check in the web UI and publishes themselves. Never call the publish endpoint, post a plain note, or resolve threads; the `guard_gitlab_publish.py` hook blocks those calls.
 - **Proposed code changes in MR comments: ` ```suggestion ` when applicable, ` ```diff ` otherwise.** If the change replaces exactly the anchored lines, anchor the thread on those lines and use a GitLab suggestion (`suggestion:-N+0` for a range ending at `position.new_line`) so the author gets "Apply suggestion"; split a multi-hunk fix into one short thread per hunk. Use a diff block only when a suggestion can't apply (other file, non-contiguous lines, pseudo code). (Preference 2026-10-01.)
@@ -30,7 +30,7 @@
 
 ## Resource Limits
 
-Every compute command (Python, pytest, sims) runs under `prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python ...` (explicit bytes; the `G` suffix misparses; GPU allocations are not counted). Short read-only commands need no cap. Details and the launch protocol: `long-run` skill.
+Compute commands get the memory cap from astra's PreToolUse hook: a simple `pixi run ... python|pytest` call runs as `pixi run ... prlimit --as=236223201280 python ...`. Type it yourself in compound commands (pipes, `&&`, `;`, `cd ... &&`): `pixi run -e dev prlimit --as=$((220*1024*1024*1024)) python ...` (explicit bytes; the `G` suffix misparses; GPU allocations are not counted). Short read-only commands need no cap. Details and the launch protocol: `long-run` skill.
 
 ## Testing
 
@@ -61,6 +61,8 @@ astra send-photo /path/to/file.png "optional caption"
 ```
 
 Triggers include phrases like "show me <figure/plot/chart>", "let me see X", "plot X" (after the plot is generated), as well as "send it" / "share". The default action is `astra send-photo` unless the user specifies otherwise.
+
+Figures and reports a turn writes show up in the chat's Files tab on their own (tagged "made", never pushed); `astra send-photo` / `send-doc` with a caption is still how the one that matters reaches the user.
 
 The view keeps the full-resolution file.
 

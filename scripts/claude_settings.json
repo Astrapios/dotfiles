@@ -1,6 +1,7 @@
 {
   "env": {
-    "CLAUDE_CODE_DISABLE_MOUSE": "1"
+    "CLAUDE_CODE_DISABLE_MOUSE": "1",
+    "ASTRA_ARCHIVE_DIR": "/home/ubuntu/src/site3d_project_root/ppt"
   },
   "permissions": {
     "allow": [
@@ -36,6 +37,7 @@
       "WebSearch"
     ]
   },
+  "attribution": { "commit": "", "pr": "" },
   "model": "claude-opus-5-5",
   "hooks": {
     "Notification": [

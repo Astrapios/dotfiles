@@ -13,9 +13,10 @@ allowed-tools: Read, Bash, Write, Edit, Grep, Glob, ScheduleWakeup, Monitor
    enabled for every run, above all for benchmarks and "why is this slow" investigations; a
    measurement with a known speedup off is not a measurement. Flags that matter are default-on
    in code, not opt-in per script.
-3. **Cap memory.** Compute commands run under
-   `prlimit --as=$((220*1024*1024*1024)) pixi run -e dev python ...` (explicit bytes; the `G`
-   suffix misparses). GPU allocations do not count against it. Max four concurrent CPHD readers.
+3. **Cap memory.** astra's hook adds the cap to a simple `pixi run ... python|pytest` call
+   (`pixi run -e dev prlimit --as=236223201280 python ...`); in compound commands type it
+   yourself, `pixi run -e dev prlimit --as=$((220*1024*1024*1024)) python ...` (explicit bytes;
+   the `G` suffix misparses). GPU allocations do not count against it. Max four concurrent CPHD readers.
 4. **Launch in the background** with the Bash tool's `run_in_background`, never a trailing `&`
    inside a foreground call (pipes close, workers die with BrokenPipeError). Multi-GPU work
    reuses the spawn-Pool pattern (`mp.get_context("spawn").Pool(n_gpu)`, `CUDA_VISIBLE_DEVICES`
@@ -24,7 +25,8 @@ allowed-tools: Read, Bash, Write, Edit, Grep, Glob, ScheduleWakeup, Monitor
    names the step or collect done, timestamps, errors, and the updated ETA. Liveness via
    `pgrep -af '[p]attern'` plus `nvidia-smi` memory and log growth (`ps aux` is truncated by the
    rtk wrapper; never kill or relaunch on a bare `ps | grep` miss). Keep a `pkill` in its own
-   Bash call with the pattern bracketed so the call does not match itself.
+   Bash call with the pattern bracketed so the call does not match itself. astra reminds you at
+   the turn's end when a background job runs with no check-in scheduled.
 6. **Times are Pacific, 12-hour, with zone**: `TZ=America/Los_Angeles date "+%-I:%M %p %Z"`
    run in the same turn, never extrapolated or converted by hand.
 7. **Report faithfully.** A running command is not finished work; read the output you asked
