@@ -52,17 +52,17 @@ When generating PowerPoint presentations, follow the dark theme established in `
 - **Generate figures programmatically** in the PPT script itself, not rely on pre-existing images only
 - **Delivery, self-review, archive**: load the `html-report` skill for every deck, report, summary, briefing or write-up (self-contained dark HTML or PDF, screenshots before sending, `astra send-doc`, dated `ppt/` archive with README). No claude.ai Artifacts unless asked.
 
-## Telegram Integration
+## Sending figures and files (Astra View)
 
-Whenever the user asks you to **show** them a figure, image, chart, screenshot, or plot — even without explicitly saying "Telegram" or "send" — assume they mean for it to be delivered via Telegram (the user is typically on a phone/CLI without an inline image viewer). Use `astra send-photo` automatically as part of fulfilling the request:
+Whenever the user asks you to **show** them a figure, image, chart, screenshot, or plot, even without saying "send", deliver it with `astra send-photo` (the user is typically on a phone without an inline image viewer). It lands in this session's chat and the Gallery in Astra View and pushes to the user's devices (a picture with its thumbnail):
 
 ```bash
 astra send-photo /path/to/file.png "optional caption"
 ```
 
-Triggers include phrases like "show me <figure/plot/chart>", "let me see X", "plot X" (after the plot is generated), as well as the explicit "send to Telegram" / "share". The default action is `astra send-photo` unless the user specifies otherwise.
+Triggers include phrases like "show me <figure/plot/chart>", "let me see X", "plot X" (after the plot is generated), as well as "send it" / "share". The default action is `astra send-photo` unless the user specifies otherwise.
 
-Images larger than 1280px are automatically sent as documents to preserve full resolution.
+The view keeps the full-resolution file.
 
 To send any file (PDF, log, archive, etc.) as a document:
 

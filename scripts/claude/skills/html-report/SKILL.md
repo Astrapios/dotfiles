@@ -49,7 +49,7 @@ Files here: `assets/theme.css` (inline it), `assets/template.html` (skeleton),
 
 ## Send and archive
 
-- `astra send-doc <file> "<caption>"`; captions are Telegram Markdown (links as `[label](url)`,
+- `astra send-doc <file> "<caption>"`; captions are Markdown (links as `[label](url)`,
   backtick names with underscores). Send key figures with `astra send-photo` in the same turn.
 - Archive in `site3d_project_root/ppt/YYYY-MM-DD-<descriptive-kebab-title>/`: the deliverable
   plus PNG previews, frozen copies of the generator and every data/figure/check script it

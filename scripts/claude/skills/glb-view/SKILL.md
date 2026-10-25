@@ -20,7 +20,7 @@ snapshot. Reply with the link (and a top-down PNG via `astra send-photo` if a qu
    (prefix `s3://array-labs-dev-test-data/data/jisu/<topic>/`, default aws profile, viewer
    link printed with every model visible). For a comparison upload each variant as its own GLB
    and list both in one link.
-3. **Reply** with the link as Telegram Markdown (`[viewer](url)`), what each model is, and the
+3. **Reply** with the link as Markdown (`[viewer](url)`), what each model is, and the
    altitude range used. The viewer colours by altitude hue (`range=100`) and ignores vertex
    colours; for headless top-down shots pass `cam`, `camrot`, `orbit_point`.
 

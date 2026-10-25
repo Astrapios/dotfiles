@@ -12,10 +12,14 @@ from the tail of the transcript; subagent (sidechain) turns are skipped. Knobs (
   CONTEXT_ADVISOR_FLOOR    below this many tokens, no note (nothing worth clearing yet); default 20000
   CONTEXT_ADVISOR_COMPACT  from this size on, a long-running task is worth a /compact; default 250000
   CONTEXT_ADVISOR_OFF=1    no note at all
+An Astra View area's desk or worker gets no note (`astra role --json`): a large desk is replaced with New desk, which
+the desk's bar suggests, and a worker lives for one task. When astra is missing, fails or is slow, the note goes as
+before.
 Any error is swallowed: advice must never get in the way of a prompt.
 """
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +48,17 @@ def context_tokens(transcript: str) -> int | None:
         if usage:
             return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
     return None
+
+
+def in_area(session_id: str) -> bool:
+    """True when astra says this session is an area's desk or worker; False for anything else, including no astra,
+    an error or no answer within a second."""
+    astra = os.path.expanduser("~/bin/astra")
+    try:
+        r = subprocess.run([astra, "role", "--json", "--session", session_id], capture_output=True, text=True, timeout=1)
+        return json.loads(r.stdout).get("role") in ("desk", "worker")
+    except Exception:
+        return False
 
 
 def note(tokens: int) -> str:
@@ -81,7 +96,7 @@ def main() -> int:
     try:
         ev = json.load(sys.stdin)
         tokens = context_tokens(ev.get("transcript_path") or "")
-        if tokens is not None and tokens >= FLOOR:
+        if tokens is not None and tokens >= FLOOR and not in_area(ev.get("session_id") or ""):
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": note(tokens)}}))
     except Exception:   # never block a prompt over advice
         return 0
