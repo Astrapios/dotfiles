@@ -37,7 +37,10 @@
       "WebSearch"
     ]
   },
-  "attribution": { "commit": "", "pr": "" },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "model": "claude-opus-5-5",
   "hooks": {
     "Notification": [
@@ -215,6 +218,17 @@
       },
       {
         "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/bin/astra\" hook"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
