@@ -1,7 +1,13 @@
 {
   "env": {
     "CLAUDE_CODE_DISABLE_MOUSE": "1",
-    "ASTRA_ARCHIVE_DIR": "/home/ubuntu/src/site3d_project_root/ppt"
+    "ASTRA_ARCHIVE_DIR": "/home/ubuntu/src/site3d_project_root/ppt",
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": "http/json",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "http://127.0.0.1:7777/v1/metrics",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "cumulative",
+    "OTEL_METRIC_EXPORT_INTERVAL": "10000"
   },
   "permissions": {
     "allow": [
