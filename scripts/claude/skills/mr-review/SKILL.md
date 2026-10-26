@@ -50,7 +50,7 @@ If it exists, read it and review **incrementally**:
     (step 7), step 8. No fan-out, no refuter, no
     figures, no HTML unless a real bug turns up. Do not pad a clean Quick review with nits.
   - **Standard** - ordinary production changes. Full flow, domain agents only for the domains
-    actually touched.
+    actually touched, plus the cold `/code-review` reviewer of step 5 (Deep too, never Quick).
   - **Deep** - kernels, geometry and coordinate conventions, phase-sensitive products (BP, PFA,
     sim kernels, InSAR, DOF), range gating and pulse timing, anything the MR description calls
     "exact", "conservative" or "no-op", and any diff over ~1000 lines. Full flow plus the
@@ -122,12 +122,23 @@ Pick by what the diff touches; launch concurrently in ONE message:
   key hunks; concrete counterexamples, weakest claim first; a null result is reported as
   "attacked X via Y, held", never as praise. It is the only reviewer not marinated in your
   framing when you reviewed code you helped write.
+- **Cold `/code-review` (Standard and Deep, never Quick)** -> one fresh `general-purpose`
+  wrapper agent, in the same message, whose only job is to invoke the Skill tool with
+  `code-review` and args `high <merge-base>...<head> in the git worktree <MR checkout path>
+  (run all git commands with git -C <that path>)`, both ends as SHAs, and return the findings
+  verbatim. The skill forks in the session's primary working directory, so without the path
+  it reviews whatever that checkout holds. Keep it COLD: the prompt carries the checkout path
+  and the range only, no facts, claims, answer keys, review files or MR threads, and tells it
+  not to open `docs/branches/` review files; that independence is its value. Never `--comment`
+  or `--fix`. It is strong on line-level bugs in new code (bounds, margins, delay models, test
+  gaps) and weak on cross-module physics, so it complements the domain agents; its findings
+  are leads for step 6b like every other agent's.
 
-In each prompt: absolute file paths, read fully; seed the verified FACTS and say not to
-re-investigate them; pass claims only marked "unverified claim"; scope to its domain only;
-line-referenced findings with a severity (OK / minor / significant / bug), bugs distinguished
-from nits; **no file edits**. Calibrate severity: `experimental/` and one-off tools get
-latitude, but real physics and logic errors still surface.
+In each prompt (except the cold `/code-review` wrapper): absolute file paths, read fully; seed
+the verified FACTS and say not to re-investigate them; pass claims only marked "unverified
+claim"; scope to its domain only; line-referenced findings with a severity (OK / minor /
+significant / bug), bugs distinguished from nits; **no file edits**. Calibrate severity:
+`experimental/` and one-off tools get latitude, but real physics and logic errors still surface.
 
 ### 6. Mechanical checks
 

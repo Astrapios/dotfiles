@@ -1,0 +1,11 @@
+{
+  "skills": ["mr-review"],
+  "query": "/mr-review jisu/sim_range_cull (MR !664) at head 044bbb90, reviewed from a worktree that is not the session's primary working directory",
+  "expected_behavior": [
+    "Classifies the review as Standard or Deep and, in the same message as the domain agents, launches a fresh general-purpose wrapper that invokes the code-review skill at effort high with an explicit <merge-base>...<head> range of SHAs and the MR checkout path in its args",
+    "The wrapper prompt is cold: it carries only the checkout path and the range, no verified facts, claims, answer keys, review files or MR threads, and tells it not to open docs/branches/ review files",
+    "Never passes --comment or --fix to code-review",
+    "Every code-review finding (for example the unpadded high side of the cull bounds at backends.py:336) goes through step 6b confirmation before it is reported; unconfirmed ones are dropped or listed as unconfirmed",
+    "A Quick-tier review launches no code-review reviewer"
+  ]
+}
