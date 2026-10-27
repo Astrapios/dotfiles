@@ -14,8 +14,9 @@ Files here: `assets/theme-light.css` (decks and slides, the default for them),
 `assets/theme.css` (dark: reports, briefings, summaries, and decks only when the user asks for
 dark), `assets/deck-template.html` (white deck skeleton), `assets/template.html` (report
 skeleton), `scripts/bake_math.py` (typeset MathJax then strip scripts), `scripts/shot_html.py`
-(screenshots with JS off, offline; exits 1 if scripts remain). Both themes use the same class
-names, so a page switches theme by swapping the pasted stylesheet.
+(screenshots with JS off, offline; exits 1 if scripts remain), `scripts/render_math.js` (math
+to inline SVG with one shared glyph cache, for the derivation variant). Both themes use the same
+class names, so a page switches theme by swapping the pasted stylesheet.
 
 ## Build
 
@@ -53,6 +54,44 @@ names, so a page switches theme by swapping the pasted stylesheet.
    goes out as the `.pptx` itself (user, Oct 27 2026: "I need pptx as well to import to google
    slides"), so send both with `astra send-doc`. Strip autoshape theme styles (shadows show in
    LibreOffice and Google Slides) as `no_style()` in that script does.
+
+## Derivation variant (math-heavy write-ups)
+
+For derivations, proofs and paper-style technical reviews where equations carry the content,
+build a reading page instead of the dark report; everything above about self-containment,
+self-review, sending and archiving still applies.
+
+- **Math to inline SVG**: write `\[...\]` display and `\(...\)` inline TeX, then in the scratchpad
+  `npm install mathjax-full@3.2.1` and `NODE_PATH=$PWD/node_modules node <skill>/scripts/render_math.js in.html out.html`.
+  It wraps display math in `<div class="mjd">`, injects one shared glyph `<defs>` block before
+  `<div class="wrap">`, decodes HTML entities (a literal `&lt;` in math is a "Misplaced &" error,
+  so write `\lt`, `\gt`) and exits 2 on any `data-mjx-error`. Keep display equations under ~65ex:
+  split long chains into `\begin{aligned}` blocks broken before `=`, merge related one-liners.
+- **Theme-aware palette**: light on bare `:root`, overridden under both
+  `@media (prefers-color-scheme:dark)` guarded as `:root:not([data-theme="light"])` and under
+  `:root[data-theme="dark"]`; never give a color its only definition inside a media block. Ink
+  `#16202b` / `#3d4a58` / `#6b7885`, rules `#dde2e8`, panel `#f6f7f9`; accents blue `#1f5f8b`,
+  green `#1a7a5e`, amber `#a8560f`, crimson `#a32638`, purple `#7b4aa0`.
+- **Typography**: `.wrap` at `max-width:47rem`; Charter/Georgia serif for `h1`-`h3`, system sans
+  body at 16px/1.62; `h2` with a 2px accent underline; `.step` spans number the sections.
+- **Components**: `.box` (accent left border) with `.ok` / `.warn` variants for results and
+  caveats; a `.tw` scroll wrapper around every `<table>`, `td.num` monospace + `tabular-nums`.
+- **Figures as inline matplotlib SVG**: `svg.fonttype:"path"`, serif family,
+  `mathtext.fontset:"dejavuserif"`, white facecolor, `axes.linewidth:0.7`, ticks in, the accent
+  palette above. Strip the `width`/`height` attributes, set `style="width:100%;height:auto"`, wrap
+  in `.fgb` (white panel, rounded, `overflow-x:auto`). `mathtext` is not full LaTeX (`\leq` works,
+  `\le` and `\tfrac` do not). Render a PNG of each figure too and look at it; move crowded legends
+  to their own gridspec row or into the figcaption. Number captions `<b>Figure N.</b>` by document
+  order programmatically and re-resolve in-text references.
+- **Navigation for long pages**: a `.toc` card near the top listing every section, and a
+  `position:sticky` top bar of section links (plain anchors, no script) with `mask-image`
+  edge fades; `h2,h3{scroll-margin-top:3.9rem}` so anchors clear it.
+- **Responsive**: breakpoints at 680px and 430px shrink body text, scale `.mjd` to `.84em` then
+  `.70em` so math fits instead of scrolling sideways, tighten table padding, drop non-essential
+  bar labels.
+- **Validate before sending**: MathJax errors 0, unresolved glyph `xlink:href`s 0, balanced tags,
+  no external refs (every `src`/`href` a `#` anchor or absent), no `<script>`, no em/en dashes,
+  TOC anchors all resolving, widest display equation under 70ex.
 
 ## Self-review before sending (mandatory)
 
