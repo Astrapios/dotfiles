@@ -67,7 +67,11 @@ names, so a page switches theme by swapping the pasted stylesheet.
 ## Send and archive
 
 - `astra send-doc <file> "<caption>"`; captions are Markdown (links as `[label](url)`,
-  backtick names with underscores). Send key figures with `astra send-photo` in the same turn.
+  backtick names with underscores). The page carries the task's figures and files: send it, not
+  each figure with `astra send-photo` beside it (one report per task, Oct 27 2026: "a single
+  comprehensive html with figures as the report"); a task with one figure sends just that file.
+  Caption each figure in its `<figcaption>`: screenshots of a view name the device and theme
+  ("phone, dark"), which `astra ship` reads for its shot check.
 - Archive with the send: `astra send-doc --archive <descriptive-kebab-title> --preview <png> <file> "<caption>"`
   copies the deliverable and its preview into `site3d_project_root/ppt/YYYY-MM-DD-<title>/`
   (`ASTRA_ARCHIVE_DIR`; resending with the same title updates that folder). Add there the other PNG previews, frozen copies of the generator and every data/figure/check script it
