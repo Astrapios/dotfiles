@@ -61,7 +61,7 @@ mkdir -p ~/.config/systemd/user
 cp $DOTFILES_ROOT/scripts/tmux-main.service ~/.config/systemd/user/tmux-main.service
 systemctl --user daemon-reload
 systemctl --user enable tmux-main.service
-tmux has-session -t main 2>/dev/null || systemctl --user start tmux-main.service
+tmux has-session -t astra-view 2>/dev/null || systemctl --user start tmux-main.service
 sudo loginctl enable-linger $CURRENT_USER 2>/dev/null || true
 
 # Protect the user manager from the OOM killer (default adj=100 makes it a
