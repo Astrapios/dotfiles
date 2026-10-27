@@ -1,0 +1,50 @@
+/* Light theme, the default for decks and slides (matches the light pptx palette of
+   ppt/2026-10-27-all-hands-sim v5). Same class names as theme.css, which stays the report theme. */
+:root {
+  --bg: #FFFFFF; --bg-elev: #F8FAFC; --bg-surf: #F1F5F9; --line: #E2E8F0;
+  --fg: #475569; --fg-head: #0F172A; --fg-2: #64748B; --fg-3: #94A3B8;
+  --teal: #0D9488; --blue: #4F46E5; --amber: #D97706; --rose: #E11D48;
+  --teal-tint: #F0FDFA; --blue-tint: #EEF2FF; --amber-tint: #FFFBEB; --rose-tint: #FFF1F2;
+  --teal-edge: #99F6E4; --blue-edge: #C7D2FE; --amber-edge: #FDE68A; --rose-edge: #FECDD3;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--sans); }
+body { padding: 0 16px 48px; max-width: 1100px; margin: 0 auto; }
+h1, h2, h3 { color: var(--fg-head); line-height: 1.2; margin: 1.4em 0 0.5em; }
+h1 { font-size: 1.9rem; } h2 { font-size: 1.35rem; } h3 { font-size: 1.1rem; }
+.accent-bar { height: 4px; background: linear-gradient(90deg, var(--blue), var(--teal)); margin: 0 -16px; }
+.meta { color: var(--fg-2); font-size: 0.9rem; }
+.card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 16px 0; }
+.card.surface { background: var(--bg-surf); }
+.verdict { border-left: 4px solid var(--teal); }
+/* number cards: tint fill, accent edge, big accent number over a muted label */
+.num { border-radius: 10px; padding: 14px 16px; border: 1px solid; }
+.num b { display: block; font-size: 2rem; line-height: 1.1; }
+.num span { color: var(--fg-2); font-size: 0.9rem; }
+.num.teal { background: var(--teal-tint); border-color: var(--teal-edge); } .num.teal b { color: var(--teal); }
+.num.blue { background: var(--blue-tint); border-color: var(--blue-edge); } .num.blue b { color: var(--blue); }
+.num.amber { background: var(--amber-tint); border-color: var(--amber-edge); } .num.amber b { color: var(--amber); }
+.num.rose { background: var(--rose-tint); border-color: var(--rose-edge); } .num.rose b { color: var(--rose); }
+.pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font: 600 0.75rem/1.6 var(--sans); letter-spacing: .02em; }
+.pill.bug { background: var(--rose-tint); color: var(--rose); } .pill.sig { background: var(--amber-tint); color: var(--amber); }
+.pill.minor { background: var(--teal-tint); color: var(--teal); } .pill.ok { background: var(--blue-tint); color: var(--blue); }
+.pill.pre { background: var(--bg-surf); color: var(--fg-2); }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.95rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--fg-2); font-weight: 600; }
+code, pre { font-family: var(--mono); font-size: 0.88em; }
+code { background: var(--bg-surf); padding: 1px 5px; border-radius: 4px; color: var(--fg-head); }
+pre { background: var(--bg-surf); padding: 12px 14px; border-radius: 8px; overflow-x: auto; }
+figure { margin: 14px 0; } figure img { width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid var(--line); }
+figcaption { color: var(--fg-2); font-size: 0.9rem; margin-top: 6px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 720px) { .grid2, .grid4 { grid-template-columns: 1fr; } body { font-size: 15px; } }
+a { color: var(--blue); }
+.slide { position: relative; min-height: 100vh; padding: 24px 0 40px; border-bottom: 1px dashed var(--line); }
+.slide > .accent-bar { margin: -24px -16px 0; }
+.accent-bar.teal { background: var(--teal); } .accent-bar.blue { background: var(--blue); }
+.accent-bar.amber { background: var(--amber); } .accent-bar.rose { background: var(--rose); }
+.slide-num { position: absolute; right: 16px; bottom: 8px; color: var(--fg-3); font-size: 0.8rem; }

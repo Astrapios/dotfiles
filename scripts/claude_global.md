@@ -47,19 +47,22 @@ Compute commands get the memory cap from astra's PreToolUse hook: a simple `pixi
 
 ## Presentation Style
 
-When generating PowerPoint presentations, follow the dark theme established in `ppt/scripts/generate_interpolation_tutorial.py`:
-- **Dark background**: `BG_PRIMARY = #121212`, `BG_ELEVATED = #1E1E1E`, `BG_SURFACE = #2A2A2A`
-- **Light text**: headings `#F5F5F5`, body `#E0E0E0`, secondary `#A0A0A0`
-- **Accent colors**: blue `#60A5FA`, teal `#2DD4BF`, amber `#FBBF24`, rose `#FB7185`
-- **Accent bar**: thin colored bar at top of each slide
+Decks (PowerPoint and HTML decks / slides) default to the **light (white) style** (user, 2026-10-27: "Use that deck style as the default"). Reference: `ppt/2026-10-27-all-hands-sim/scripts/build_deck.py` with `THEME=light` (palette constants at its top; origin `ppt/2026-10-09-multistatic-approach-and-syl-resolution/`, helpers `ppt/scripts/generate_sim_verification_diagram.py`):
+- **White background**: `BG_PRIMARY = #FFFFFF`, `BG_ELEVATED = #F8FAFC`, `BG_SURFACE = #F1F5F9`
+- **Ink text**: headings `#0F172A`, body `#475569`, muted `#64748B`, tertiary `#94A3B8`
+- **Accent colors**: teal `#0D9488`, indigo `#4F46E5`, amber `#D97706`, rose `#E11D48`
+- **Number cards**: accent tint fill with a light accent border: teal `#F0FDFA`, indigo `#EEF2FF`, amber `#FFFBEB`, rose `#FFF1F2`
+- **Accent bar**: thin solid accent-colored bar at top of each slide
 - **Slide numbers**: bottom-right, tertiary color
-- **Fonts**: "Inter" for body, "IBM Plex Mono" for code/equations
-- **Matplotlib figures**: use matching dark style (`figure.facecolor = #121212`, etc.)
+- **Fonts**: "Inter" for body (Google Slides has it), "IBM Plex Mono" for code/equations
+- **Matplotlib figures**: white surrounds; dark figure scripts re-skin with `import deck_theme` under `THEME=light` (`test_scripts/deck_theme.py`), data colormaps unchanged
+- **Dark theme only when asked**: the previous dark deck palette (`#121212` background, `#F5F5F5` / `#E0E0E0` text, accents `#60A5FA` / `#2DD4BF` / `#FBBF24` / `#FB7185`, `ppt/scripts/generate_interpolation_tutorial.py`) is used for a deck only when the user asks for dark. Reports, summaries and briefings keep the dark theme (`html-report` skill).
+- **Decks to be presented also go out as the `.pptx`** (user, 2026-10-27: "I need pptx as well to import to google slides"), next to the PDF and HTML, every round
 - **Each slide is its own function** (e.g., `slide_title(prs)`, `slide_algorithm(prs)`)
 - **Use `add_box()` for elevated panels**, `add_eqn()` for equations
 - **Content should be detailed and bite-sized**: explain concepts with block diagrams built from shapes, step-by-step algorithmic breakdowns, and annotated figures
 - **Generate figures programmatically** in the PPT script itself, not rely on pre-existing images only
-- **Delivery, self-review, archive**: load the `html-report` skill for every deck, report, summary, briefing or write-up (self-contained dark HTML or PDF, screenshots before sending, `astra send-doc`, dated `ppt/` archive with README). No claude.ai Artifacts unless asked.
+- **Delivery, self-review, archive**: load the `html-report` skill for every deck, report, summary, briefing or write-up (self-contained HTML or PDF, white for decks and dark for reports, screenshots before sending, `astra send-doc`, dated `ppt/` archive with README). No claude.ai Artifacts unless asked.
 
 ## Sending figures and files (Astra View)
 

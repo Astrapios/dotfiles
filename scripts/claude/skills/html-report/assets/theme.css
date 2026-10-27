@@ -1,4 +1,5 @@
-/* Dark theme shared by decks, briefings and reports (matches the pptx generator palette). */
+/* Dark theme for briefings, reports and summaries (and decks only when the user asks for dark).
+   Decks default to theme-light.css. */
 :root {
   --bg: #121212; --bg-elev: #1E1E1E; --bg-surf: #2A2A2A;
   --fg: #E0E0E0; --fg-head: #F5F5F5; --fg-2: #A0A0A0; --fg-3: #6E6E6E;
@@ -31,5 +32,5 @@ figcaption { color: var(--fg-2); font-size: 0.9rem; margin-top: 6px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } body { font-size: 15px; } }
 a { color: var(--blue); }
-.slide { min-height: 100vh; padding: 24px 0; border-bottom: 1px dashed #2E2E2E; }
+.slide { position: relative; min-height: 100vh; padding: 24px 0; border-bottom: 1px dashed #2E2E2E; }
 .slide-num { position: absolute; right: 16px; bottom: 8px; color: var(--fg-3); font-size: 0.8rem; }

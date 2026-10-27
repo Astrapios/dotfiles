@@ -1,6 +1,6 @@
 ---
 name: html-report
-description: Build and deliver a self-contained dark-theme HTML deck, briefing, report or summary (figures as data URIs, no scripts, works offline on a phone), self-review it with screenshots, send it via astra send-doc, and archive it in a dated ppt/ folder with a README. Use whenever the user asks for a deck, slides, report, summary, write-up, briefing, findings, status update or "HTML" deliverable, or when a review or investigation produces results for them to read.
+description: Build and deliver a self-contained HTML deck (white by default), briefing, report or summary (dark theme; figures as data URIs, no scripts, works offline on a phone), self-review it with screenshots, send it via astra send-doc, and archive it in a dated ppt/ folder with a README. Use whenever the user asks for a deck, slides, report, summary, write-up, briefing, findings, status update or "HTML" deliverable, or when a review or investigation produces results for them to read.
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
 ---
 
@@ -10,15 +10,27 @@ Any requested summary, write-up, plan, review briefing or deck goes out as ONE s
 HTML file sent with `astra send-doc`, never as chat text alone and never as a claude.ai
 Artifact. The chat message carries the verdict in a few lines plus the file name.
 
-Files here: `assets/theme.css` (inline it), `assets/template.html` (skeleton),
-`scripts/bake_math.py` (typeset MathJax then strip scripts), `scripts/shot_html.py`
-(screenshots with JS off, offline; exits 1 if scripts remain).
+Files here: `assets/theme-light.css` (decks and slides, the default for them),
+`assets/theme.css` (dark: reports, briefings, summaries, and decks only when the user asks for
+dark), `assets/deck-template.html` (white deck skeleton), `assets/template.html` (report
+skeleton), `scripts/bake_math.py` (typeset MathJax then strip scripts), `scripts/shot_html.py`
+(screenshots with JS off, offline; exits 1 if scripts remain). Both themes use the same class
+names, so a page switches theme by swapping the pasted stylesheet.
 
 ## Build
 
-1. Start from `assets/template.html` with `assets/theme.css` pasted into `<style>`: `#121212`
-   background, Inter body, IBM Plex Mono code, blue/teal/amber/rose accents, thin accent bar,
-   16 px side gutter, no horizontal scroll at phone width.
+1. Pick the theme by deliverable, then paste that stylesheet into `<style>` (inline):
+   - **Deck or slides: light** (user, Oct 27 2026: "Use that deck style as the default"). Start
+     from `assets/deck-template.html` with `assets/theme-light.css`: white background, ink
+     `#0F172A` headings, slate `#475569` body, muted `#64748B`, one thin solid accent bar per
+     slide (`accent-bar teal|blue|amber|rose`), accents teal `#0D9488` / indigo `#4F46E5` /
+     amber `#D97706` / rose `#E11D48`, number cards `.num.<accent>` on the tints `#F0FDFA` /
+     `#EEF2FF` / `#FFFBEB` / `#FFF1F2`. Figures with white surrounds: dark figure scripts
+     re-skin with `import deck_theme` and `THEME=light` (`site3d_project_root/test_scripts/deck_theme.py`).
+   - **Report, briefing, summary, review: dark** (unchanged). Start from `assets/template.html`
+     with `assets/theme.css`: `#121212` background, blue/teal/amber/rose accents.
+   - Dark deck only when the user asks for it; a light report only when asked.
+   Both: Inter body, IBM Plex Mono code, 16 px side gutter, no horizontal scroll at phone width.
 2. **Visual first.** Every finding, step or result gets a figure; words are captions of at most
    two sentences. Prefer a measured diagnostic (the actual image/map/scatter, before vs after on
    one scale) over a schematic; a mechanism diagram only when nothing measurable shows it. 2-D
@@ -34,9 +46,13 @@ Files here: `assets/theme.css` (inline it), `assets/template.html` (skeleton),
    to pre-render it and strip every `<script>`. Always with `--no-project` (plain `uv run` drops uv.lock
    and a .venv into whatever worktree it runs in), and never `pixi exec --spec playwright-python` (conda's
    playwright can overwrite its driver in pixi's shared cache).
-5. Slide decks use `<section class="slide">` per slide with a slide number bottom-right. pptx
-   decks (python-pptx, `~/pixi_tools/ppt`) go out as PDF via `libreoffice --headless`, never raw
-   .pptx; the same theme values apply.
+5. Slide decks use `<section class="slide">` per slide with an accent bar on top and a
+   `slide-num` bottom-right. pptx decks (python-pptx, `~/pixi_tools/ppt`) use the same light
+   values (reference `site3d_project_root/ppt/2026-10-27-all-hands-sim/scripts/build_deck.py`,
+   `THEME=light`) and go out as PDF via `libreoffice --headless`; a deck to be presented also
+   goes out as the `.pptx` itself (user, Oct 27 2026: "I need pptx as well to import to google
+   slides"), so send both with `astra send-doc`. Strip autoshape theme styles (shadows show in
+   LibreOffice and Google Slides) as `no_style()` in that script does.
 
 ## Self-review before sending (mandatory)
 
