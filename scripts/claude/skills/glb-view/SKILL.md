@@ -16,6 +16,11 @@ snapshot. Reply with the link (and a top-down PNG via `astra send-photo` if a qu
    vertices plus the ECEF node matrix, so float32 precision survives; never put raw ECEF in
    float32 vertices). Weld vertices (`merge_vertices`) before any edge extraction.
    Sanity-check that the mesh center projects to the expected lat/lon before upload.
+   A site3d SAR product grid (DOF heights) is in the image frame: layover-correct it first
+   (`xy = Ainv @ (-az, -rg) + z * sv` from `sar_common.geometry.geometry.layover_shift`), emit
+   small cubes, not a POINTS primitive (1-pixel dots in most viewers), and assert the node
+   rotation's determinant is +1 (a mirrored frame point-reflects the scene). Reference:
+   `site3d_project_root/test_scripts/glb_export.py` and `glb_verify_geo.py`.
 2. **Upload and link** with `python scripts/glb_viewer_link.py --topic <topic> a.glb b.glb`
    (prefix `s3://array-labs-dev-test-data/data/jisu/<topic>/`, default aws profile, viewer
    link printed with every model visible). For a comparison upload each variant as its own GLB

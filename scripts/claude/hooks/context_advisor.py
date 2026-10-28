@@ -9,7 +9,8 @@ else gets no comment.
 
 The context size is the last main-thread assistant turn's prompt (input + cache read + cache creation tokens), read
 from the tail of the transcript; subagent (sidechain) turns are skipped. Knobs (environment):
-  CONTEXT_ADVISOR_FLOOR    below this many tokens, no note (nothing worth clearing yet); default 20000
+  CONTEXT_ADVISOR_FLOOR    below this many tokens, no note (nothing worth clearing yet); default 80000,
+                           above the ~48K every session starts with
   CONTEXT_ADVISOR_COMPACT  from this size on, a long-running task is worth a /compact; default 250000
   CONTEXT_ADVISOR_OFF=1    no note at all
 An Astra View area's desk or worker gets no note (`astra role --json`): a large desk is replaced with New desk, which
@@ -25,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-FLOOR = int(os.environ.get("CONTEXT_ADVISOR_FLOOR", "20000"))
+FLOOR = int(os.environ.get("CONTEXT_ADVISOR_FLOOR", "80000"))
 COMPACT = int(os.environ.get("CONTEXT_ADVISOR_COMPACT", "250000"))
 TAIL = 4 * 1024 * 1024   # the last main-thread turn is always near the end of the transcript
 
