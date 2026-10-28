@@ -87,7 +87,7 @@ fi
 
 # Claude settings symlinks
 ln -sf $SCRIPT_PATH/scripts/claude_settings.json ~/.claude/settings.json
-ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md
+ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md   # imports shared_rules.md, found next to the link's target
 ln -sf $SCRIPT_PATH/scripts/claude_rtk.md ~/.claude/RTK.md          # imported by CLAUDE.md (@RTK.md)
 ln -sf $SCRIPT_PATH/scripts/claude_keybindings.json ~/.claude/keybindings.json
 
@@ -117,6 +117,35 @@ done
 echo "  installing Gemini CLI hooks..."
 mkdir -p ~/.gemini
 ln -sf $SCRIPT_PATH/scripts/gemini_settings.json ~/.gemini/settings.json
+
+# Antigravity CLI (agy) global rules and skills, where agy is installed (the
+# mkdir above makes ~/.gemini on every machine, so it is no sign of agy).
+# AGENTS.md includes shared_rules.md, the file CLAUDE.md imports, so both tools
+# read one copy of the rules; agy cuts a rules file at 24,000 bytes after its
+# includes. agy 1.4.8 resolves that include against ~/.gemini, not next to
+# AGENTS.md; the second link keeps it working if that changes. Skills are the
+# Claude skills that do not need Claude-only tools.
+# agy's machine-specific or secret files (antigravity-cli/settings.json with
+# trustedWorkspaces, the oauth token, brain/) are never linked.
+if command -v agy &> /dev/null || [ -d ~/.gemini/antigravity-cli ]; then
+    echo "  installing agy rules and skills..."
+    mkdir -p ~/.gemini/config/skills
+    ln -sf $SCRIPT_PATH/scripts/agy_global.md ~/.gemini/config/AGENTS.md
+    ln -sf $SCRIPT_PATH/scripts/shared_rules.md ~/.gemini/shared_rules.md
+    ln -sf $SCRIPT_PATH/scripts/shared_rules.md ~/.gemini/config/shared_rules.md
+    for s in html-report glb-view long-run deeper resolve-conflicts; do
+        dest=~/.gemini/config/skills/$s
+        if [ -d "$dest" ] && [ ! -L "$dest" ]; then
+            mv "$dest" "$dest.bak.$(date +%Y%m%d%H%M%S)"
+            echo "  moved existing $dest aside"
+        fi
+        ln -sfn $SCRIPT_PATH/scripts/claude/skills/$s "$dest"
+    done
+    agy_rules_bytes=$(( $(wc -c < $SCRIPT_PATH/scripts/agy_global.md) + $(wc -c < $SCRIPT_PATH/scripts/shared_rules.md) ))
+    if (( agy_rules_bytes > 24000 )); then
+        echo "  warning: agy rules are $agy_rules_bytes bytes; agy keeps the first 24,000"
+    fi
+fi
 
 # Telegram credentials
 if [ ! -f ~/.config/astra.env ] && [ ! -f ~/.config/tg_hook.env ]; then
