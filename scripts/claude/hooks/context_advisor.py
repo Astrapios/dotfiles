@@ -17,6 +17,8 @@ the desk's bar suggests, and a worker lives for one task. When astra is missing,
 before.
 Any error is swallowed: advice must never get in the way of a prompt.
 """
+from __future__ import annotations
+
 import json
 import os
 import subprocess
