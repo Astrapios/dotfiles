@@ -19,6 +19,9 @@ h1 { font-size: 1.9rem; } h2 { font-size: 1.35rem; } h3 { font-size: 1.1rem; }
 .card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 16px 0; }
 .card.surface { background: var(--bg-surf); }
 .verdict { border-left: 4px solid var(--teal); }
+/* contents bar at the top of a deck: one numbered link per slide, wraps on a phone */
+.toc { border-bottom: 1px solid var(--line); padding: .5rem 16px; margin: 0 -16px; display: flex; gap: .2rem .8rem; flex-wrap: wrap; font-size: 12px; }
+.toc a { color: var(--fg-2); text-decoration: none; overflow-wrap: anywhere; } .toc a:hover { color: var(--fg-head); }
 /* number cards: tint fill, accent edge, big accent number over a muted label */
 .num { border-radius: 10px; padding: 14px 16px; border: 1px solid; }
 .num b { display: block; font-size: 2rem; line-height: 1.1; }

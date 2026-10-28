@@ -54,6 +54,11 @@ class names, so a page switches theme by swapping the pasted stylesheet.
    goes out as the `.pptx` itself (user, Oct 27 2026: "I need pptx as well to import to google
    slides"), so send both with `astra send-doc`. Strip autoshape theme styles (shadows show in
    LibreOffice and Google Slides) as `no_style()` in that script does.
+6. **Contents bar on top** (user, Oct 27 2026: "html report should have toc on top like html slide
+   decks"): every report and deck opens with `<nav class="toc">` (under the title block of a report,
+   before the first slide of a deck), one numbered link per section or slide (`<a href="#s3">3. ...</a>`,
+   `id`s on the `h2` or `section`), titles cut near 45 characters with "..."; the derivation
+   variant's sticky top bar is its contents bar.
 
 ## Derivation variant (math-heavy write-ups)
 
@@ -101,6 +106,8 @@ self-review, sending and archiving still applies.
 - Review every figure for CONTENT, not layout: does it show what the caption claims, do the
   values make physical sense, same window/scale/crop on compared panels, current method version,
   identical sign and axis conventions across the deck.
+- The contents links all land on their sections: every `href="#id"` in `nav.toc` matches an `id`
+  on the page, one link per section, and the bar wraps at phone width with no horizontal scroll.
 - `shot_html.py` must report zero scripts left (`astra send-doc` refuses a page with a `<script>` tag).
 
 ## Send and archive

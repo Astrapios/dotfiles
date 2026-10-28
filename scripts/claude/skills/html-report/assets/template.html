@@ -12,10 +12,11 @@
 <div class="accent-bar"></div>
 <h1>TITLE</h1>
 <p class="meta">DATE (Pacific, 12-hour) · branch / commit · who it is for</p>
+<nav class="toc"><a href="#s1">1. Findings</a><a href="#s2">2. Section title cut near 45 characters...</a></nav>
 
 <div class="card verdict"><strong>Verdict.</strong> Two or three lines: what holds, what is broken, what is pending.</div>
 
-<h2>Findings</h2>
+<h2 id="s1">Findings</h2>
 <table><thead><tr><th>#</th><th>Severity</th><th>Title</th></tr></thead>
 <tbody><tr><td>1</td><td><span class="pill bug">bug</span></td><td>Short title</td></tr></tbody></table>
 
@@ -24,5 +25,8 @@
 <figure><img src="data:image/png;base64,..." alt=""><figcaption>At most two sentences: what to look at.</figcaption></figure>
 <p><strong>Fix:</strong> one line.</p>
 </div>
+
+<h2 id="s2">Section title cut near 45 characters in the bar</h2>
+<p>One h2 per section, each with an id the contents bar links to.</p>
 </body>
 </html>

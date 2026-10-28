@@ -17,6 +17,9 @@ h1 { font-size: 1.9rem; } h2 { font-size: 1.35rem; } h3 { font-size: 1.1rem; }
 .card { background: var(--bg-elev); border: 1px solid #2E2E2E; border-radius: 10px; padding: 16px 18px; margin: 16px 0; }
 .card.surface { background: var(--bg-surf); }
 .verdict { border-left: 4px solid var(--teal); }
+/* contents bar under the title block: one numbered link per h2 section, wraps on a phone */
+.toc { border-bottom: 1px solid #2E2E2E; padding: .5rem 16px; margin: 0 -16px; display: flex; gap: .2rem .8rem; flex-wrap: wrap; font-size: 12px; }
+.toc a { color: var(--fg-2); text-decoration: none; overflow-wrap: anywhere; } .toc a:hover { color: var(--fg-head); }
 .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font: 600 0.75rem/1.6 var(--sans); letter-spacing: .02em; }
 .pill.bug { background: #3b1a22; color: var(--rose); } .pill.sig { background: #3a2d0f; color: var(--amber); }
 .pill.minor { background: #10303a; color: var(--teal); } .pill.ok { background: #14233a; color: var(--blue); }
