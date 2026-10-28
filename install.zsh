@@ -67,11 +67,11 @@ mkdir -p "$CODE_SERVER_USER_DIR"
 ln -sf $SCRIPT_PATH/code-server/settings.json "$CODE_SERVER_USER_DIR/settings.json"
 ln -sf $SCRIPT_PATH/code-server/keybindings.json "$CODE_SERVER_USER_DIR/keybindings.json"
 
-# Claude Code / Telegram hooks
+# Claude Code hooks
 echo Installing Claude Code hooks...
 mkdir -p ~/bin ~/.claude ~/.config
 
-# astra (the Telegram bridge) now lives in its own repo at ~/src/astra.
+# astra now lives in its own repo at ~/src/astra.
 # Install it from there: `git clone git@github.com:Astrapios/astra.git ~/src/astra
 # && cd ~/src/astra && ./install.sh`. The hook symlinks below still wire Claude
 # Code / Gemini to `astra hook` via the ~/bin/astra PATH wrapper its installer
@@ -145,25 +145,6 @@ if command -v agy &> /dev/null || [ -d ~/.gemini/antigravity-cli ]; then
     if (( agy_rules_bytes > 24000 )); then
         echo "  warning: agy rules are $agy_rules_bytes bytes; agy keeps the first 24,000"
     fi
-fi
-
-# Telegram credentials
-if [ ! -f ~/.config/astra.env ] && [ ! -f ~/.config/tg_hook.env ]; then
-    if $YES; then
-        echo "  skipping Telegram credentials (set manually in ~/.config/astra.env)"
-    else
-        echo -n "  Telegram Bot Token (or Enter to skip): "
-        read tg_token
-        if [ -n "$tg_token" ]; then
-            echo -n "  Telegram Chat ID: "
-            read tg_chat
-            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n" "$tg_token" "$tg_chat" > ~/.config/astra.env
-            chmod 600 ~/.config/astra.env
-            echo "  saved to ~/.config/astra.env"
-        fi
-    fi
-else
-    echo "  Telegram credentials already configured"
 fi
 
 # Misc

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-Personal dotfiles repo with shell/editor/tmux configs. Uses symlink-based installation (no GNU Stow). (The `astra` Telegram bridge that used to live here was extracted to its own repo at `~/src/astra`.)
+Personal dotfiles repo with shell/editor/tmux configs. Uses symlink-based installation (no GNU Stow). (`astra`, which used to live here, was extracted to its own repo at `~/src/astra`.)
 
 ## Key Commands
 
@@ -17,9 +17,9 @@ Personal dotfiles repo with shell/editor/tmux configs. Uses symlink-based instal
 
 ## Architecture
 
-### astra (Telegram bridge) — moved out
+### astra (moved out)
 
-The `astra` Telegram bridge now lives in its own repo at **`~/src/astra`**
+`astra` now lives in its own repo at **`~/src/astra`**
 (`git@github.com:Astrapios/astra.git`) with its own installer, tests, and docs.
 It is no longer part of this repo. The hook symlinks below still wire Claude
 Code / Gemini to `astra hook`, which resolves via the `~/bin/astra` PATH wrapper
