@@ -10,6 +10,21 @@ Any requested summary, write-up, plan, review briefing or deck goes out as ONE s
 HTML file sent with `astra send-doc`, never as chat text alone and never as a claude.ai
 Artifact. The chat message carries the verdict in a few lines plus the file name.
 
+## Report and summary pages: light first
+
+The first instruction for every report, briefing, summary or review page (decks keep their own
+slide rules below; user, Oct 29 2026: "I need light overview distilled report. visuals first
+whenever applicable, short sentences", for every desk):
+
+A page the user reads: the verdict in one or two short sentences; then visuals, one per point,
+each with a one-line caption; then a short "Next" list; about 150 words of text in all; plain
+words, no internal labels or unexplained abbreviations. The full record (tables, rules, caveats,
+numbers for later workers) goes in `<name>.md` beside the page, linked from it, never sent as the
+page.
+
+`astra send-doc` counts the page's words and warns past 300. The build steps below serve this
+rule: where they ask for glossaries, worked examples or parameters, those go in the `.md`.
+
 Files here: `assets/theme-light.css` (decks and slides, the default for them),
 `assets/theme.css` (dark: reports, briefings, summaries, and decks only when the user asks for
 dark), `assets/deck-template.html` (white deck skeleton), `assets/template.html` (report
@@ -100,6 +115,10 @@ self-review, sending and archiving still applies.
 
 ## Self-review before sending (mandatory)
 
+- Word count (report and summary pages): about 150 words of text, never past 300. Count it the
+  way `astra send-doc` does (text outside figures; captions, code and tables counted):
+  `PYTHONPATH=~/.local/share/astra/current/src python3 -c 'import sys; from astra.cli import page_words; print(page_words(sys.argv[1]))' page.html`.
+  Over: move the detail into `<name>.md` and link it.
 - `python scripts/shot_html.py FILE OUTDIR [--slides section.slide]` from the scratchpad in the
   playwright pixi env; read every screenshot (resize to 1800 px first). Fix overlaps, cut-off
   labels, garbled ticks, elements hidden behind others.
