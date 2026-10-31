@@ -1,0 +1,1 @@
+<!-- astra desk definition, local additions: astra appends this file's lines (comments dropped) after the shipped src/astra/desk.md at each desk start, never in its place; linked as ~/.config/astra/desk.local.md by install.zsh. -->

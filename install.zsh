@@ -91,6 +91,10 @@ ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md   # imports sha
 ln -sf $SCRIPT_PATH/scripts/claude_rtk.md ~/.claude/RTK.md          # imported by CLAUDE.md (@RTK.md)
 ln -sf $SCRIPT_PATH/scripts/claude_keybindings.json ~/.claude/keybindings.json
 
+# astra desk definition, local additions: appended after the shipped src/astra/desk.md at each desk start
+mkdir -p ~/.config/astra
+ln -sf $SCRIPT_PATH/scripts/astra_desk_local.md ~/.config/astra/desk.local.md
+
 # Claude hooks referenced from claude_settings.json (guard_gitlab_publish.sh etc.)
 mkdir -p ~/.claude/hooks
 for f in $SCRIPT_PATH/scripts/claude/hooks/*.(sh|py)(.N); do ln -sf "$f" ~/.claude/hooks/${f:t}; done
