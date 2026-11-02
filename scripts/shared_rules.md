@@ -35,9 +35,8 @@
 - When dealing with terminal UI interactions (tmux send-keys), capture the actual pane content at each step to understand the UI state before writing key sequences.
 - Think through the full execution path before making changes: trace through the code, consider timing, and verify assumptions.
 - **Narrate while working, one line at a time:** before each edit or state-changing command, one line of at most 15 words on what changes and why (file, problem, expected effect); say nothing before reads, searches or checks, and otherwise speak only when you find something or change direction. Never silently apply batches of edits without giving the user context to follow along and object.
-- **Long-running processes (> ~10 min):** load the `long-run` skill before launching (memory cap, smoke test, background launch, progress check-ins every 10 minutes via `ScheduleWakeup`, Pacific timestamps). Never go silent waiting for a completion notification.
-- **Always report times in Pacific time** (the user's timezone), never UTC: progress updates, ETAs, log timestamps, and dates in summaries. Read the clock with `TZ=America/Los_Angeles date` in the same turn (a machine clock may be UTC), never estimate or apply the offset by hand, and include the zone label.
-- **Use 12-hour AM/PM time, never 24-hour**: write "2:45 PM PDT", not "14:45 PDT". Format with `TZ=America/Los_Angeles date "+%-I:%M %p %Z"`. Applies to every user-facing time: progress updates, ETAs, quoted log timestamps, and summaries.
+- **Long-running processes (> ~10 min):** load the `long-run` skill before launching (memory cap, smoke test, background launch, progress check-ins every 10 minutes via `ScheduleWakeup`, Pacific timestamps, results saved before any cleanup code). Never go silent waiting for a completion notification.
+- **Times are Pacific, 12-hour, with the zone** ("2:45 PM PDT", never UTC or "14:45") in every user-facing time: read the clock with `TZ=America/Los_Angeles date "+%-I:%M %p %Z"` in the same turn, never estimate or apply the offset by hand.
 
 ## Resource Limits
 
@@ -85,8 +84,7 @@ Decks, reports, summaries, briefings and plans: load the `html-report` skill (li
   swallow output.
 - **Reproduce the known-good config first** on any regression: find the producing script/branch, `git diff` it, copy its
   exact config, then change one knob at a time.
-- **Check efficiency before running** (crop / subsample; anything over ~30 s deserves a size estimate); long runs follow
-  the `long-run` skill (smoke test end to end first, results saved before any cleanup code).
+- **Check efficiency before running** (crop / subsample; anything over ~30 s deserves a size estimate).
 
 ## Shell and process hygiene (this box)
 

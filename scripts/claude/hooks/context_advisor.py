@@ -16,6 +16,9 @@ from the tail of the transcript; subagent (sidechain) turns are skipped. Knobs (
 An Astra View area's desk or worker gets no note (`astra role --json`): a large desk is replaced with New desk, which
 the desk's bar suggests, and a worker lives for one task. When astra is missing, fails or is slow, the note goes as
 before.
+Memory budget: when the project's memory index (memory/MEMORY.md beside the transcript) holds more than
+MEMORY_BUDGET lines, one more line asks to retire or merge entries before adding; it goes on every prompt, whatever the
+context size or role, until the index is back within budget. CONTEXT_ADVISOR_OFF=1 turns it off too.
 Any error is swallowed: advice must never get in the way of a prompt.
 """
 from __future__ import annotations
@@ -28,6 +31,7 @@ from pathlib import Path
 
 FLOOR = int(os.environ.get("CONTEXT_ADVISOR_FLOOR", "80000"))
 COMPACT = int(os.environ.get("CONTEXT_ADVISOR_COMPACT", "250000"))
+MEMORY_BUDGET = 60   # lines in a project's memory/MEMORY.md, the index loaded into every session
 TAIL = 4 * 1024 * 1024   # the last main-thread turn is always near the end of the transcript
 
 
@@ -51,6 +55,21 @@ def context_tokens(transcript: str) -> int | None:
         if usage:
             return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
     return None
+
+
+def memory_note(transcript: str) -> str | None:
+    """The budget line when the project's MEMORY.md (memory/ beside the transcript) passes MEMORY_BUDGET lines."""
+    if not transcript:
+        return None
+    index = Path(transcript).parent / "memory" / "MEMORY.md"
+    try:
+        with index.open("rb") as f:
+            n = sum(1 for _ in f)
+    except OSError:
+        return None
+    if n <= MEMORY_BUDGET:
+        return None
+    return f"MEMORY.md is {n} lines (budget {MEMORY_BUDGET}): retire or merge before adding"
 
 
 def in_area(session_id: str) -> bool:
@@ -98,9 +117,14 @@ def main() -> int:
         return 0
     try:
         ev = json.load(sys.stdin)
-        tokens = context_tokens(ev.get("transcript_path") or "")
+        transcript = ev.get("transcript_path") or ""
+        notes = [memory_note(transcript)]
+        tokens = context_tokens(transcript)
         if tokens is not None and tokens >= FLOOR and not in_area(ev.get("session_id") or ""):
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": note(tokens)}}))
+            notes.append(note(tokens))
+        text = "\n".join(n for n in notes if n)
+        if text:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}))
     except Exception:   # never block a prompt over advice
         return 0
     return 0
