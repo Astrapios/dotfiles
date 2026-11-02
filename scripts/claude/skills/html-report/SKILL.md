@@ -10,20 +10,46 @@ Any requested summary, write-up, plan, review briefing or deck goes out as ONE s
 HTML file sent with `astra send-doc`, never as chat text alone and never as a claude.ai
 Artifact. The chat message carries the verdict in a few lines plus the file name.
 
-## Report and summary pages: light first
+## Report and summary pages: the Report pages standard
 
 The first instruction for every report, briefing, summary or review page (decks keep their own
-slide rules below; user, Oct 29 2026: "I need light overview distilled report. visuals first
-whenever applicable, short sentences", for every desk):
+slide rules below). Jisu, Nov 2 2026: "For each item, it should have at least 1~3 sentences with
+visuals whenever possible", and on card N-iq: "multiple sentences to bulleted lists for
+readability". It replaced the 150-word Light pages rule of Oct 29.
 
-A page the user reads: the verdict in one or two short sentences; then visuals, one per point,
-each with a one-line caption; then a short "Next" list; about 150 words of text in all; plain
-words, no internal labels or unexplained abbreviations. The full record (tables, rules, caveats,
-numbers for later workers) goes in `<name>.md` beside the page, linked from it, never sent as the
-page.
+Report pages (2026-11-02)
+1. The verdict in 1 to 2 sentences: what happened and what it means for the reader.
+2. Each item is a heading line and 1 to 3 bullets, each bullet one full sentence: what happened,
+   its number, why it matters to the reader, and the link to its source.
+3. Each item carries its visual when one exists: a figure already made, a small chart from the
+   record, a viewer link.
+4. Each Next item says why it is next.
+5. No page-wide word cap: an item stays under 60 words; tables, rules, caveats and long detail go
+   in `<name>.md` beside the page, linked from it, never sent as the page.
+6. Plain words, no internal labels or unexplained abbreviations.
 
-`astra send-doc` counts the page's words and warns past 300. The build steps below serve this
-rule: where they ask for glossaries, worked examples or parameters, those go in the `.md`.
+An item is one block, the same markup in both themes (`assets/template.html` has one):
+
+```html
+<div class="item">
+<h3>astra</h3>
+<ul>
+<li>One full sentence: what happened, with its number (<a href="...">source</a>).</li>
+<li class="ask">One full sentence that asks the reader for something (amber marker).</li>
+</ul>
+<figure><img src="data:image/png;base64,..." alt=""><figcaption>One line: what to look at.</figcaption></figure>
+</div>
+```
+
+A chart drawn in CSS (bars of `div`s) carries `role="img"` so the check counts it as a visual.
+
+`astra send-doc` checks the page per item (a heading and its bullets) after the send and warns on
+an item over 60 words, a bullet under one full sentence (fewer than 8 words or no full stop;
+captions and table rows are not held to it), or a page with no figure, image or viewer link; never
+on the page total; it sends the page anyway. A list of more than 3 bullets, and each line of a
+Next list, counts as one item per bullet. `astra send-doc --check page.html` prints each item's
+words and the same warnings, and sends nothing. The build steps below serve this rule: where they
+ask for glossaries, worked examples or parameters, those go in the `.md`.
 
 Files here: `assets/theme-light.css` (decks and slides, the default for them),
 `assets/theme.css` (dark: reports, briefings, summaries, and decks only when the user asks for
@@ -47,8 +73,8 @@ class names, so a page switches theme by swapping the pasted stylesheet.
      with `assets/theme.css`: `#121212` background, blue/teal/amber/rose accents.
    - Dark deck only when the user asks for it; a light report only when asked.
    Both: Inter body, IBM Plex Mono code, 16 px side gutter, no horizontal scroll at phone width.
-2. **Visual first.** Every finding, step or result gets a figure; words are captions of at most
-   two sentences. Prefer a measured diagnostic (the actual image/map/scatter, before vs after on
+2. **A visual with every item.** Every item, finding, step or result gets its figure when one
+   exists; its words are its 1 to 3 bullets, and the figure's caption is one line. Prefer a measured diagnostic (the actual image/map/scatter, before vs after on
    one scale) over a schematic; a mechanism diagram only when nothing measurable shows it. 2-D
    maps and images, not bar charts or histograms, unless asked. Figures go in as data URIs
    (`base64` of the PNG); resize figures to the width they are shown at.
@@ -115,10 +141,10 @@ self-review, sending and archiving still applies.
 
 ## Self-review before sending (mandatory)
 
-- Word count (report and summary pages): about 150 words of text, never past 300. Count it the
-  way `astra send-doc` does (text outside figures; captions, code and tables counted):
-  `PYTHONPATH=~/.local/share/astra/current/src python3 -c 'import sys; from astra.cli import page_words; print(page_words(sys.argv[1]))' page.html`.
-  Over: move the detail into `<name>.md` and link it.
+- Report pages check (report and summary pages): `astra send-doc --check page.html` before
+  sending, and fix each warning: an item over 60 words, move its detail into `<name>.md` and link
+  it; a bullet under one full sentence, write the sentence; no visual, add the figure, chart or
+  viewer link the item has. There is no page total to cut to.
 - `python scripts/shot_html.py FILE OUTDIR [--slides section.slide]` from the scratchpad in the
   playwright pixi env; read every screenshot (resize to 1800 px first). Fix overlaps, cut-off
   labels, garbled ticks, elements hidden behind others.
