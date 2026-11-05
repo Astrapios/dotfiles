@@ -13,20 +13,50 @@ Artifact. The chat message carries the verdict in a few lines plus the file name
 ## Report and summary pages: the Report pages standard
 
 The first instruction for every report, briefing, summary or review page (decks keep their own
-slide rules below). Jisu, Nov 2 2026: "For each item, it should have at least 1~3 sentences with
-visuals whenever possible", and on card N-iq: "multiple sentences to bulleted lists for
-readability". It replaced the 150-word Light pages rule of Oct 29.
+slide rules below; a deck's first slide states the problem instead). Jisu, Nov 5 2026: "Title and
+verdict without knowing full details makes zero sense... Person with zero context should get 80%
+idea of what this is about just from the report. ... Concise, clear, self contained/complete".
+Nov 2: "For each item, it should have at least 1~3 sentences with visuals whenever possible", and on
+card N-iq: "multiple sentences to bulleted lists for readability". It replaced the 150-word Light
+pages rule of Oct 29.
 
-Report pages (2026-11-02)
-1. The verdict in 1 to 2 sentences: what happened and what it means for the reader.
-2. Each item is a heading line and 1 to 3 bullets, each bullet one full sentence: what happened,
+Report pages (2026-11-05)
+1. Title: the question or subject in plain words a stranger understands, never a run id, an
+   internal label or a number that needs the report to explain it.
+2. Bottom line, labeled "Bottom line", first: 1 to 2 sentences that read alone. They name the
+   subject, say what happened and what it means for the reader, and define any number they use.
+3. Background, labeled "Background", second: 2 to 4 one-sentence bullets, under 80 words in all:
+   the problem, why it came up or matters now, and what this work did. It assumes the reader has
+   never heard of this work. Every term a later item uses is defined here.
+4. The test: someone with zero context gets 80% of what this is about from the title, Bottom line
+   and Background alone.
+5. Each item is a heading line and 1 to 3 bullets, each bullet one full sentence: what happened,
    its number, why it matters to the reader, and the link to its source.
-3. Each item carries its visual when one exists: a figure already made, a small chart from the
+6. Each item carries its visual when one exists: a figure already made, a small chart from the
    record, a viewer link.
-4. Each Next item says why it is next.
-5. No page-wide word cap: an item stays under 60 words; tables, rules, caveats and long detail go
+7. Each Next item says why it is next.
+8. No page-wide word cap: an item stays under 60 words; tables, rules, caveats and long detail go
    in `<name>.md` beside the page, linked from it, never sent as the page.
-6. Plain words, no internal labels or unexplained abbreviations.
+9. Plain words, no internal labels or unexplained abbreviations.
+
+A digest of many items (Morning report, Weekly summary, AI digest): the page has one Bottom line and
+one Background for the digest, and each item carries its own one-line context of what it is about,
+since Jisu moves between areas. The context is a `<p class="context">` under the item's heading and
+counts toward its 60 words.
+
+The top of the page, the same markup in both themes (`assets/template.html` has it):
+
+```html
+<div class="card verdict"><strong>Bottom line.</strong> One or two sentences that read alone.</div>
+<div class="card background">
+<h2 id="s1">Background</h2>
+<ul>
+<li>One sentence: the problem, in words for someone who has never heard of this work.</li>
+<li>One sentence: why it came up or matters now.</li>
+<li>One sentence: what this work did.</li>
+</ul>
+</div>
+```
 
 An item is one block, the same markup in both themes (`assets/template.html` has one):
 
@@ -45,11 +75,14 @@ A chart drawn in CSS (bars of `div`s) carries `role="img"` so the check counts i
 
 `astra send-doc` checks the page per item (a heading and its bullets) after the send and warns on
 an item over 60 words, a bullet under one full sentence (fewer than 8 words or no full stop;
-captions and table rows are not held to it), or a page with no figure, image or viewer link; never
-on the page total; it sends the page anyway. A list of more than 3 bullets, and each line of a
-Next list, counts as one item per bullet. `astra send-doc --check page.html` prints each item's
-words and the same warnings, and sends nothing. The build steps below serve this rule: where they
-ask for glossaries, worked examples or parameters, those go in the `.md`.
+captions and table rows are not held to it), or a page with no figure, image or viewer link; on a
+page with no Bottom line or Background heading or label, a Background over 80 words, or a title
+carrying a run id (T-xx); never on the page total; it sends the page anyway. A label is a heading
+or a block opening with the word ("Bottom line:", "Background."). A list of more than 3 bullets,
+and each line of a Next list, counts as one item per bullet; a Background is one block whatever
+its bullets. A deck is held on its title only. `astra send-doc --check page.html` prints each
+item's words and the same warnings, and sends nothing. The build steps below serve this rule:
+where they ask for glossaries, worked examples or parameters, those go in the `.md`.
 
 Files here: `assets/theme-light.css` (decks and slides, the default for them),
 `assets/theme.css` (dark: reports, briefings, summaries, and decks only when the user asks for
@@ -89,7 +122,7 @@ class names, so a page switches theme by swapping the pasted stylesheet.
    and a .venv into whatever worktree it runs in), and never `pixi exec --spec playwright-python` (conda's
    playwright can overwrite its driver in pixi's shared cache).
 5. Slide decks use `<section class="slide">` per slide with an accent bar on top and a
-   `slide-num` bottom-right. pptx decks (python-pptx, `~/pixi_tools/ppt`) use the same light
+   `slide-num` bottom-right; the first slide states the problem the deck addresses. pptx decks (python-pptx, `~/pixi_tools/ppt`) use the same light
    values (reference `site3d_project_root/ppt/2026-10-27-all-hands-sim/scripts/build_deck.py`,
    `THEME=light`) and go out as PDF via `libreoffice --headless`; a deck to be presented also
    goes out as the `.pptx` itself (user, Oct 27 2026: "I need pptx as well to import to google
@@ -142,9 +175,13 @@ self-review, sending and archiving still applies.
 ## Self-review before sending (mandatory)
 
 - Report pages check (report and summary pages): `astra send-doc --check page.html` before
-  sending, and fix each warning: an item over 60 words, move its detail into `<name>.md` and link
-  it; a bullet under one full sentence, write the sentence; no visual, add the figure, chart or
-  viewer link the item has. There is no page total to cut to.
+  sending, and fix each warning: no Bottom line or Background, write it; a Background over 80 words,
+  keep the problem, why now and what was done; a run id in the title, name the subject; an item over
+  60 words, move its detail into `<name>.md` and link it; a bullet under one full sentence, write
+  the sentence; no visual, add the figure, chart or viewer link the item has. There is no page total
+  to cut to.
+- Read only the title, Bottom line and Background, as someone new to this work: does that say what
+  the problem was, what was done, what was found and what it means? If not, rewrite them.
 - `python scripts/shot_html.py FILE OUTDIR [--slides section.slide]` from the scratchpad in the
   playwright pixi env; read every screenshot (resize to 1800 px first). Fix overlaps, cut-off
   labels, garbled ticks, elements hidden behind others.

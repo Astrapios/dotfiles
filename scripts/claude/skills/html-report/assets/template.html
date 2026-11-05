@@ -3,22 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TITLE</title>
+<title>TITLE: the question or subject in plain words, no run id</title>
 <style>
 /* paste assets/theme.css here (inline; the file must be self-contained) */
 </style>
 </head>
 <body>
 <div class="accent-bar"></div>
-<h1>TITLE</h1>
+<h1>TITLE: the question or subject in plain words, no run id</h1>
 <p class="meta">DATE (Pacific, 12-hour) · branch / commit · who it is for</p>
-<nav class="toc"><a href="#s1">1. Findings</a><a href="#s2">2. Next</a></nav>
+<nav class="toc"><a href="#s1">1. Background</a><a href="#s2">2. Findings</a><a href="#s3">3. Next</a></nav>
 
-<div class="card verdict"><strong>Verdict.</strong> One or two sentences: what happened and what it means for the reader.</div>
+<div class="card verdict"><strong>Bottom line.</strong> One or two sentences that read alone: name the subject, say what happened and what it means for the reader, and define any number used.</div>
 
-<h2 id="s1">Findings</h2>
+<div class="card background">
+<h2 id="s1">Background</h2>
+<ul>
+<li>One sentence: the problem, for someone who has never heard of this work.</li>
+<li>One sentence: why it came up or matters now.</li>
+<li>One sentence: what this work did, defining every term a later item uses.</li>
+</ul>
+</div>
+
+<h2 id="s2">Findings</h2>
 <div class="item">
 <h3>Item heading: the one thing this item is about</h3>
+<p class="context">In a digest only: one line of what this item is about, for a reader coming from another area.</p>
 <ul>
 <li>One full sentence: what happened, with its number and the link to its <a href="#">source</a>.</li>
 <li>One full sentence: why it matters to the reader.</li>
@@ -28,7 +38,7 @@
 </div>
 <p class="meta">Tables, rules, caveats and long detail: <a href="NAME.md">NAME.md</a> beside this page.</p>
 
-<h2 id="s2">Next</h2>
+<h2 id="s3">Next</h2>
 <ul>
 <li>Each Next line is one full sentence that says why it is next.</li>
 </ul>
