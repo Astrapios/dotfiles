@@ -68,16 +68,13 @@ To send any file (PDF, log, archive, etc.) as a document:
 astra send-doc /path/to/file.ext "optional caption"
 ```
 
-Decks, reports, summaries, briefings and plans: load the `html-report` skill (light decks, dark reports,
-`astra send-doc`, dated `ppt/` archive). No claude.ai Artifacts unless asked.
+Decks, reports, summaries, briefings and plans, never as chat text alone: load the `html-report` skill (light decks,
+dark reports, `astra send-doc`, dated `ppt/` archive). No claude.ai Artifacts unless asked.
 
 ## Process discipline
 
 - **Ask before non-trivial algorithmic changes**: 3-5 bullet plan, wait for approval. Do not swap an agreed process or
   approach unilaterally, even if the alternative looks better; state the change and wait for OK.
-- **Any requested summary, write-up, report or plan awaiting approval goes out as a self-contained HTML file**
-  built with the `html-report` skill (`astra send-doc`, one visual per finding or step, pass/fail table per
-  experiment), not as chat text alone; the chat message carries the verdict and the file name.
 - **No plan mode for simple tasks** (parameter change, run a script, status check). In plan mode, spawn 2 to 3 independent
   reviewer agents in parallel (domain + general) on the plan and fix what they find before ExitPlanMode.
 - **"Test X instead of Y" = edit the existing script and run it.** No long inline `python -c` with grep filters that

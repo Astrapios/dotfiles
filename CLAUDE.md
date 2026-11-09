@@ -69,4 +69,4 @@ and update procedure: `installers/ttyd/README.md`.
 - `scripts/claude_settings.json` -> `~/.claude/settings.json` (model, hooks, promoted permissions), `scripts/claude_keybindings.json` -> `~/.claude/keybindings.json`
 - `scripts/claude/skills/<name>/` -> `~/.claude/skills/<name>`: `mr-review` (MR review with glab scripts, references, evals), `html-report` (self-contained dark HTML decks and reports, screenshot self-review), `glb-view` (ECEF GLB to S3 plus viewer link), `long-run` (background compute jobs with check-ins), `deeper`, `resolve-conflicts`, `vault-sync`
 - `scripts/claude/agents/<name>.md` -> `~/.claude/agents/`: `sar-physics-reviewer`
-- `scripts/claude/hooks/*.py|sh` -> `~/.claude/hooks/`: `guard_gitlab_publish.py` (PreToolUse guard: no publishing, plain notes or thread resolution on MRs)
+- `scripts/claude/hooks/*.py|sh` -> `~/.claude/hooks/`: `guard_gitlab_publish.py` (PreToolUse guard: no publishing, plain notes or thread resolution on MRs), `memory_budget_guard.py` (PreToolUse on Write and Edit: refuses growing a `memory/MEMORY.md` past 60 lines), `context_advisor.py` (UserPromptSubmit: /clear and /compact advice, memory budget line)
