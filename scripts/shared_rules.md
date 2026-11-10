@@ -79,8 +79,10 @@ dark reports, `astra send-doc`, dated `ppt/` archive). No claude.ai Artifacts un
   reviewer agents in parallel (domain + general) on the plan and fix what they find before ExitPlanMode.
 - **"Test X instead of Y" = edit the existing script and run it.** No long inline `python -c` with grep filters that
   swallow output.
-- **Reproduce the known-good config first** on any regression: find the producing script/branch, `git diff` it, copy its
-  exact config, then change one knob at a time.
+- **Reproduce the known-good config first** on any regression or study: find the producing script/branch, `git diff` it,
+  copy its exact config, then change one knob at a time. Any study or method comparison loads the `study-gates` skill;
+  never skipped: the base run first, and anything that contradicts an accepted result or is "unexplained" stops and goes
+  to the user, never onto a slide.
 - **Check efficiency before running** (crop / subsample; anything over ~30 s deserves a size estimate).
 
 ## Shell and process hygiene (this box)
