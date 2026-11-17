@@ -209,7 +209,7 @@ self-review, sending and archiving still applies.
   ("phone, dark"), which `astra ship` reads for its shot check.
 - Archive with the send: `astra send-doc --archive <descriptive-kebab-title> --preview <png> <file> "<caption>"`
   copies the deliverable and its preview into `site3d_project_root/ppt/YYYY-MM-DD-<title>/`
-  (`ASTRA_ARCHIVE_DIR`; resending with the same title updates that folder). Add there the other PNG previews, frozen copies of the generator and every data/figure/check script it
+  (`ASTRA_ARCHIVE_DIR`; resending with the same title adds a changed file as `<name>-r2`, `-r3` beside the copy already sent, never over it, and leaves the same bytes as they are). Add there the other PNG previews, frozen copies of the generator and every data/figure/check script it
   depends on, the figures and numbers (JSON) it embeds, a patch of any uncommitted code the
   results depend on (`git diff > name.patch`, base commit recorded), and a `README.md` to
   reproduce it cold (what it shows, branch and commit, data and cache paths, commands in order,
