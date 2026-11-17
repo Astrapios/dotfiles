@@ -17,6 +17,11 @@ h1 { font-size: 1.9rem; } h2 { font-size: 1.35rem; } h3 { font-size: 1.1rem; }
 .card { background: var(--bg-elev); border: 1px solid #2E2E2E; border-radius: 10px; padding: 16px 18px; margin: 16px 0; }
 .card.surface { background: var(--bg-surf); }
 .verdict { border-left: 4px solid var(--teal); }
+.verdict > strong:first-child { display: block; margin: 0 0 8px; font-size: 1.05rem; }
+.verdict > ul { margin: 0; padding-left: 1.2em; }
+.verdict > ul > li { margin: 0 0 7px; line-height: 1.55; padding-left: .25em; }
+.verdict > ul > li:last-child { margin-bottom: 0; }
+.verdict > ul > li::marker { color: var(--teal); }
 /* contents bar under the title block: one numbered link per h2 section, wraps on a phone */
 .toc { border-bottom: 1px solid #2E2E2E; padding: .5rem 16px; margin: 0 -16px; display: flex; gap: .2rem .8rem; flex-wrap: wrap; font-size: 12px; }
 .toc a { color: var(--fg-2); text-decoration: none; overflow-wrap: anywhere; } .toc a:hover { color: var(--fg-head); }

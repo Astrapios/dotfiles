@@ -23,9 +23,10 @@ pages rule of Oct 29.
 Report pages (2026-11-05)
 1. Title: the question or subject in plain words a stranger understands, never a run id, an
    internal label or a number that needs the report to explain it.
-2. Bottom line, labeled "Bottom line", first: 1 to 2 sentences that read alone. They name the
-   subject, say what happened and what it means for the reader, and define any number they use.
-3. Background, labeled "Background", second: 2 to 4 one-sentence bullets, under 80 words in all:
+2. Bottom line, labeled "Bottom line", first: 2 to 5 one-sentence bullets, the most important
+   first, each reading alone. Together they name the subject, say what happened and what it means
+   for the reader, and define any number they use.
+3. Background, labeled "Background", second: 2 to 5 one-sentence bullets, under 80 words in all:
    the problem, why it came up or matters now, and what this work did. It assumes the reader has
    never heard of this work. Every term a later item uses is defined here.
 4. The test: someone with zero context gets 80% of what this is about from the title, Bottom line
@@ -47,7 +48,12 @@ counts toward its 60 words.
 The top of the page, the same markup in both themes (`assets/template.html` has it):
 
 ```html
-<div class="card verdict"><strong>Bottom line.</strong> One or two sentences that read alone.</div>
+<div class="card verdict"><strong>Bottom line</strong>
+<ul>
+<li>One sentence, the most important: what happened to the subject, reading alone.</li>
+<li>One sentence: what it means for the reader, defining any number it uses.</li>
+</ul>
+</div>
 <div class="card background">
 <h2 id="s1">Background</h2>
 <ul>
@@ -76,8 +82,8 @@ A chart drawn in CSS (bars of `div`s) carries `role="img"` so the check counts i
 `astra send-doc` checks the page per item (a heading and its bullets) after the send and warns on
 an item over 60 words, a bullet under one full sentence (fewer than 8 words or no full stop;
 captions and table rows are not held to it), or a page with no figure, image or viewer link; on a
-page with no Bottom line or Background heading or label, a Background over 80 words, or a title
-carrying a run id (T-xx); never on the page total; it sends the page anyway. A label is a heading
+page with no Bottom line or Background heading or label, a Bottom line or Background over 5
+bullets, a Background over 80 words, or a title carrying a run id (T-xx); never on the page total; it sends the page anyway. A label is a heading
 or a block opening with the word ("Bottom line:", "Background."). A list of more than 3 bullets,
 and each line of a Next list, counts as one item per bullet; a Background is one block whatever
 its bullets. A deck is held on its title only. `astra send-doc --check page.html` prints each
@@ -175,8 +181,9 @@ self-review, sending and archiving still applies.
 ## Self-review before sending (mandatory)
 
 - Report pages check (report and summary pages): `astra send-doc --check page.html` before
-  sending, and fix each warning: no Bottom line or Background, write it; a Background over 80 words,
-  keep the problem, why now and what was done; a run id in the title, name the subject; an item over
+  sending, and fix each warning: no Bottom line or Background, write it; a Bottom line or Background
+  over 5 bullets, keep the most important 5 or fewer; a Background over 80 words, keep the problem,
+  why now and what was done; a run id in the title, name the subject; an item over
   60 words, move its detail into `<name>.md` and link it; a bullet under one full sentence, write
   the sentence; no visual, add the figure, chart or viewer link the item has. There is no page total
   to cut to.
