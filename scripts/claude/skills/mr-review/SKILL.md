@@ -46,11 +46,11 @@ If it exists, read it and review **incrementally**:
 - **Depth tier**, chosen by what the diff touches, never by who wrote it; state it in the report:
   - **Quick** - docs, comments, test-only or config-only changes, renames, additive tooling
     under `experimental/` or `test_scripts/` with no production import. Steps 1-3, step 6
-    (ruff + dead-parameter sweep), short chat summary opening with "What this MR does"
+    (ruff, dead-parameter and redundancy sweeps), short chat summary opening with "What this MR does"
     (step 7), step 8. No fan-out, no refuter, no
     figures, no HTML unless a real bug turns up. Do not pad a clean Quick review with nits.
-  - **Standard** - ordinary production changes. Full flow, domain agents only for the domains
-    actually touched, plus the cold `/code-review` reviewer of step 5 (Deep too, never Quick).
+  - **Standard** - ordinary production changes. Full flow (redundancy sweep included, Deep
+    too), domain agents only for the domains actually touched, plus the cold `/code-review` reviewer of step 5 (Deep too, never Quick).
   - **Deep** - kernels, geometry and coordinate conventions, phase-sensitive products (BP, PFA,
     sim kernels, InSAR, DOF), range gating and pulse timing, anything the MR description calls
     "exact", "conservative" or "no-op", and any diff over ~1000 lines. Full flow plus the
@@ -145,6 +145,14 @@ significant / bug), bugs distinguished from nits; **no file edits**. Calibrate s
 - `pixi run -e lint ruff check <changed files>`.
 - Tests: note whether they exist and would run; verify logic yourself, never ask the user to
   run speculative things.
+- **Redundancy sweep** (every tier; user, 2026-11-18): every new public symbol, and every new
+  private helper over about 5 lines, is searched against `main` and the MR's own stack: `rg` on
+  the name AND on its core expression, in `python_common/`, `sar_common/`, the touched package,
+  and library equivalents (SciPy, trimesh). List each overlap with both `file:line` and a
+  verdict: **duplicate** (same computation, shown numerically or line by line), **near
+  duplicate** (same job, different contract; say what differs) or **new**. A duplicate is a
+  finding whose draft points to the existing helper; a near duplicate that changes results is
+  a finding too.
 - **Dead-parameter sweep**: every parameter of every touched signature is still READ in the
   new body (a culled loop that stops reading `n_targets` leaves a live arg feeding a dead param).
 - **Load-bearing-op sweep**: for each defensive op near the hunks (clip, clamp, guard, re-sort,
@@ -204,7 +212,8 @@ the MR's scope changes), then: reviewed range (MR,
 merge-base, HEAD, date, tier, fix SHAs); ground-truth facts with `file:line`; findings ledger
 (severity, `file:line`, status open / fixed-in-<sha> / wontfix-with-reason, pre-existing tag);
 reviewer-comment checklist (discussion id, anchor, gist, disposition, draft or posted reply);
-verdict; figure script and output dir. One file per branch, updated in place with a short
+a `## Redundancy check (<head short SHA>)` section for this round (each new symbol and its
+step 6 verdict, or "no new public symbols"); verdict; figure script and output dir. One file per branch, updated in place with a short
 history of prior SHAs. Derived state: on conflict, GitLab is canonical. Add a pointer in
 `docs/branches/<branch>.md` if missing.
 
