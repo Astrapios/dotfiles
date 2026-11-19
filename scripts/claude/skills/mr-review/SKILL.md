@@ -203,6 +203,11 @@ both open with "What this MR does"; after it, the chat summary is one line per f
   code is correct.
 - **HTML briefing** for Standard and Deep (and a Quick that found a bug): follow
   `references/html-briefing.md`, send with `astra send-doc`, figures with `astra send-photo`.
+  When the MR has existing threads (re-review, received reply, or any round that drafts
+  replies), the page carries a **Threads and draft replies** section so the user can comment
+  or question each one: one item per thread with the reviewer and `file:line`, the comment
+  quoted in full, and the draft reply quoted in full (or "no reply drafted" and why). Full
+  text on the page, not only in the review file.
 
 ### 8. Persist the review state (ALWAYS, before finishing)
 
