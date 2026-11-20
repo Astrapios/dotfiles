@@ -91,6 +91,10 @@ ln -sf $SCRIPT_PATH/scripts/claude_global.md ~/.claude/CLAUDE.md   # imports sha
 ln -sf $SCRIPT_PATH/scripts/claude_rtk.md ~/.claude/RTK.md          # imported by CLAUDE.md (@RTK.md)
 ln -sf $SCRIPT_PATH/scripts/claude_keybindings.json ~/.claude/keybindings.json
 
+# Google Workspace MCP servers (Drive, Docs) at user scope in every Claude config dir;
+# skips until the OAuth client is at ~/.config/google-mcp/oauth_client.json (never in git)
+zsh $SCRIPT_PATH/scripts/claude_google_mcp.zsh
+
 # astra desk definition, local additions: appended after the shipped src/astra/desk.md at each desk start
 mkdir -p ~/.config/astra
 ln -sf $SCRIPT_PATH/scripts/astra_desk_local.md ~/.config/astra/desk.local.md
