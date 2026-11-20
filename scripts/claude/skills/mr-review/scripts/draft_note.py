@@ -15,7 +15,8 @@ Usage (run from the worktree that has the MR's base and head commits):
   draft_note.py --update <draft_id> --path ... --line 40 --line-end 44 --note-file note.md
   # list / delete drafts
   draft_note.py --list            draft_note.py --delete <draft_id>
-Add --mr IID when not on the MR's branch, --dry-run to print the payload only.
+Add --mr IID when not on the MR's branch, --dry-run to print the payload only, --json to print one JSON line
+(id, path, line_from, line, reply_to, posted_sha256) that `mr_context.py review add --drafts` takes.
 
 Line codes follow GitLab's diff parser: `sha1(new_path)_<old_pos>_<new_pos>`, where for an
 added line old_pos is the next unconsumed old line number; unchanged lines carry old_line in
@@ -32,7 +33,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from glab_common import api, paged, resolve_mr  # noqa: E402
+from glab_common import api, resolve_mr  # noqa: E402
 
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -116,13 +117,24 @@ def position_dict(refs: dict, path: str, start: int, end: int, lmap: dict) -> di
 
 
 def send_json(path: str, body: dict, method: str) -> dict:
-    """glab api with a JSON body: --input + Content-Type header (auth comes from glab)."""
+    """Glab api with a JSON body: --input + Content-Type header (auth comes from glab)."""
     import tempfile
 
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tmp:
         json.dump(body, tmp)
         name = tmp.name
     return api(path, "--input", name, "-H", "Content-Type: application/json", method=method)
+
+
+def result_json(res: dict, iid: int) -> dict:
+    """What a review lists for a draft GitLab created (`--json`): its id, where it sits, and the sha256 of its body as
+    GitLab returned it, so the MR review app can tell later whether Jisu edited it before publishing.
+    """
+    pos = res.get("position") or {}
+    start = ((pos.get("line_range") or {}).get("start") or {}).get("new_line")
+    return {"id": res["id"], "mr": iid, "path": pos.get("new_path"), "line_from": start if start is not None else pos.get("new_line"),
+            "line": pos.get("new_line"), "reply_to": res.get("discussion_id"),
+            "posted_sha256": hashlib.sha256((res.get("note") or "").encode()).hexdigest()}
 
 
 def main() -> None:
@@ -139,6 +151,7 @@ def main() -> None:
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--delete")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--json", action="store_true", help="print one JSON line: id, where, posted_sha256 (for review add)")
     a = ap.parse_args()
 
     mr = resolve_mr(a.mr)
@@ -194,6 +207,9 @@ def main() -> None:
     where = f" at {pos.get('new_path')}:{pos.get('new_line')}" if pos.get("new_path") else ""
     if a.path and not pos.get("new_path"):
         raise SystemExit(f"draft {res['id']} was created WITHOUT its anchor; delete it and investigate")
+    if a.json:
+        print(json.dumps(result_json(res, iid)))
+        return
     print(f"{method} ok: draft {res['id']} on !{iid}{where}")
 
 

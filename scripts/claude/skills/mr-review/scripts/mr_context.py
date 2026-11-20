@@ -16,11 +16,19 @@ Usage:
     mr_context.py check DIR [--head SHA] [--threads THREADS.json] [--mr-head IID=SHA ...]
                   exit 1 unless every entry is valid, its files exist, its draft has no unfilled slot,
                   every promise in it is queued, and (with --threads) no thread has a newer note
+    mr_context.py check DIR --review TASK   also: a review by TASK is listed, its page is there with no script,
+                  every draft titled (mr_review_index.py)
+    mr_context.py review add DIR --task T-x --kind new|rereview|received-reply|self-review --tier quick|standard|deep
+                  --head SHA --state request-changes|ready|comments-only --verdict TEXT --page PAGE.html
+                  --record RECORD.md --drafts DRAFTS.json [--changes CHANGES.json | --no-sigs] [--made-at ISO]
+                  copy the review page into DIR/reviews/<head12>-<task>/ and list the review
     mr_context.py promises DIR [--md]   the queued fixes the drafts promise ("I'll ...")
     mr_context.py text DIR/<discussion_id>.html   the block's words, figures listed by caption (cold read)
 
-Schema 2 adds last_note_id, anchor_status, evidence and promises to an entry. Schema 1 entries (written
-before Nov 20 2026) still pass; their missing keys give a warning.
+Schema 2 adds last_note_id, anchor_status, evidence and promises to an entry, and the review half
+(mr_review_index.py): `reviews` (one per review round: its page, verdict and drafts) and each finding's
+severity, path and lines. Schema 1 entries (written before Nov 20 2026) still pass; their missing keys
+give a warning.
 
 Standard library only, so any Python runs it.
 """
@@ -35,6 +43,9 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mr_review_index as RI  # noqa: E402
 
 SCHEMA = 2
 SCHEMAS = (1, 2)
@@ -64,8 +75,15 @@ V2_KEYS = {
 # A finding the review raised whose draft has no thread yet (the !808 layout): no discussion id,
 # no thread to be fresh against.
 FINDING_KEYS = {"finding": str, **{k: v for k, v in ENTRY_KEYS.items() if k != "discussion_id"}}
-FINDING_OPTIONAL = {"draft_note_id": (int, type(None)), "evidence": list, "promises": list}
-INDEX_KEYS = {"schema", "project", "mr_iid", "entries", "findings"}
+FINDING_OPTIONAL = {
+    "draft_note_id": (int, type(None)),
+    "evidence": list,
+    "promises": list,
+    # where the finding sits (severity, path, line_from, line), drawn on its lines by the app; typed by
+    # mr_review_index.problems
+    **{k: object for k in RI.FINDING_LOCATION},
+}
+INDEX_KEYS = {"schema", "project", "mr_iid", "entries", "findings", "reviews"}  # reviews: mr_review_index.py
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 FINDING_NAME = re.compile(r"^finding-\d+$")
 
@@ -184,7 +202,7 @@ def _load(d: Path) -> dict:
 
 def _save(d: Path, idx: dict) -> None:
     idx["entries"].sort(key=lambda e: e["made_at"])
-    (d / "index.json").write_text(json.dumps(idx, indent=2) + "\n")
+    RI.save_atomic(d / "index.json", idx)  # (temp file and os.replace: the app never reads half a file)
 
 
 def _check_types(tag: str, e: dict, keys: dict, out: list[str]) -> bool:
@@ -279,6 +297,7 @@ def audit(
     head: str | None = None,
     threads: list[dict] | None = None,
     mr_heads: dict[int, str] | None = None,
+    review: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Every way the folder breaks the schema or the draft rules, and what only deserves a warning.
 
@@ -288,6 +307,7 @@ def audit(
         threads: `mr_discussions.py --json --all` output; an entry whose thread has a note newer
             than its last_note_id is stale even at the same head.
         mr_heads: Current head per MR iid; evidence taken from that MR at another SHA is stale.
+        review: When given, a review by this task must be listed (mr_review_index.problems).
 
     Returns:
         (problems, warnings), one line each; the folder passes when problems is empty.
@@ -311,9 +331,10 @@ def audit(
     extra = set(idx) - INDEX_KEYS
     if extra:
         out.append(f"unknown index keys {sorted(extra)}")
+    out += RI.problems(d, idx, review)
     entries = idx.get("entries")
     findings = idx.get("findings", [])
-    if not isinstance(entries, list) or not isinstance(findings, list) or not (entries or findings):
+    if not isinstance(entries, list) or not isinstance(findings, list) or not (entries or findings or idx.get("reviews")):
         return out + ["entries missing or empty"], warn
     by_id = {t["id"]: t for t in threads or []}
     seen = set()
@@ -374,9 +395,9 @@ def audit(
     return out, warn
 
 
-def problems(d: Path, head: str | None = None) -> list[str]:
+def problems(d: Path, head: str | None = None, review: str | None = None) -> list[str]:
     """Every way the folder breaks the schema; empty when it is valid (see `audit`)."""
-    return audit(d, head)[0]
+    return audit(d, head, review=review)[0]
 
 
 def _parse_mr_sha(items: list[str] | None) -> dict[int, str]:
@@ -442,7 +463,7 @@ def cmd_add(a: argparse.Namespace) -> int:
 
 def cmd_check(a: argparse.Namespace) -> int:
     threads = json.loads(Path(a.threads).read_text()) if a.threads else None
-    probs, warn = audit(Path(a.dir), a.head, threads, _parse_mr_sha(a.mr_head))
+    probs, warn = audit(Path(a.dir), a.head, threads, _parse_mr_sha(a.mr_head), a.review)
     for p in probs:
         print(p)
     for w in warn:
@@ -450,8 +471,49 @@ def cmd_check(a: argparse.Namespace) -> int:
     if probs:
         return 1
     idx = json.loads((Path(a.dir) / "index.json").read_text())
-    n, m = len(idx["entries"]), len(idx.get("findings", []))
-    print(f"ok: {n} entries" + (f", {m} findings" if m else "") + (f", {len(warn)} warnings" if warn else ""))
+    n, m, r = len(idx["entries"]), len(idx.get("findings", [])), len(idx.get("reviews", []))
+    print(f"ok: {n} entries" + (f", {m} findings" if m else "") + (f", {r} reviews" if r else "")
+          + (f", {len(warn)} warnings" if warn else ""))
+    return 0
+
+
+def _sigs(a: argparse.Namespace, project: str, iid: int | None) -> dict[str, str]:
+    """Each changed file's diff signature at --head: from --changes, else GitLab (GET): the MR's changes when --head
+    is its head now, else the MR version at --head.
+    """
+    if a.no_sigs:
+        return {}
+    if a.changes:
+        c = json.loads(Path(a.changes).read_text())
+        return RI.sigs_of(c.get("changes") or c.get("diffs") or [] if isinstance(c, dict) else c)
+    from glab_common import api
+
+    p = f"projects/{project.replace('/', '%2F')}/merge_requests/{iid}"
+    if (api(p).get("diff_refs") or {}).get("head_sha") == a.head:
+        return RI.sigs_of(api(f"{p}/changes?access_raw_diffs=true").get("changes") or [])
+    v = next((v for v in api(f"{p}/versions") or [] if v.get("head_commit_sha") == a.head), None)
+    if not v:
+        raise SystemExit(f"no MR version at {a.head[:9]}; pass --changes or --no-sigs")
+    return RI.sigs_of(api(f"{p}/versions/{v['id']}").get("diffs") or [])
+
+
+def cmd_review_add(a: argparse.Namespace) -> int:
+    d = Path(a.dir)
+    d.mkdir(parents=True, exist_ok=True)
+    idx = _load(d)
+    idx["project"] = idx.get("project") or a.project
+    if idx.get("mr_iid") is None:
+        idx["mr_iid"] = a.iid if a.iid is not None else int(d.name) if d.name.isdigit() else None
+    entry = RI.add_review(d, idx, task=a.task, kind=a.kind, tier=a.tier, head=a.head, verdict=a.verdict,
+                          state=a.state, page=Path(a.page), record=a.record, drafts=RI.drafts_from(Path(a.drafts)),
+                          file_sigs=_sigs(a, idx["project"], idx["mr_iid"]), made_at=a.made_at)
+    probs = RI.problems(d, idx)
+    if probs:
+        for p in probs:
+            print(p)
+        return 1
+    RI.save_atomic(d / "index.json", idx)
+    print(f"index.json: review {a.task} at {a.head[:9]}, {len(entry['drafts'])} drafts, page {entry['page']}")
     return 0
 
 
@@ -544,7 +606,26 @@ def main() -> int:
     p.add_argument("--head", default=None, help="require every entry at this head SHA")
     p.add_argument("--threads", default=None, help="mr_discussions.py --json --all output: flag newer notes")
     p.add_argument("--mr-head", action="append", help="IID=SHA current head of another MR in the stack (repeat)")
+    p.add_argument("--review", default=None, help="require a review by this task id, its page and titled drafts")
     p.set_defaults(fn=cmd_check)
+    rv = sub.add_parser("review", help="the reviews of the MR (schema 2)").add_subparsers(dest="rcmd", required=True)
+    p = rv.add_parser("add", help="copy a review page in and list the review")
+    p.add_argument("dir")
+    p.add_argument("--task", required=True)
+    p.add_argument("--kind", required=True, choices=RI.KINDS)
+    p.add_argument("--tier", required=True, choices=RI.REVIEW_TIERS)
+    p.add_argument("--head", required=True)
+    p.add_argument("--state", required=True, choices=RI.STATES)
+    p.add_argument("--verdict", required=True)
+    p.add_argument("--page", required=True, help="the review's HTML briefing")
+    p.add_argument("--record", required=True, help="docs/branches/<branch>-review.md")
+    p.add_argument("--drafts", required=True, help="JSON list or lines: draft_note.py --json plus kind, finding, title")
+    p.add_argument("--changes", default=None, help="saved GitLab changes JSON at --head (default: read GitLab)")
+    p.add_argument("--no-sigs", action="store_true", help="no file signatures (the app then trusts the head only)")
+    p.add_argument("--project", default="product/site3d")
+    p.add_argument("--iid", type=int, default=None)
+    p.add_argument("--made-at", default=None, help="ISO 8601 with offset (default now)")
+    p.set_defaults(fn=cmd_review_add)
     p = sub.add_parser("promises", help="list the fixes the drafts promise")
     p.add_argument("dir")
     p.add_argument("--md", action="store_true", help="as a markdown checklist for the review record")
