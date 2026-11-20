@@ -38,7 +38,7 @@ def ri():
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(CTX), *args], capture_output=True, text=True)
+    return subprocess.run([sys.executable, str(CTX), *args], capture_output=True, text=True, check=False)
 
 
 def sha(text: str) -> str:

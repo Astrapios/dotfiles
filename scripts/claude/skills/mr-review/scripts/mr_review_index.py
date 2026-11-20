@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """The review half of an MR's index.json (schema 2): which reviews were made, at which head, with which drafts.
 
 The MR review app reads it to draw the Review tab, put each finding and draft on its line or thread, tell a draft's
@@ -55,7 +54,7 @@ DRAFT_KEYS = {"id": int, "kind": str, "finding": (str, NONE), "discussion_id": (
               "line": (int, NONE), "title": str, "posted_sha256": (str, NONE)}
 DRAFT_OPTIONAL = {"line_from": (int, NONE), "posted_text": str}
 FINDING_LOCATION = {"severity": str, "path": (str, NONE), "line_from": (int, NONE), "line": (int, NONE)}
-LINKED = re.compile(r"""\b(?:src|href)\s*=\s*["']([^"'#?]+)""", re.I)
+LINKED = re.compile(r"""\b(?:src|href)\s*=\s*["']([^"'#?]+)""", re.IGNORECASE)
 
 
 def save_atomic(path: Path, obj: dict) -> None:
@@ -195,7 +194,7 @@ def _linked(html: str) -> list[str]:
     out = []
     for m in LINKED.finditer(html):
         u = m.group(1).strip()
-        if not u or re.match(r"^[a-z][a-z0-9+.-]*:", u, re.I) or u.startswith(("/", "//")) or ".." in u.split("/"):
+        if not u or re.match(r"^[a-z][a-z0-9+.-]*:", u, re.IGNORECASE) or u.startswith(("/", "//")) or ".." in u.split("/"):
             continue
         out.append(u)
     return out
