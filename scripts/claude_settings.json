@@ -1,4 +1,5 @@
 {
+  "cleanupPeriodDays": 180,
   "env": {
     "CLAUDE_CODE_DISABLE_MOUSE": "1",
     "ASTRA_ARCHIVE_DIR": "/home/ubuntu/src/site3d_project_root/ppt",
