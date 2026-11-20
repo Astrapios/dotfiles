@@ -184,8 +184,11 @@ site3d_project_root/outputs/mr_context/<iid>/
                          base64 data URIs, no script, readable at 390 px wide
   deep_<topic>.html      Deep pages (same rules), beside the blocks; deep_<topic>.md beside each
   <discussion_id>_fig<N>.png  the figures as files (cold reader, app thumbnails)
+  reviews/<head12>-<task>/   each review round's HTML briefing and the files it links (review add)
   index.json
 ```
+
+Any project other than product/site3d uses `outputs/mr_context/<group>-<project>/<iid>/`.
 
 A finding the review raises that has no GitLab thread yet uses `finding-<n>` in place of a
 discussion id for its file name only, and is not listed in `index.json` until its draft becomes a
@@ -219,7 +222,20 @@ thread.
   "findings": [
     {"finding": "finding-1", "head_sha": "...", "tier": "...", "title": "...", "block": "finding-1.html",
      "deep_page": null, "cold_read": "...", "cold_read_note": "", "requested_by": "review",
-     "made_at": "...", "draft_note_id": 123}
+     "made_at": "...", "draft_note_id": 123,
+     "severity": "significant", "path": "a/b.py", "line_from": 81, "line": 83}
+  ],
+  "reviews": [
+    {"task": "T-uZ", "kind": "new | rereview | received-reply | self-review",
+     "tier": "quick | standard | deep", "head_sha": "<40 hex>", "made_at": "<ISO 8601 with offset>",
+     "state": "request-changes | ready | comments-only", "verdict": "<one line>",
+     "page": "reviews/<head12>-<task>/index.html", "page_bytes": 1086549,
+     "record": "docs/branches/<branch>-review.md",
+     "file_sigs": {"<path>": "<sha1 of the file's diff at head_sha, 16 hex>"},
+     "drafts": [{"id": 3939, "kind": "finding | reply | summary", "finding": "finding-1 or null",
+                 "discussion_id": "<40 hex, a reply's thread> or null", "path": "a/b.py",
+                 "line_from": 81, "line": 83, "title": "<one line>",
+                 "posted_sha256": "<sha256 of the body GitLab returned>"}]}
   ]
 }
 ```
@@ -244,11 +260,29 @@ only. A finding's block is listed under `findings` until its draft becomes a thr
   too. The app says "written at an older version" and offers a refresh; the digest and the watcher
   reuse an entry only when both match and never file a new explanation for it.
 
+## The review itself (`reviews`)
+
+Each review round adds one item to `reviews` (newest last), written only by `mr_context.py review
+add` (SKILL.md step 8): it copies the round's HTML briefing into `reviews/<head12>-<task>/`, keeps
+the drafts the round posted (from `draft_note.py --json`: id, place, `posted_sha256`) with their
+titles, and the file signatures at the review head (`file_sigs`, read from GitLab, GET only). A
+finding's `severity`, `path`, `line_from` and `line` let the app draw it on its lines.
+
+- The app tells each draft's state from the MR it already reads: not published (still a draft;
+  "edited" when its body's hash changed), published, published but rewritten, or deleted.
+- When the MR head is not the review's head the app shows a box saying the MR moved; a finding stays
+  on its lines only while its file's diff signature is the one in `file_sigs`.
+- `check <dir> --review <task>` exits 1 unless that review is listed, its page is under `reviews/`
+  with no script, and every draft has a title and a body hash (or the text posted, for a backfill).
+- `index.json` is replaced through a temporary file and a rename, so the app never reads half a file.
+
 ## Where it shows up
 
 - The review's HTML briefing (`references/html-briefing.md`): in "Threads and draft replies", each
   thread's block sits under the quoted comment and before the draft reply; each finding's block
   under its card.
-- The MR review app: the block collapsed as "Explanation" under the thread, from `index.json`.
+- The MR review app: the block collapsed as "Explanation" under the thread, from `index.json`; the
+  Review tab lists the newest review with its drafts and findings, and opens its page as "Full report".
+  The app reads the folder at `/apps/mr-context/` (registered by the app's `register.sh`).
 - A pilot or standalone explain run: one page for Jisu (Report pages standard), one item per thread
   with the comment quoted, its block inline (or the Deep page linked) and the cold-read verdict.

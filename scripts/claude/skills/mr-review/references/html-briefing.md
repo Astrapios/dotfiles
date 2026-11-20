@@ -15,6 +15,11 @@ The chat summary is a few lines; this file is the primary deliverable, read on a
 the worktrees). Build it with the html-report skill (`~/.claude/skills/html-report`): same
 dark theme, self-contained, no JS, figures as data URIs.
 
+`mr_context.py review add` (SKILL.md step 8) copies the page, and only the files it links by a
+relative path, into `outputs/mr_context/<dir>/reviews/<head12>-<task>/`, where the MR review app
+opens it as "Full report" in a new tab. So link every local file relatively (or inline it), and
+keep scripts out: `check --review` refuses a page with a script.
+
 ## Page structure (adapt to what the round did)
 
 - Header: MR number, branch, date (Pacific, 12-hour), reviewed and fix commit SHAs, tier.

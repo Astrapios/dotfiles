@@ -25,7 +25,8 @@ Files in this skill (one level deep, read when the step says so):
   `mr_discussions.py --all --json` keeps each thread as the reviewer saw it (full position, posted
   head, every note, `anchor_status` as-posted or inferred)
 - `scripts/mr_context.py` - `add` / `check` / `promises` / `text` for the explanations folder and its
-  `index.json` (freshness on head SHA plus last note id, draft slots, queued promises)
+  `index.json` (freshness on head SHA plus last note id, draft slots, queued promises); `review add`
+  lists the review itself (its page, verdict and drafts) for the app's Review tab
 - `scripts/line_origin.py` - trace a line to the commit, session and words that chose it: fact log,
   blame, past a split's port commit to the dev line, transcripts by symbol and commit subject
 - `scripts/merge_names.py <repo> <head A> <head B>` - merge-order check between two MRs: conflicts,
@@ -244,6 +245,15 @@ a `## Redundancy check (<head short SHA>)` section for this round (each new symb
 step 6 verdict, or "no new public symbols"); verdict; figure script and output dir. One file per branch, updated in place with a short
 history of prior SHAs. Derived state: on conflict, GitLab is canonical. Add a pointer in
 `docs/branches/<branch>.md` if missing.
+
+Then list the round in the MR's `outputs/mr_context/<dir>/` so the MR review app shows it in its
+Review tab (`references/thread-explanation.md`, "The review itself"): post every draft with
+`draft_note.py --json`, collect its JSON lines into `drafts.json` with each draft's `kind`
+(finding, reply, summary), `finding` and a one-line `title`, then run `mr_context.py review add
+<dir> --task <T-x> --kind <new|rereview|received-reply|self-review> --tier <quick|standard|deep>
+--head <sha> --state <request-changes|ready|comments-only> --verdict "<one line>" --page
+<briefing.html> --record docs/branches/<branch>-review.md --drafts drafts.json`, and verify with
+`mr_context.py check <dir> --review <T-x>`. Never edit `index.json` by hand.
 
 ### 9. Record review misses (whenever one surfaces)
 
