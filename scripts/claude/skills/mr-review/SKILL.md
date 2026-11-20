@@ -19,9 +19,15 @@ Files in this skill (one level deep, read when the step says so):
 - `references/posting-glab.md` - posting draft notes on the MR (rules, suggestion syntax, scripts)
 - `references/html-briefing.md` - the HTML briefing: structure, figures, self-review, sending
 - `references/thread-explanation.md` - the explanation per thread and per finding: contents, tiers,
-  figures, history sources, cold-read check, `outputs/mr_context/<iid>/` layout and `index.json`
-- `scripts/mr_discussions.py`, `scripts/draft_note.py` - run them, do not hand-roll glab calls
-- `scripts/mr_context.py` - `add` / `check` / `text` for the explanations folder and its `index.json`
+  figures, history sources, port maps, cold-read check, `outputs/mr_context/<iid>/` layout and
+  `index.json`
+- `scripts/mr_discussions.py`, `scripts/draft_note.py` - run them, do not hand-roll glab calls;
+  `mr_discussions.py --all --json` keeps each thread as the reviewer saw it (full position, posted
+  head, every note, `anchor_status` as-posted or inferred)
+- `scripts/mr_context.py` - `add` / `check` / `promises` / `text` for the explanations folder and its
+  `index.json` (freshness on head SHA plus last note id, draft slots, queued promises)
+- `scripts/line_origin.py` - trace a line to the commit, session and words that chose it: fact log,
+  blame, past a split's port commit to the dev line, transcripts by symbol and commit subject
 - `scripts/merge_names.py <repo> <head A> <head B>` - merge-order check between two MRs: conflicts,
   names one side removed that the merged tree still uses, undefined names (tests in `tests/`)
 - `evals/` - regression prompts built from past misses
@@ -72,7 +78,10 @@ relevant ones into the domain agents (step 5). Resolved threads are context, not
 Every open thread gets an explanation (Jisu, Nov 19 2026: "give a background on the comments so
 that I have enough context to review before submiting"): follow `references/thread-explanation.md`
 (tier per thread, figures, history, cold read) and write the blocks and `index.json` into
-`site3d_project_root/outputs/mr_context/<iid>/`. Reuse an entry already at the current head.
+`site3d_project_root/outputs/mr_context/<iid>/`. Explain the line the reviewer saw: an `inferred`
+anchor is read at the posted head, and every note counts (a reply can withdraw the comment). For
+history, read the fact log first, then run `scripts/line_origin.py` on each anchored line. Reuse an
+entry only when both its head and its `last_note_id` are current (`mr_context.py check --threads`).
 
 ### 3. Read the full diff
 

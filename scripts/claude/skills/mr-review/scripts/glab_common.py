@@ -28,6 +28,12 @@ def api(path: str, *args: str, method: str | None = None) -> object:
     return json.loads(out.stdout) if out.stdout.strip() else None
 
 
+def raw(path: str) -> str | None:
+    """GET a non-JSON endpoint (a file's raw content); None when GitLab refuses it."""
+    out = subprocess.run(["glab", "api", path], capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else None
+
+
 def paged(path: str) -> list:
     """Fetch every page of a list endpoint."""
     sep = "&" if "?" in path else "?"
