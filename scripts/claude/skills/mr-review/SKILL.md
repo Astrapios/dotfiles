@@ -22,6 +22,8 @@ Files in this skill (one level deep, read when the step says so):
   figures, history sources, cold-read check, `outputs/mr_context/<iid>/` layout and `index.json`
 - `scripts/mr_discussions.py`, `scripts/draft_note.py` - run them, do not hand-roll glab calls
 - `scripts/mr_context.py` - `add` / `check` / `text` for the explanations folder and its `index.json`
+- `scripts/merge_names.py <repo> <head A> <head B>` - merge-order check between two MRs: conflicts,
+  names one side removed that the merged tree still uses, undefined names (tests in `tests/`)
 - `evals/` - regression prompts built from past misses
 
 ## Steps
@@ -160,6 +162,10 @@ significant / bug), bugs distinguished from nits; **no file edits**. Calibrate s
   duplicate** (same job, different contract; say what differs) or **new**. A duplicate is a
   finding whose draft points to the existing helper; a near duplicate that changes results is
   a finding too.
+- **Merge order between MRs** (two open MRs touching the same files, or any "merge X before Y"
+  advice): run `python3 ~/.claude/skills/mr-review/scripts/merge_names.py <repo> <head A> <head B>`
+  on the two heads; never rely on `git merge-tree` conflicts alone. It reported one conflict where
+  the merge also left `reuse_mesh` undefined and an old keyword in five calls (Nov 20).
 - **Dead-parameter sweep**: every parameter of every touched signature is still READ in the
   new body (a culled loop that stops reading `n_targets` leaves a live arg feeding a dead param).
 - **Load-bearing-op sweep**: for each defensive op near the hunks (clip, clamp, guard, re-sort,
