@@ -26,6 +26,11 @@ dark theme, self-contained, no JS, figures as data URIs.
 - One card per finding: severity pill and title, the figure, a caption of at most two
   sentences saying what to look at, and a one-line fix (inline code only for a one-liner).
   No diff blocks unless the fix itself is the point.
+- Each finding card carries its explanation block under the fix line (`references/thread-explanation.md`).
+- "Threads and draft replies" (an MR with threads): one item per thread with the reviewer and
+  `file:line`, the comment quoted in full, then the thread's explanation block from
+  `outputs/mr_context/<iid>/<discussion_id>.html` (pasted inline, its Deep page linked), then the
+  draft reply quoted in full.
 - Pre-existing findings in their own short section after the MR's own.
 - If fixes were applied: test and lint results, commits, and (if restacked) what was ported
   into which upstack MR, including merge traps caught.

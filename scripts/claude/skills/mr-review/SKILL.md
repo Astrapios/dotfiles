@@ -18,7 +18,10 @@ effort on judgment, not archaeology.
 Files in this skill (one level deep, read when the step says so):
 - `references/posting-glab.md` - posting draft notes on the MR (rules, suggestion syntax, scripts)
 - `references/html-briefing.md` - the HTML briefing: structure, figures, self-review, sending
+- `references/thread-explanation.md` - the explanation per thread and per finding: contents, tiers,
+  figures, history sources, cold-read check, `outputs/mr_context/<iid>/` layout and `index.json`
 - `scripts/mr_discussions.py`, `scripts/draft_note.py` - run them, do not hand-roll glab calls
+- `scripts/mr_context.py` - `add` / `check` / `text` for the explanations folder and its `index.json`
 - `evals/` - regression prompts built from past misses
 
 ## Steps
@@ -64,6 +67,10 @@ claimed contract; verify the diff against it), then
 `python scripts/mr_discussions.py [iid]` for the authoritative thread list with anchors and
 resolved state (`--all` for resolved ones). Build a checklist of **open** comments and seed the
 relevant ones into the domain agents (step 5). Resolved threads are context, not action items.
+Every open thread gets an explanation (Jisu, Nov 19 2026: "give a background on the comments so
+that I have enough context to review before submiting"): follow `references/thread-explanation.md`
+(tier per thread, figures, history, cold read) and write the blocks and `index.json` into
+`site3d_project_root/outputs/mr_context/<iid>/`. Reuse an entry already at the current head.
 
 ### 3. Read the full diff
 
@@ -206,8 +213,9 @@ both open with "What this MR does"; after it, the chat summary is one line per f
   When the MR has existing threads (re-review, received reply, or any round that drafts
   replies), the page carries a **Threads and draft replies** section so the user can comment
   or question each one: one item per thread with the reviewer and `file:line`, the comment
-  quoted in full, and the draft reply quoted in full (or "no reply drafted" and why). Full
-  text on the page, not only in the review file.
+  quoted in full, then that thread's explanation (`references/thread-explanation.md`), then the
+  draft reply quoted in full (or "no reply drafted" and why). Each finding also carries its
+  explanation under its card. Full text on the page, not only in the review file.
 
 ### 8. Persist the review state (ALWAYS, before finishing)
 
