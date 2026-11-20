@@ -2,7 +2,7 @@
 """Check the merge of two heads for names that one side removed and the merged tree still uses.
 
 Usage:
-    merge_names.py <repo> <head A> <head B> [--base REF] [--json]
+    merge_names.py <repo> <head A> <head B> [--base REF] [--json] [--out DIR] [--exit-zero]
 
 `git merge-tree` reports textual conflicts only. A merge can be conflict free and still broken: a moved function
 body keeps a parameter the other side never had, or one side renames a keyword while the other side adds a call
@@ -19,7 +19,8 @@ moved; git only adds the merged objects to the object store) and reports:
 A conflicted file is analyzed twice, once with every hunk resolved to A's text and once to B's, and line numbers
 are mapped back to the merged file with its markers.
 
-Exit status: 0 clean, 1 findings, 2 usage or git error.
+Exit status: 0 clean, 1 findings (0 with --exit-zero), 2 usage or git error. --out DIR also writes
+merge_names.txt and merge_names.json there.
 Ruff comes from $MERGE_NAMES_RUFF, PATH, <repo>/.pixi/envs/*/bin/ruff or `uvx ruff`; pyflakes is the fallback.
 """
 
@@ -703,14 +704,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("head_b", help="second head")
     ap.add_argument("--base", help="merge base to use instead of `git merge-base A B`")
     ap.add_argument("--json", action="store_true", help="print the structured result")
+    ap.add_argument("--out", type=Path, help="also write merge_names.txt and merge_names.json into this folder")
+    ap.add_argument("--exit-zero", action="store_true", help="exit 0 even with findings (still 2 on errors)")
     args = ap.parse_args(argv)
     try:
         res = check(args.repo, args.head_a, args.head_b, args.base)
     except GitError as exc:
         print(f"merge_names: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(res, indent=1) if args.json else render(res))
-    return 1 if res["findings"] else 0
+    text, as_json = render(res), json.dumps(res, indent=1)
+    if args.out:
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / "merge_names.txt").write_text(text + "\n")
+        (args.out / "merge_names.json").write_text(as_json + "\n")
+    print(as_json if args.json else text)
+    return 1 if res["findings"] and not args.exit_zero else 0
 
 
 if __name__ == "__main__":

@@ -201,6 +201,14 @@ def test_text_and_json_output_and_exit_status(mn, rename_repo, capsys):
     assert res["findings"] == 1 + 2 + len([u for u in res["undefined"] if not u["pre_existing"]])
 
 
+def test_out_folder_and_exit_zero(mn, rename_repo, tmp_path, capsys):
+    out = tmp_path / "out"
+    assert mn.main([str(rename_repo), "a", "b", "--out", str(out), "--exit-zero"]) == 0
+    printed = capsys.readouterr().out
+    assert (out / "merge_names.txt").read_text() == printed
+    assert json.loads((out / "merge_names.json").read_text())["findings"] >= 3
+
+
 def test_base_option_matches_the_merge_base(mn, rename_repo):
     base = git(rename_repo, "rev-parse", "main").strip()
     auto = mn.check(str(rename_repo), "a", "b", None)
