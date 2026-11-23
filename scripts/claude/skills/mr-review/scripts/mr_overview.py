@@ -416,7 +416,8 @@ def check_notes(notes: dict, boxes: list[dict], fx: dict | None = None) -> tuple
     via-methods boxes excepted); a changed symbol with no before vs after; an unknown pipeline stage; a data-flow
     node or edge that does not resolve; an edge whose `arg` is not a parameter (or field) of the box it enters, or
     whose `type` differs from that parameter's annotation; an edge whose `returns` differs from the return
-    annotation of the box it leaves. Warning: an edge into a function or class box that names no `arg`.
+    annotation of the box it leaves. Warnings: an edge into a function or class box that names no `arg`; a data-flow
+    label that would clip even after wrapping (a node line wider than its box, an edge label off the drawing).
     """
     out: list[str] = []
     warn: list[str] = []
@@ -474,6 +475,10 @@ def check_notes(notes: dict, boxes: list[dict], fx: dict | None = None) -> tuple
         sa = nodes[a].get("box")
         if meta.get("returns") and sa in syms and syms[sa].get("returns") and meta["returns"] != syms[sa]["returns"]:
             out.append(f"dataflow edge {a} -> {b}: {sa} returns {syms[sa]['returns']}, the edge says {meta['returns']}")
+    drawable = all(n in nodes for n in in_layers) and all(
+        _edge(e)[0] in in_layers and _edge(e)[1] in in_layers for e in df.get("edges", []))
+    if in_layers and drawable:
+        warn += dataflow(df)[1]
     return out, warn
 
 
@@ -531,19 +536,29 @@ def card_link(bid: str) -> str:
     return f"#card-{slug(bid)}"
 
 
-def tw(s: str, size: float, mono: bool = False) -> float:
-    return len(s) * size * (0.61 if mono else 0.56)
+def tw(s: str, size: float, mono: bool = False, bold: bool = False) -> float:
+    """Estimated text width in SVG units: per character 0.61 of the size for monospace, 0.56 for sans, 0.6 for bold
+    sans (DejaVu Sans Bold draws collection_resolution_area at 0.57)."""
+    return len(s) * size * (0.61 if mono else 0.6 if bold else 0.56)
 
 
-def wrap(s: str, width: float, size: float, mono: bool = False) -> list[str]:
-    words, lines, cur = s.split(), [], ""
-    for w in words:
-        t = (cur + " " + w).strip()
-        if tw(t, size, mono) > width and cur:
-            lines.append(cur)
-            cur = w
-        else:
-            cur = t
+# Where a word too long for its line may break: after _ . / , - or between a lowercase letter and a capital.
+BREAK = re.compile(r"(?<=[_./,-])(?=.)|(?<=[a-z0-9])(?=[A-Z])")
+
+
+def wrap(s: str, width: float, size: float, mono: bool = False, bold: bool = False) -> list[str]:
+    """Greedy lines of at most `width`; a word wider than `width` breaks at `BREAK` points. A piece with no break
+    point that is still wider stays whole (`node_box` reports it as a clip)."""
+    lines, cur = [], ""
+    for word in s.split():
+        pieces = [word] if tw(word, size, mono, bold) <= width else [p for p in BREAK.split(word) if p]
+        for i, p in enumerate(pieces):
+            t = cur + (" " if cur and i == 0 else "") + p
+            if tw(t, size, mono, bold) > width and cur:
+                lines.append(cur)
+                cur = p
+            else:
+                cur = t
     return lines + ([cur] if cur else [])
 
 
@@ -664,9 +679,13 @@ def repo_map_svg(fx: dict, boxes: list[dict], highlight: str | None = None, mini
     return svg_wrap(W, y + 4, "".join(parts), "Repository map of the MR")
 
 
-def node_box(x, y, w, n, hl=False):
-    lines = wrap(n["label"], w - 14, 11.5)
+def node_box(x, y, w, n, hl=False, clips: list[str] | None = None):
+    """A data-flow box of width `w`; a line still wider than its box (no break point left) goes to `clips`."""
+    lines = wrap(n["label"], w - 14, 11.5, bold=True)
     subs = wrap(n.get("sub", ""), w - 14, 10, True) if n.get("sub") else []
+    if clips is not None:
+        clips += [ln for ln in lines if tw(ln, 11.5, bold=True) > w - 14]
+        clips += [ln for ln in subs if tw(ln, 10, True) > w - 14]
     h = 10 + 15 * len(lines) + 13 * len(subs) + 6
     kind = n["kind"] if n["kind"] in FILL else "data"
     g = [rect(x, y, w, h, kind, hl=hl, dash=n["kind"] == "future", r=8 if n["kind"] != "data" else 3)]
@@ -681,15 +700,25 @@ def node_box(x, y, w, n, hl=False):
 
 
 def dataflow_svg(df: dict) -> str:
+    return dataflow(df)[0]
+
+
+def dataflow(df: dict) -> tuple[str, list[str]]:
+    """The data-flow drawing, and one line per label that would still clip (a node line wider than its box, an
+    edge label running off the drawing)."""
     gap = 30
-    pos, parts, y = {}, [], 8
+    pos, parts, y, clips = {}, [], 8, []
+    tops, bottoms = [], []
     for li, layer in enumerate(df["layers"]):
         n = len(layer)
         w = 220 if n == 1 else (W - 30) / n
         hmax, built = 0, []
         for i, nid in enumerate(layer):
             x = (W - w) / 2 if n == 1 else 10 + i * (w + 10)
-            g, h = node_box(x, y, w, df["nodes"][nid])
+            cl: list[str] = []
+            g, h = node_box(x, y, w, df["nodes"][nid], clips=cl)
+            clips += [f"dataflow node {nid!r}: {ln!r} would clip in its {w:.0f}-unit box (put fewer boxes in its "
+                      f"row, or a break point _ in the name)" for ln in cl]
             built.append((nid, x, g, h))
             hmax = max(hmax, h)
         for nid, x, g, h in built:
@@ -697,8 +726,10 @@ def dataflow_svg(df: dict) -> str:
             body = "".join(g)
             parts.append(boxed(nd["box"], body) if nd.get("box") else body)
             pos[nid] = (x, y, w, h, li)
+        tops.append(y)
+        bottoms.append(y + hmax)
         y += hmax + gap
-    edges = []
+    edges, labels = [], []
     for e in df["edges"]:
         a, b, label, _ = _edge(e)
         ax, ay, aw, ah, al = pos[a]
@@ -714,7 +745,8 @@ def dataflow_svg(df: dict) -> str:
             else:
                 d = (f"M{sx2:.0f} {ay + ah / 2:.0f} H{side} V{ey - 10:.0f} "
                      f"H{ex + (12 if side > W / 2 else -12):.0f} V{ey - 2:.0f}")
-            lx, ly = side - (4 if side > W / 2 else -4), (ay + ah + ey) / 2
+            # the label sits beside the side line in the first gap below the source row, where no box covers it
+            lx, ly = side - (5 if side > W / 2 else -5), (bottoms[al] + tops[al + 1]) / 2 + 3.5
             anc = "end" if side > W / 2 else "start"
         else:
             if abs(sx - ex) > 4:
@@ -728,11 +760,16 @@ def dataflow_svg(df: dict) -> str:
             anc = "start"
         edges.append(f'<path d="{d}" fill="none" stroke="#5b6672" stroke-width="1.3" marker-end="url(#ah)"/>')
         if label:
-            edges.append(text(lx, ly, label, 9.5, 600, "#3d4a58", mono=True, anchor=anc).replace(
+            x0 = lx - {"start": 0, "end": 1}[anc] * tw(label, 9.5, True)
+            if x0 < 0 or x0 + tw(label, 9.5, True) > W:
+                clips.append(f"dataflow edge {a} -> {b}: label {label!r} would run off the drawing")
+            labels.append(text(lx, ly, label, 9.5, 600, "#3d4a58", mono=True, anchor=anc).replace(
                 "<text ", '<text stroke="#ffffff" stroke-width="3" paint-order="stroke" '))
     defs = ('<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" '
             'orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="#5b6672"/></marker></defs>')
-    return svg_wrap(W, max(y - gap + 10, 20), defs + "".join(edges) + "".join(parts), "Data flow of the MR")
+    # edge labels last: a label is never hidden under a box, wherever its edge runs
+    return svg_wrap(W, max(y - gap + 10, 20), defs + "".join(edges) + "".join(parts) + "".join(labels),
+                    "Data flow of the MR"), clips
 
 
 def pipeline_svg(touched: set[str], stage: str | None) -> str:
@@ -764,8 +801,8 @@ def pipeline_svg(touched: set[str], stage: str | None) -> str:
 def tag(who: str) -> str:
     """Which part the script made (exact) and which the worker wrote (checked against the facts)."""
     if who == "script":
-        return '<span class="src s" title="made by the script from git and the code">from the code</span>'
-    return '<span class="src w" title="written by the worker, checked against the facts">written</span>'
+        return '<span class="src s" title="read from the diff by the script">from the code</span>'
+    return '<span class="src w" title="the reviewer\'s words, checked against the code">written</span>'
 
 
 def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
@@ -930,10 +967,15 @@ LEGEND = ('<p class="legend"><span class="sw added"></span>added <span class="sw
           '<span class="sw removed"></span>deleted · a box opens its card</p>')
 
 
+def tags_legend() -> str:
+    """One line where the tags first appear (a cold reader of !789 asked what they mean)."""
+    return (f'<p class="legend tags">{tag("worker")} the reviewer\'s words; {tag("script")} read from the diff.</p>')
+
+
 def fragment(fx: dict, parts: dict) -> str:
     """The overview section, styles inside, between the embed markers."""
     return (f'{START}<section class="mro" id="mr-overview"><style>{CSS}</style>'
-            f'<h2>What this MR does <span class="pill neut">at {fx["head"][:9]}</span></h2>{parts["what"]}'
+            f'<h2>What this MR does <span class="pill neut">at {fx["head"][:9]}</span></h2>{tags_legend()}{parts["what"]}'
             f'<details class="lvl" open><summary><span class="n">1</span>Repo map</summary>{LEGEND}'
             f'<div class="ov-grid"><div>{parts["map"]}</div>'
             f'<div><details class="lvl" open><summary><span class="n">2</span>Data flow</summary>{parts["flow"]}</details>'

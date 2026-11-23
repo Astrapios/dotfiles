@@ -439,6 +439,148 @@ def test_check_refuses_bad_stage_and_dangling_edge(mo, boxes, fx):
     assert any("ghost" in p for p in probs)
 
 
+# --- the data-flow drawing: labels never clip, edge labels always show ---
+
+# Widths the test allows per character, in units of the font size: wider than the renderer's own estimate, so a
+# label that passes here fits on a real screen (DejaVu Sans Bold draws collection_resolution_area at 0.57).
+SANS_BOLD, MONO_W = 0.6, 0.62
+LONG3 = ["ground_resolution_area", "NoiseConfigurationForAllPulses", "collection_resolution_area"]
+
+
+def flow_items(svg: str) -> tuple[float, list[dict], list[dict]]:
+    """The drawing width, its node rectangles and its texts (with a width from the allowances above)."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(svg)
+    width = float(root.get("viewBox").split()[2])
+    rects, texts = [], []
+    for el in root.iter():
+        tagname = el.tag.split("}")[-1]
+        if tagname == "rect":
+            rects.append({k: float(el.get(k)) for k in ("x", "y", "width", "height")})
+        elif tagname == "text":
+            size = float(el.get("font-size"))
+            mono = "monospace" in el.get("font-family")
+            w = len(el.text or "") * size * (MONO_W if mono else SANS_BOLD)
+            x = float(el.get("x"))
+            lo = {"start": x, "middle": x - w / 2, "end": x - w}[el.get("text-anchor")]
+            texts.append({"s": el.text or "", "x0": lo, "x1": lo + w, "y0": float(el.get("y")) - size,
+                          "y1": float(el.get("y")) + 2, "size": size})
+    return width, rects, texts
+
+
+def three_long_flow() -> dict:
+    return {
+        "layers": [["src"], ["a", "b", "c"], ["out"]],
+        "nodes": {
+            "src": {"label": "Inputs", "kind": "data"},
+            "a": {"label": LONG3[0], "sub": "A_cell [m^2]", "kind": "added"},
+            "b": {"label": LONG3[1], "sub": "NESZ, reference", "kind": "changed"},
+            "c": {"label": LONG3[2], "sub": "same A_cell, no echoes", "kind": "added"},
+            "out": {"label": "Noisy phase history", "kind": "data"},
+        },
+        "edges": [["src", "a", "x"], ["src", "b", "y"], ["src", "c", "z"], ["a", "out", "A_cell"],
+                  ["b", "out", "NESZ"], ["c", "out", "A_cell"]],
+    }
+
+
+def inside(t: dict, rects: list[dict]) -> dict | None:
+    """The node rectangle holding the middle of text `t`."""
+    cx, cy = (t["x0"] + t["x1"]) / 2, t["y1"] - 4
+    return next((r for r in rects if r["x"] <= cx <= r["x"] + r["width"] and r["y"] <= cy <= r["y"] + r["height"]),
+                None)
+
+
+def test_three_long_names_in_one_row_do_not_clip(mo):
+    df = three_long_flow()
+    width, rects, texts = flow_items(mo.dataflow_svg(df))
+    drawn = {}
+    for t in texts:
+        r = inside(t, rects)
+        if r is None or t["size"] not in (11.5, 10):  # an edge label, or not a node line
+            continue
+        assert r["x"] + 2 <= t["x0"] and t["x1"] <= r["x"] + r["width"] - 2, (t["s"], r)
+        if t["size"] == 11.5:
+            drawn.setdefault((r["x"], r["y"]), []).append(t["s"])
+    assert sorted("".join(v) for v in drawn.values()) == sorted(n["label"] for n in df["nodes"].values())
+    for t in texts:
+        assert 0 <= t["x0"] and t["x1"] <= width, t
+
+
+def test_long_names_break_after_a_separator(mo):
+    _, rects, texts = flow_items(mo.dataflow_svg(three_long_flow()))
+    lines = {}
+    for t in texts:
+        r = inside(t, rects)
+        if r is not None and t["size"] == 11.5:
+            lines.setdefault((r["x"], r["y"]), []).append(t["s"])
+    wrapped = [v for v in lines.values() if "".join(v) in LONG3]
+    assert len(wrapped) == 3 and all(len(v) > 1 for v in wrapped), lines
+    for v in wrapped:
+        name = "".join(v)
+        cut = 0
+        for piece in v[:-1]:  # every break is after _ or between a lowercase letter and a capital
+            cut += len(piece)
+            assert name[cut - 1] == "_" or (name[cut - 1].islower() and name[cut].isupper()), (name, piece)
+
+
+def right_side_flow() -> dict:
+    """The !789 shape: collection_resolution_area (right, layer 0) feeds image_noise_power (right, layer 2) past
+    NoiseConfig (right, layer 1), so the edge runs down the right side."""
+    return {
+        "layers": [["geom", "coll"], ["cell", "cfg"], ["add", "pow"]],
+        "nodes": {
+            "geom": {"label": "_local_pulse_geometry", "kind": "added"},
+            "coll": {"label": "collection_resolution_area", "sub": "same A_cell", "kind": "added"},
+            "cell": {"label": "ground_resolution_area", "kind": "added"},
+            "cfg": {"label": "NoiseConfig", "sub": "NESZ, reference", "kind": "changed"},
+            "add": {"label": "add_noise", "kind": "changed"},
+            "pow": {"label": "image_noise_power", "kind": "added"},
+        },
+        "edges": [["geom", "cell", "paths"], ["cell", "add", "area"], ["cfg", "add", "NESZ"],
+                  ["cfg", "pow", "NESZ"], ["coll", "pow", "A_cell"]],
+    }
+
+
+def test_side_edge_label_shows(mo):
+    width, rects, texts = flow_items(mo.dataflow_svg(right_side_flow()))
+    label = [t for t in texts if t["s"] == "A_cell"]
+    assert len(label) == 1
+    t = label[0]
+    assert 0 <= t["x0"] and t["x1"] <= width
+    for r in rects:  # no box covers it
+        assert (t["x1"] <= r["x"] or t["x0"] >= r["x"] + r["width"]
+                or t["y1"] <= r["y"] or t["y0"] >= r["y"] + r["height"]), (t, r)
+
+
+def test_left_side_edge_label_shows(mo):
+    df = right_side_flow()
+    for layer in df["layers"]:
+        layer.reverse()
+    width, rects, texts = flow_items(mo.dataflow_svg(df))
+    t = next(t for t in texts if t["s"] == "A_cell")
+    assert 0 <= t["x0"] and t["x1"] <= width
+    for r in rects:
+        assert (t["x1"] <= r["x"] or t["x0"] >= r["x"] + r["width"]
+                or t["y1"] <= r["y"] or t["y0"] >= r["y"] + r["height"]), (t, r)
+
+
+def test_check_warns_when_a_label_would_still_clip(mo, boxes, fx):
+    n = good_notes()
+    probs, warn = mo.check_notes(n, list(boxes.values()), fx)
+    assert not any("clip" in w for w in warn)
+    df = three_long_flow()
+    df["nodes"]["b"]["label"] = "abcdefghijklmnopqrstuvwxyzabcdefgh"  # one word, no place to break it
+    n["dataflow"] = df
+    probs, warn = mo.check_notes(n, list(boxes.values()), fx)
+    assert probs == []
+    clip = [w for w in warn if "clip" in w]
+    assert len(clip) == 1 and "'b'" in clip[0] and "abcdefgh" in clip[0], warn
+    n["dataflow"] = three_long_flow()
+    _, warn = mo.check_notes(n, list(boxes.values()), fx)
+    assert not any("clip" in w for w in warn)
+
+
 # --- build and the stored files (CLI, system python3) ---
 
 
@@ -486,6 +628,16 @@ def test_page_safe(mo, built):
     assert mo.svg_problems('<svg><a href="https://example.com"><g/></a></svg>')
     assert mo.svg_problems('<svg><g onload="x()"/></svg>')
     assert mo.svg_problems('<svg><foreignObject/></svg>')
+
+
+def test_page_explains_the_tags(built):
+    page = (built["dir"] / f"overview-{built['h12']}.html").read_text()
+    first = page.index('class="src ')
+    legend = page.index('class="legend tags"')
+    assert legend < first < page.index("</p>", legend), "the legend is not where the tags first appear"
+    line = page[legend: page.index("</p>", legend)]
+    assert "the reviewer&#x27;s words" in line or "the reviewer's words" in line
+    assert "read from the diff" in line
 
 
 def test_check_cli(built):

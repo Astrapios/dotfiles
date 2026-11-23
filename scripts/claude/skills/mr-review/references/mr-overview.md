@@ -35,6 +35,8 @@ explanation; boxes clickable). Plan and mock-ups: `site3d_project_root/outputs/m
   the facts, not boxes). A file: `added`, `changed` (renames included, read at the old path), `removed`.
 - **`<head12>`**: the first 12 hex digits of the MR head SHA the overview was built at; **`<disc8>`**: the first 8
   hex digits of a GitLab discussion id.
+- **Tags** on the page: "written" marks the reviewer's words (the notes file); "from the code" marks what the
+  script read from the diff. A legend line under the page title says so.
 - **Cold reader**: a fresh subagent that sees only the overview's words and a picture of levels 1 to 3, never the
   code, and says what the MR does (section "Cold-read check").
 
@@ -119,7 +121,11 @@ All standard library: plain `python3` runs them. `S=~/.claude/skills/mr-review/s
   any link other than `#card-<box>`;
 - a thread anchored to a box that is not listed.
 
-Warning only: an edge into a function or class box that names no `arg`.
+Warning only: an edge into a function or class box that names no `arg`; a data-flow label that would still clip.
+The drawing wraps a node name too wide for its box after `_ . / , -` or between a lowercase letter and a capital,
+so three long names fit in one row; a piece with no such break point (`NOISECONFIGURATION` in a third of the width)
+cannot wrap and warns, as does an edge label running off the drawing: put fewer boxes in that row. Edge labels draw
+on top of the boxes, and an edge running down a side carries its label in the first gap below its source row.
 
 `mr_context.py check <dir> --overview <sha>` adds: no `overview` entry, an entry at another head, missing or
 mistyped keys, a page, data or drawing file missing, `rewritten` or `gap` without a note.
