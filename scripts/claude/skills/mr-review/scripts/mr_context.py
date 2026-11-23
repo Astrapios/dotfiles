@@ -22,6 +22,11 @@ Usage:
                   --head SHA --state request-changes|ready|comments-only --verdict TEXT --page PAGE.html
                   --record RECORD.md --drafts DRAFTS.json [--changes CHANGES.json | --no-sigs] [--made-at ISO]
                   copy the review page into DIR/reviews/<head12>-<task>/ and list the review
+    mr_context.py overview add DIR --head SHA --task T-x --cold-read pass|rewritten|gap|pending
+                  [--cold-read-note TEXT] [--requested-by review|button] [--made-at ISO]
+                  list the overview mr_overview.py built in DIR at SHA (refused when its check fails)
+    mr_context.py check DIR --overview SHA   also: the overview entry is at SHA, its page, data and drawings are
+                  there with no script, no handler and no outside link, every thread anchors to a listed box
     mr_context.py promises DIR [--md]   the queued fixes the drafts promise ("I'll ...")
     mr_context.py text DIR/<discussion_id>.html   the block's words, figures listed by caption (cold read)
 
@@ -45,6 +50,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mr_overview as MO  # noqa: E402
 import mr_review_index as RI  # noqa: E402
 
 SCHEMA = 2
@@ -83,7 +89,23 @@ FINDING_OPTIONAL = {
     # mr_review_index.problems
     **{k: object for k in RI.FINDING_LOCATION},
 }
-INDEX_KEYS = {"schema", "project", "mr_iid", "entries", "findings", "reviews"}  # reviews: mr_review_index.py
+# reviews: mr_review_index.py; overview: the MR architecture overview (references/mr-overview.md)
+INDEX_KEYS = {"schema", "project", "mr_iid", "entries", "findings", "reviews", "overview"}
+OVERVIEW_REQUESTERS = ("review", "button")
+OVERVIEW_KEYS = {
+    "head_sha": str,  # MR head the overview was built at (40 hex)
+    "base_sha": str,  # merge base of the MR at that head (40 hex)
+    "made_at": str,  # ISO 8601 with UTC offset
+    "task": str,  # the astra task that built it
+    "requested_by": str,  # review | button
+    "page": str,  # overview-<head12>.html
+    "data": str,  # overview-<head12>.json (facts, notes, boxes, anchors)
+    "svgs": dict,  # {"map": ..., "flow": ..., "pipe": ...}
+    "cold_read": str,  # pass | rewritten | gap | pending
+    "cold_read_note": str,  # what the cold reader missed, empty on pass
+    "boxes": list,  # [{"id", "kind", "status", "line"}]
+    "threads": dict,  # discussion id -> box id or null
+}
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 FINDING_NAME = re.compile(r"^finding-\d+$")
 
@@ -298,6 +320,7 @@ def audit(
     threads: list[dict] | None = None,
     mr_heads: dict[int, str] | None = None,
     review: str | None = None,
+    overview: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Every way the folder breaks the schema or the draft rules, and what only deserves a warning.
 
@@ -308,6 +331,7 @@ def audit(
             than its last_note_id is stale even at the same head.
         mr_heads: Current head per MR iid; evidence taken from that MR at another SHA is stale.
         review: When given, a review by this task must be listed (mr_review_index.problems).
+        overview: When given, an overview at this head must be listed, its files there and safe.
 
     Returns:
         (problems, warnings), one line each; the folder passes when problems is empty.
@@ -332,9 +356,15 @@ def audit(
     if extra:
         out.append(f"unknown index keys {sorted(extra)}")
     out += RI.problems(d, idx, review)
+    if "overview" in idx:
+        out += overview_problems(d, idx["overview"], overview)
+    elif overview:
+        out.append(f"no overview in index.json (mr_overview.py make, then mr_context.py overview add, at {overview[:9]})")
     entries = idx.get("entries")
     findings = idx.get("findings", [])
-    if not isinstance(entries, list) or not isinstance(findings, list) or not (entries or findings or idx.get("reviews")):
+    if not isinstance(entries, list) or not isinstance(findings, list):
+        return out + ["entries missing or not a list"], warn
+    if not (entries or findings or idx.get("reviews") or idx.get("overview")):
         return out + ["entries missing or empty"], warn
     by_id = {t["id"]: t for t in threads or []}
     seen = set()
@@ -393,6 +423,62 @@ def audit(
             _check_evidence(tag, f, mr_heads, out)
         _check_block(tag, f, d, out, warn)
     return out, warn
+
+
+def overview_problems(d: Path, ov: object, head: str | None = None) -> list[str]:
+    """Problems of the `overview` entry: its keys, its head, its files (mr_overview.check_dir), its anchors.
+
+    Args:
+        d: The MR's mr_context folder.
+        ov: index.json's `overview` value.
+        head: When given, the overview must be at this head SHA.
+
+    Returns:
+        One line per problem, each starting with "overview".
+    """
+    if not isinstance(ov, dict):
+        return ["overview: not an object"]
+    out: list[str] = []
+    if not _check_types("overview", ov, OVERVIEW_KEYS, out):
+        return out
+    unknown = set(ov) - set(OVERVIEW_KEYS)
+    if unknown:
+        out.append(f"overview: unknown keys {sorted(unknown)}")
+    for k in ("head_sha", "base_sha"):
+        if not HEX40.match(ov[k]):
+            out.append(f"overview: {k} is not 40 hex")
+    if out:
+        return out
+    if head and ov["head_sha"] != head:
+        out.append(f"overview: written at {ov['head_sha'][:9]}, MR head is {head[:9]}")
+    if ov["requested_by"] not in OVERVIEW_REQUESTERS:
+        out.append(f"overview: requested_by {ov['requested_by']!r} not in {OVERVIEW_REQUESTERS}")
+    if ov["cold_read"] not in VERDICTS:
+        out.append(f"overview: cold_read {ov['cold_read']!r} not in {VERDICTS}")
+    if ov["cold_read"] in ("rewritten", "gap") and not ov["cold_read_note"]:
+        out.append(f"overview: cold_read {ov['cold_read']} needs a cold_read_note")
+    try:
+        if dt.datetime.fromisoformat(ov["made_at"]).utcoffset() is None:
+            out.append("overview: made_at has no UTC offset")
+    except ValueError:
+        out.append("overview: made_at is not ISO 8601")
+    n = MO.names(ov["head_sha"])
+    want = {"page": n["page"], "data": n["data"]}
+    for k, v in want.items():
+        if ov[k] != v:
+            out.append(f"overview: {k} is {ov[k]!r}, expected {v!r}")
+    if ov["svgs"] != {"map": n["map"], "flow": n["flow"], "pipe": n["pipe"]}:
+        out.append(f"overview: svgs must name {n['map']}, {n['flow']}, {n['pipe']}")
+    listed = {b.get("id") for b in ov["boxes"] if isinstance(b, dict)}
+    for i, b in enumerate(ov["boxes"]):
+        if not (isinstance(b, dict) and {"id", "kind", "status", "line"} <= set(b)):
+            out.append(f"overview: box {i} must have id, kind, status, line")
+    for disc, bid in ov["threads"].items():
+        if bid is not None and bid not in listed:
+            out.append(f"overview: thread {disc[:8]} anchored to {bid}, which is not a listed box")
+    probs, _ = MO.check_dir(d, ov["head_sha"])
+    out += [f"overview: {p}" for p in probs]
+    return out
 
 
 def problems(d: Path, head: str | None = None, review: str | None = None) -> list[str]:
@@ -463,7 +549,7 @@ def cmd_add(a: argparse.Namespace) -> int:
 
 def cmd_check(a: argparse.Namespace) -> int:
     threads = json.loads(Path(a.threads).read_text()) if a.threads else None
-    probs, warn = audit(Path(a.dir), a.head, threads, _parse_mr_sha(a.mr_head), a.review)
+    probs, warn = audit(Path(a.dir), a.head, threads, _parse_mr_sha(a.mr_head), a.review, a.overview)
     for p in probs:
         print(p)
     for w in warn:
@@ -472,7 +558,8 @@ def cmd_check(a: argparse.Namespace) -> int:
         return 1
     idx = json.loads((Path(a.dir) / "index.json").read_text())
     n, m, r = len(idx["entries"]), len(idx.get("findings", [])), len(idx.get("reviews", []))
-    print(f"ok: {n} entries" + (f", {m} findings" if m else "") + (f", {r} reviews" if r else "")
+    ov = f", overview at {idx['overview']['head_sha'][:9]}" if idx.get("overview") else ""
+    print(f"ok: {n} entries" + (f", {m} findings" if m else "") + (f", {r} reviews" if r else "") + ov
           + (f", {len(warn)} warnings" if warn else ""))
     return 0
 
@@ -514,6 +601,49 @@ def cmd_review_add(a: argparse.Namespace) -> int:
         return 1
     RI.save_atomic(d / "index.json", idx)
     print(f"index.json: review {a.task} at {a.head[:9]}, {len(entry['drafts'])} drafts, page {entry['page']}")
+    return 0
+
+
+def cmd_overview_add(a: argparse.Namespace) -> int:
+    d = Path(a.dir)
+    probs, warn = MO.check_dir(d, a.head)
+    for w in warn:
+        print(f"warn: {w}")
+    if probs:
+        for p in probs:
+            print(p)
+        print("not listed: fix the notes and rebuild (mr_overview.py make), then add again")
+        return 1
+    n = MO.names(a.head)
+    rec = json.loads((d / n["data"]).read_text())
+    idx = _load(d)
+    idx["project"] = idx.get("project") or a.project
+    if idx.get("mr_iid") is None:
+        idx["mr_iid"] = a.iid if a.iid is not None else int(d.name) if d.name.isdigit() else None
+    idx.setdefault("entries", [])
+    idx["overview"] = {
+        "head_sha": a.head,
+        "base_sha": rec["base_sha"],
+        "made_at": a.made_at or dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "task": a.task,
+        "requested_by": a.requested_by,
+        "page": n["page"],
+        "data": n["data"],
+        "svgs": {"map": n["map"], "flow": n["flow"], "pipe": n["pipe"]},
+        "cold_read": a.cold_read,
+        "cold_read_note": a.cold_read_note or "",
+        "boxes": [{k: b[k] for k in ("id", "kind", "status", "line")} for b in rec["boxes"]],
+        "threads": {k: v["box"] for k, v in rec["anchors"].items()},
+    }
+    probs = overview_problems(d, idx["overview"], a.head)
+    if probs:
+        for p in probs:
+            print(p)
+        return 1
+    RI.save_atomic(d / "index.json", idx)
+    ov = idx["overview"]
+    print(f"index.json: overview at {a.head[:9]}, {len(ov['boxes'])} boxes, {len(ov['threads'])} threads, "
+          f"cold read {a.cold_read}")
     return 0
 
 
@@ -607,7 +737,20 @@ def main() -> int:
     p.add_argument("--threads", default=None, help="mr_discussions.py --json --all output: flag newer notes")
     p.add_argument("--mr-head", action="append", help="IID=SHA current head of another MR in the stack (repeat)")
     p.add_argument("--review", default=None, help="require a review by this task id, its page and titled drafts")
+    p.add_argument("--overview", default=None, help="require the overview at this head SHA, its files, safe")
     p.set_defaults(fn=cmd_check)
+    ov = sub.add_parser("overview", help="the MR architecture overview").add_subparsers(dest="ocmd", required=True)
+    p = ov.add_parser("add", help="list the overview built in DIR (mr_overview.py make)")
+    p.add_argument("dir")
+    p.add_argument("--head", required=True)
+    p.add_argument("--task", required=True)
+    p.add_argument("--cold-read", default="pending", choices=VERDICTS)
+    p.add_argument("--cold-read-note", default="")
+    p.add_argument("--requested-by", default="review", choices=OVERVIEW_REQUESTERS)
+    p.add_argument("--project", default="product/site3d")
+    p.add_argument("--iid", type=int, default=None)
+    p.add_argument("--made-at", default=None, help="ISO 8601 with offset (default now)")
+    p.set_defaults(fn=cmd_overview_add)
     rv = sub.add_parser("review", help="the reviews of the MR (schema 2)").add_subparsers(dest="rcmd", required=True)
     p = rv.add_parser("add", help="copy a review page in and list the review")
     p.add_argument("dir")

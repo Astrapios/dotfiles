@@ -23,7 +23,14 @@ write the same files.
 
 ## What an explanation holds (in order)
 
-1. **Where**: `file:line` at the head SHA (a GitLab blob link pinned to the SHA), the function, its
+1. **Where**: opens with the thread's **mini map** and a link back to the overview
+   (`references/mr-overview.md`): inline `overview-<head12>-mini-<disc8>.svg` from the MR's
+   `outputs/mr_context/<iid>/` folder (the repo map cut to the thread's file, its box outlined; the
+   box is computed from the thread's own position by `mr_overview.py`), then
+   `<a href="#card-<slug>">See it on the overview</a>` (the slug of the box id, the card the
+   overview page and the review briefing carry). A thread on no box (a general comment naming no
+   function) gets no mini map and says "the MR as a whole". Then `file:line` at the head SHA (a
+   GitLab blob link pinned to the SHA), the function, its
    caller chain two levels up, and what flows in and out (shapes, units, frames). Take the line from
    `mr_discussions.py --all --json`, which keeps the thread as the reviewer saw it: the full GitLab
    position, the head the MR had when the comment was posted (`posted_head`) and every note. When

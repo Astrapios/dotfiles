@@ -23,9 +23,13 @@ keep scripts out: `check --review` refuses a page with a script.
 ## Page structure (adapt to what the round did)
 
 - Header: MR number, branch, date (Pacific, 12-hour), reviewed and fix commit SHAs, tier.
-- "What this MR does": the first block under the title, ahead of the verdict. Two or three
-  plain sentences on what the MR is trying to achieve (the problem it solves and the approach),
-  from the MR description and the diff, in your own words.
+- "What this MR does": the first block under the title, ahead of the verdict: the MR
+  architecture overview (`references/mr-overview.md`), put there by `mr_overview.py embed <dir>
+  --head <sha> --into <briefing.html>`. It opens with two or three plain sentences on what the MR
+  is trying to achieve (the problem it solves and the approach), then the repo map, data flow,
+  pipeline place, cards and before vs after. It is a light panel with its own styles, so it reads
+  the same on the dark page; its boxes link to its cards (`#card-...`), and each thread's mini map
+  links there too.
 - A 2-3 line verdict box (what is broken, what holds) and a one-line-per-finding table
   (id, severity pill, title), opening with the count.
 - One card per finding: severity pill and title, the figure, a caption of at most two

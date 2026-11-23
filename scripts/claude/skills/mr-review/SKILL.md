@@ -18,6 +18,8 @@ effort on judgment, not archaeology.
 Files in this skill (one level deep, read when the step says so):
 - `references/posting-glab.md` - posting draft notes on the MR (rules, suggestion syntax, scripts)
 - `references/html-briefing.md` - the HTML briefing: structure, figures, self-review, sending
+- `references/mr-overview.md` - the MR architecture overview every review opens with: the five levels,
+  the notes file, `check` rules, thread anchors, stored files, cold read
 - `references/thread-explanation.md` - the explanation per thread and per finding: contents, tiers,
   figures, history sources, port maps, cold-read check, `outputs/mr_context/<iid>/` layout and
   `index.json`
@@ -27,6 +29,9 @@ Files in this skill (one level deep, read when the step says so):
 - `scripts/mr_context.py` - `add` / `check` / `promises` / `text` for the explanations folder and its
   `index.json` (freshness on head SHA plus last note id, draft slots, queued promises); `review add`
   lists the review itself (its page, verdict and drafts) for the app's Review tab
+- `scripts/mr_overview.py` - `make` / `check` / `embed` for the overview (facts from git and `ast`,
+  drawings as SVG, a page with no script); `mr_context.py overview add` lists it, `check --overview`
+  verifies it
 - `scripts/line_origin.py` - trace a line to the commit, session and words that chose it: fact log,
   blame, past a split's port commit to the dev line, transcripts by symbol and commit subject
 - `scripts/merge_names.py <repo> <head A> <head B>` - merge-order check between two MRs: conflicts,
@@ -88,6 +93,13 @@ entry only when both its head and its `last_note_id` are current (`mr_context.py
 
 Read every changed file in full, not just the hunks; context around a change is where bugs
 hide. For a new file, read the whole thing.
+
+Every review, every tier, builds the **MR architecture overview** while reading (Jisu, Nov 23 2026:
+"start off with what the MR does in a diagram"): write `notes.json` (what the MR does, one
+description per box, an existing function or class described in general first, the data flow with
+`arg` on each arrow, before vs after per changed symbol), then `mr_overview.py make` into
+`outputs/mr_context/<dir>/` until its check says `ok`, the cold read, and `mr_context.py overview
+add`. Commands, notes format and rules: `references/mr-overview.md`.
 
 ### 4. Establish ground truth (BEFORE launching agents)
 
@@ -213,6 +225,8 @@ both open with "What this MR does"; after it, the chat summary is one line per f
 - **What this MR does** - FIRST, before the verdict or any finding: two or three plain
   sentences on what the MR is trying to achieve (the problem it solves and the approach), from
   the MR description and the diff, in your own words. Also for a review of the user's own MR.
+  These are the overview's `what`; on the briefing they open the overview block, which
+  `mr_overview.py embed` puts under the title (`references/html-briefing.md`).
 - **Summary** - what `main` gains, 2-4 sentences, the code not the refactoring journey.
 - **Soundness & logic** - open with the count ("2 bugs, 1 significant, 3 minor; 2 pre-existing
   kept separate"), then findings de-duplicated across agents, most important first, each with
@@ -253,7 +267,8 @@ Review tab (`references/thread-explanation.md`, "The review itself"): post every
 <dir> --task <T-x> --kind <new|rereview|received-reply|self-review> --tier <quick|standard|deep>
 --head <sha> --state <request-changes|ready|comments-only> --verdict "<one line>" --page
 <briefing.html> --record docs/branches/<branch>-review.md --drafts drafts.json`, and verify with
-`mr_context.py check <dir> --review <T-x>`. Never edit `index.json` by hand.
+`mr_context.py check <dir> --review <T-x> --overview <head>` (the review listed, the overview at the
+reviewed head with its files). Never edit `index.json` by hand.
 
 ### 9. Record review misses (whenever one surfaces)
 
