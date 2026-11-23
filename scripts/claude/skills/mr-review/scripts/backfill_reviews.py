@@ -35,9 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mr_context as MC  # noqa: E402
 import mr_discussions as MD  # noqa: E402
 import mr_review_index as RI  # noqa: E402
+from glab_common import PROJECT, run_glab  # noqa: E402
 
-HOST = "gitlab.gc.arraylabs.net"
-PROJECT = "product/site3d"
 ROOT = Path("/home/ubuntu/src/site3d_project_root")
 RUNS = Path("/home/ubuntu/.config/astra/areas/1a1c25b6/runs")
 
@@ -89,7 +88,7 @@ PLANS = {
 
 
 def get(path: str):
-    out = subprocess.run(["glab", "api", "--hostname", HOST, path], check=True, capture_output=True, text=True).stdout
+    out = run_glab("api", path, check=True).stdout
     return json.loads(out)
 
 

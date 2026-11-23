@@ -11,26 +11,73 @@ Gotchas baked in:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+from urllib.parse import quote
+
+HOST = "gitlab.gc.arraylabs.net"
+PROJECT = "product/site3d"
+
+
+def _in_checkout() -> bool:
+    probe = ["git", "rev-parse", "--is-inside-work-tree"]
+    return subprocess.run(probe, check=False, capture_output=True, text=True).returncode == 0
+
+
+def glab_argv(*args: str) -> tuple[list[str], dict[str, str]]:
+    """The glab argv and child env for `glab <args>`, both naming the GitLab host.
+
+    Args:
+        *args: glab arguments, e.g. ("api", "-X", "PUT", "projects/:id/...", "--input", "body.json").
+
+    Returns:
+        The full argv and the environment to run it with: `GITLAB_HOST` set (the caller's value when it set
+        one, else HOST), `--hostname` added to `glab api`, and outside a git checkout `:id` in a
+        `projects/:id` endpoint replaced by the URL-encoded PROJECT.
+    """
+    env = dict(os.environ)
+    host = env.get("GITLAB_HOST") or HOST
+    env["GITLAB_HOST"] = host
+    argv = ["glab", *args]
+    if args and args[0] == "api":
+        if any(a.startswith("projects/:id") for a in args) and not _in_checkout():
+            argv = [a.replace("projects/:id", f"projects/{quote(PROJECT, safe='')}", 1)
+                    if a.startswith("projects/:id") else a for a in argv]
+        argv = ["glab", "api", "--hostname", host, *argv[2:]]
+    return argv, env
+
+
+def run_glab(*args: str, check: bool = False) -> subprocess.CompletedProcess:
+    """Run `glab <args>` against the GitLab host (see `glab_argv`), capturing text output.
+
+    Args:
+        *args: glab arguments.
+        check: raise CalledProcessError on a nonzero exit.
+
+    Returns:
+        The completed process.
+    """
+    argv, env = glab_argv(*args)
+    return subprocess.run(argv, capture_output=True, text=True, env=env, check=check)
 
 
 def api(path: str, *args: str, method: str | None = None) -> object:
     """Call `glab api <path>` and parse JSON. Extra args go through verbatim (-f key=value ...)."""
-    cmd = ["glab", "api"]
+    cmd = ["api"]
     if method:
         cmd += ["-X", method]
     cmd += [path, *args]
-    out = subprocess.run(cmd, capture_output=True, text=True)
+    out = run_glab(*cmd)
     if out.returncode != 0:
         sys.stderr.write(out.stderr)
-        raise SystemExit(f"glab api failed: {' '.join(cmd)}")
+        raise SystemExit(f"glab api failed: {' '.join(glab_argv(*cmd)[0])}")
     return json.loads(out.stdout) if out.stdout.strip() else None
 
 
 def raw(path: str) -> str | None:
     """GET a non-JSON endpoint (a file's raw content); None when GitLab refuses it."""
-    out = subprocess.run(["glab", "api", path], capture_output=True, text=True)
+    out = run_glab("api", path)
     return out.stdout if out.returncode == 0 else None
 
 

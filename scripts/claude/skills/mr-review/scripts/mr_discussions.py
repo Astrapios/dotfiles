@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List MR discussion threads with their code anchors and resolved state.
 
-Usage (run from the worktree so `projects/:id` resolves and blobs read from local git):
+Usage (run from the worktree so blobs read from local git; elsewhere `projects/:id` is product/site3d):
     mr_discussions.py [IID] [--all] [--json] [--repo PATH]
 
 Default: open threads only (unresolved diff threads plus non-resolvable general comments),

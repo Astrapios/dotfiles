@@ -278,6 +278,9 @@ check the new text against it; with `evals/` it is the skill's regression set.
   per finding, captions of two sentences.
 - `glab mr view --comments` silently drops comments and anchors; only the discussions API
   counts, and it is paginated.
+- `glab api` outside a git checkout goes to gitlab.com and answers 401 (seen twice). The scripts
+  name the host through `glab_common.run_glab`; a hand-typed call adds
+  `--hostname gitlab.gc.arraylabs.net` and spells the project (`projects/product%2Fsite3d`).
 - A draft-note PUT with only `note` wipes the position. `draft_note.py --update` resends it.
 - `glab api -f "position[new_line]=3"` sends a flat JSON key, which GitLab ignores: the draft
   lands with NO anchor and no error. Positions go as a nested JSON body (`--input` plus
