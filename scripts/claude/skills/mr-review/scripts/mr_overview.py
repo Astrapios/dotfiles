@@ -424,6 +424,7 @@ class Code:
         self._members: dict[tuple, dict] = {}
         self._scoped: dict[str, list] = {}
         self._types: dict[tuple, object] = {}  # memo of name and field types; PENDING while one is worked out
+        self._spans: dict[str, list[tuple[int, int, str]]] = {}
 
     # modules and scopes
 
@@ -761,6 +762,78 @@ class Code:
             return self.value_type(r, depth + 1) if r is not None else None
         return None
 
+    # functions that take a value and use one of its attributes (a worker pool running `processor.process`)
+
+    def enclosing(self, mod: Mod, line: int) -> str:
+        """The qualname of the innermost def or class holding `line`, else "module level"."""
+        if mod.path not in self._spans:
+            spans: list[tuple[int, int, str]] = []
+
+            def walk(node, prefix):
+                for c in ast.iter_child_nodes(node):
+                    if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        q = f"{prefix}.{c.name}" if prefix else c.name
+                        spans.append((c.lineno, c.end_lineno, q))
+                        walk(c, q)
+                    else:
+                        walk(c, prefix)
+
+            if mod.tree is not None:
+                walk(mod.tree, "")
+            self._spans[mod.path] = spans
+        inner = [s for s in self._spans[mod.path] if s[0] <= line <= s[1]]
+        return min(inner, key=lambda s: s[1] - s[0])[2] if inner else "module level"
+
+    def param_of(self, call: ast.Call, scope: Scope, at: int | str) -> tuple[tuple, str] | None:
+        """The repo function `call` runs and the name of its parameter that receives argument `at` (a position in
+        `call.args` or a keyword), or None when the callee is not a def in the repo or takes no such parameter.
+        A method called on an instance (`obj.m(...)`, not `Class.m(...)`) gets the instance as its first one."""
+        f = self.ref_of(call.func, scope)
+        node = self.def_node(f)
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return None
+        a = node.args
+        pos = a.posonlyargs + a.args
+        if isinstance(at, str):
+            names = [x.arg for x in a.args + a.kwonlyargs]
+            return (f, at) if at in names else None
+        skip = 0
+        owner = ("sym", f[1], f[2].rsplit(".", 1)[0]) if "." in f[2] else None
+        if owner and isinstance(self.def_node(owner), ast.ClassDef) and not _decorated(node, "staticmethod"):
+            on_class = isinstance(call.func, ast.Attribute) and isinstance(
+                self.def_node(self.ref_of(call.func.value, scope)), ast.ClassDef)
+            skip = 1 if (_decorated(node, "classmethod") or not on_class) else 0
+        i = at + skip
+        return (f, pos[i].arg) if i < len(pos) else None
+
+    def uses_attr(self, fn: tuple, param: str, attr: str, depth: int = 0, seen: set | None = None) -> bool:
+        """Whether repo function `fn` uses attribute `attr` of its parameter `param`: reads `param.attr` (calls it,
+        or hands the bound method to a pool), or passes `param` on to a repo function that does."""
+        seen = set() if seen is None else seen
+        if depth > DEPTH or (fn, param, attr) in seen:
+            return False
+        seen.add((fn, param, attr))
+        node, m = self.def_node(fn), self.mod(fn[1])
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or m is None:
+            return False
+        owner = ("sym", fn[1], fn[2].rsplit(".", 1)[0]) if "." in fn[2] else None
+        owner = owner if owner and isinstance(self.def_node(owner), ast.ClassDef) else None
+        sc = self.func_scope(m, node, m.scope, owner)
+        if sc.binds.get(param, [None])[0] is None or len(sc.binds[param]) > 1:
+            return False  # rebound in the body: the name no longer holds what the caller passed
+        for n in _local_nodes(node.body):
+            if (isinstance(n, ast.Attribute) and n.attr == attr and isinstance(n.value, ast.Name)
+                    and n.value.id == param):
+                return True
+            if isinstance(n, ast.Call):
+                given = [(i, x) for i, x in enumerate(n.args)] + [(k.arg, k.value) for k in n.keywords if k.arg]
+                for at, x in given:
+                    if isinstance(x, ast.Name) and x.id == param:
+                        nxt = self.param_of(n, sc, at)
+                        if nxt and self.uses_attr(nxt[0], nxt[1], attr, depth + 1, seen):
+                            return True
+        return False
+
 
 def call_sites(code: Code, path: str, qual: str, skip: tuple[str, int, int] | None) -> tuple[list[dict], list[dict]]:
     """Where the head uses symbol `qual` of `path`: (resolved, possible).
@@ -771,6 +844,12 @@ def call_sites(code: Code, path: str, qual: str, skip: tuple[str, int, int] | No
     construction for a class or its `__init__`, or a read (`x.p`) for a property. Possible: the same name on a
     receiver whose type the code does not say (or a file that does not parse). A same-name function elsewhere, or a
     receiver of another type, is never listed. `skip` = (path, from, to), the symbol's own body.
+
+    Passed (`how` "passed", with `callee` and `caller`): the function or bound method given as an argument
+    (`pool.imap(f, xs)`, `ex.submit(obj.m)`, `key=f`), or, for a method, an instance whose class has it given to a
+    repo function that uses that attribute of its parameter, directly or through the functions it passes the
+    parameter on to (`multiprocess_grid(cfg, Proc())` reaching `pool.imap(item_processor.process, ...)`). An
+    instance given to a function outside the repo, or to one that never touches the method, is not a use.
     """
     target = ("sym", path, qual)
     node = code.def_node(target)
@@ -778,9 +857,13 @@ def call_sites(code: Code, path: str, qual: str, skip: tuple[str, int, int] | No
     if qual.endswith(".__init__"):
         target = ("sym", path, qual.rsplit(".", 1)[0])
     name = target[2].split(".")[-1]
-    member = "." in target[2] and isinstance(code.def_node(("sym", path, target[2].rsplit(".", 1)[0])), ast.ClassDef)
+    cls = ("sym", path, target[2].rsplit(".", 1)[0]) if "." in target[2] else None
+    member = cls is not None and isinstance(code.def_node(cls), ast.ClassDef)
     how = "read" if prop else "construct" if isinstance(code.def_node(target), ast.ClassDef) else "call"
-    r = subprocess.run(["git", "-C", code.repo, "grep", "-l", "-w", name, code.head, "--", "*.py"],
+    # a method's instances are passed under its class's name, which a file may name without the method's
+    instances = member and how == "call" and not qual.endswith(".__init__")
+    words = ["-e", name] + (["-e", cls[2].split(".")[-1]] if instances else [])
+    r = subprocess.run(["git", "-C", code.repo, "grep", "-l", "-w", *words, code.head, "--", "*.py"],
                        capture_output=True, text=True, check=False)
     found, maybe = [], []
     for line in r.stdout.splitlines():
@@ -788,13 +871,18 @@ def call_sites(code: Code, path: str, qual: str, skip: tuple[str, int, int] | No
         m = code.mod(p)
         if m is None:
             continue
-        hits: dict[int, bool] = {}  # line -> resolved (a resolved use on a line wins over a possible one)
+        # line -> (resolved, how, extra); a resolved use on a line wins over a possible one
+        hits: dict[int, tuple[bool, str, dict]] = {}
         if m.tree is None:  # unparsable at the head: the name followed by "(" on a line that is not a comment
             for i, t in enumerate(m.lines, 1):
                 if re.search(rf"\b{re.escape(name)}\s*\(", t) and not t.strip().startswith("#"):
-                    hits.setdefault(i, False)
+                    hits.setdefault(i, (False, how, {}))
         else:
             for n, scope in code.scoped(m):
+                if not prop and isinstance(n, ast.Call):
+                    for ln, ok, extra in _passed(code, m, n, scope, target, name, member, instances):
+                        if ln not in hits or (ok and not hits[ln][0]):
+                            hits[ln] = (ok, "passed", extra)
                 if prop:
                     if not (isinstance(n, ast.Attribute) and n.attr == name and isinstance(n.ctx, ast.Load)):
                         continue
@@ -810,16 +898,45 @@ def call_sites(code: Code, path: str, qual: str, skip: tuple[str, int, int] | No
                     ln = e.end_lineno if isinstance(e, ast.Attribute) else n.lineno
                 ref = code.ref_of(e, scope)
                 if ref == target:
-                    hits[ln] = True
+                    hits[ln] = (True, how, {})
                 elif ref is None and ((isinstance(e, ast.Attribute) and member)
                                       or (isinstance(e, ast.Name) and e.id == name and m.star)):
-                    hits.setdefault(ln, False)
+                    hits.setdefault(ln, (False, how, {}))
         for ln in sorted(hits):
             if skip and p == skip[0] and skip[1] <= ln <= skip[2]:
                 continue
-            site = {"path": p, "line": ln, "test": is_test(p), "text": m.lines[ln - 1].strip()[:110], "how": how}
-            (found if hits[ln] else maybe).append(site)
+            ok, hw, extra = hits[ln]
+            site = {"path": p, "line": ln, "test": is_test(p), "text": m.lines[ln - 1].strip()[:110], "how": hw,
+                    **extra}
+            (found if ok else maybe).append(site)
     return found, maybe
+
+
+def _passed(code: Code, m: Mod, call: ast.Call, scope: Scope, target: tuple, name: str, member: bool,
+            instances: bool) -> list[tuple[int, bool, dict]]:
+    """The arguments of `call` that hand `target` over (see `call_sites`): (line, resolved, callee and caller)."""
+    out = []
+    given = [(i, x) for i, x in enumerate(call.args)] + [(k.arg, k.value) for k in call.keywords if k.arg]
+    for at, x in given:
+        ok = None
+        # every bare name is resolved (it may be an alias of the target); an attribute only when it is named so
+        if isinstance(x, ast.Name) or (isinstance(x, ast.Attribute) and x.attr == name):
+            ref = code.ref_of(x, scope)
+            if ref == target:
+                ok = True
+            elif ref is None and isinstance(x, ast.Attribute) and member:
+                ok = False  # `pool.map(obj.m)` on a receiver whose type the code does not say
+        if ok is None and instances and not isinstance(x, ast.Lambda):
+            t = code.type_of(x, scope)
+            if t is not None and t[0] == "sym" and code.member(t, name, 0) == target:
+                nxt = code.param_of(call, scope, at)
+                if nxt and code.uses_attr(nxt[0], nxt[1], name):
+                    ok = True
+        if ok is not None:
+            callee = ast.unparse(call.func)
+            out.append((x.lineno, ok, {"callee": callee if len(callee) <= 40 else "..." + callee[-37:],
+                                       "caller": code.enclosing(m, x.lineno)}))
+    return out
 
 
 def facts(repo: str, base: str, head: str) -> dict:
@@ -1112,14 +1229,17 @@ def repo_map_svg(fx: dict, boxes: list[dict], highlight: str | None = None, mini
         cx0, cw_max = x + 8, W - x - 16
         rows, cur, cw = [], [], 0
         for s in syms:
-            w = tw(s["name"], 10.5, True) + 14
+            # a chip wider than its file box wraps its name at the BREAK points onto more lines
+            lines = wrap(s["name"], cw_max - 14, 10.5, True)
+            w = max(tw(ln, 10.5, True) for ln in lines) + 14
             if cur and cw + w > cw_max:
                 rows.append(cur)
                 cur, cw = [], 0
-            cur.append((s, w))
+            cur.append((s, w, lines))
             cw += w + 5
         if cur:
             rows.append(cur)
+        row_h = [18 + 13 * (max(len(c[2]) for c in row) - 1) + 4 for row in rows]
         unch = [s for s in f["symbols"] if s["status"] == "unchanged"]
         extra = []
         if unch and not mini:
@@ -1129,7 +1249,6 @@ def repo_map_svg(fx: dict, boxes: list[dict], highlight: str | None = None, mini
             extra.append(f"+ {others_n} more changed here")
         if f.get("old_path"):
             extra.append(f"moved from {f['old_path']}")
-        h = 24 + 22 * len(rows) + 14 * len(extra) + (4 if rows else 0)
         sub = f"+{f['plus']} -{f['minus']}" if f["minus"] else f"+{f['plus']}"
         if f["status"] == "removed":
             sub = f"deleted -{f['minus']}"
@@ -1137,21 +1256,34 @@ def repo_map_svg(fx: dict, boxes: list[dict], highlight: str | None = None, mini
             tparts = [f"{fb['tests_added']} new tests" if fb["tests_added"] else "",
                       f"{fb['tests_changed']} changed" if fb["tests_changed"] else ""]
             sub = ", ".join(t for t in tparts if t) + (", " if any(tparts) else "") + sub
+        sub = ("new  " if f["status"] == "added" else "") + sub
+        # the file name on the left, its counts on the right of the same line when both fit with a 10-unit gap;
+        # else the counts go on lines of their own under the name (a test file's "6 new tests, 12 changed, ...")
+        inner = W - x - 4 - 16
+        names = wrap(Path(f["path"]).name, inner, 12, bold=True)
+        side = len(names) == 1 and tw(names[0], 12, bold=True) + 10 + tw(sub, 10.5, bold=True) <= inner
+        subs = [] if side else wrap(sub, inner, 10.5, bold=True)
+        head_h = 16 * len(names) + 14 * len(subs)
+        h = 8 + head_h + sum(row_h) + 14 * len(extra) + (4 if rows else 0)
         g = [rect(x, y, W - x - 4, h, f["status"], hl=bool(hb and hb["id"] == fb["id"]))]
-        g.append(text(x + 8, y + 16, Path(f["path"]).name, 12, 700, FILL[f["status"]][2]))
-        g.append(text(W - 10, y + 16, ("new  " if f["status"] == "added" else "") + sub, 10.5, 600,
-                      FILL[f["status"]][2], anchor="end"))
+        for i, ln in enumerate(names):
+            g.append(text(x + 8, y + 16 + 16 * i, ln, 12, 700, FILL[f["status"]][2]))
+        if side:
+            g.append(text(W - 10, y + 16, sub, 10.5, 600, FILL[f["status"]][2], anchor="end"))
+        for i, ln in enumerate(subs):
+            g.append(text(x + 8, y + 16 * len(names) + 14 + 14 * i, ln, 10.5, 600, FILL[f["status"]][2]))
         parts.append(boxed(fb["id"], "".join(g)))
-        cy = y + 24
-        for row in rows:
+        cy = y + 8 + head_h
+        for row, rh in zip(rows, row_h):
             cx = cx0
-            for s, w in row:
+            for s, w, lines in row:
                 on = bool(hb and hb["id"] == s["id"])
-                chip = rect(cx, cy, w, 18, s["status"], hl=on, r=9) + text(
-                    cx + 7, cy + 13, s["name"], 10.5, 700 if on else 500, FILL[s["status"]][2], mono=True)
+                chip = rect(cx, cy, w, 18 + 13 * (len(lines) - 1), s["status"], hl=on, r=9) + "".join(
+                    text(cx + 7, cy + 13 + 13 * i, ln, 10.5, 700 if on else 500, FILL[s["status"]][2], mono=True)
+                    for i, ln in enumerate(lines))
                 parts.append(boxed(s["id"], chip))
                 cx += w + 5
-            cy += 22
+            cy += rh
         for e in extra:
             ln = wrap(e, W - x - 24, 10)
             parts.append(text(cx0, cy + 10, ln[0] + (" ..." if len(ln) > 1 else ""), 10, 400, "#5b6672"))
@@ -1334,20 +1466,35 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
             prod = [c for c in sites if not c["test"]]
             tests = [c for c in sites if c["test"]]
 
-            def links(cs):
-                return ", ".join(
-                    f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc("/".join(c["path"].split("/")[-2:]))}:{c["line"]}</a>'
-                    for c in cs[:4]) + (f" and {len(cs) - 4} more" if len(cs) > 4 else "")
+            def link(c):
+                a = (f'<a href="{esc(code_link(c["path"], c["line"]))}">'
+                     f'{esc("/".join(c["path"].split("/")[-2:]))}:{c["line"]}</a>')
+                if c.get("how") == "passed":
+                    return f'passed to <code>{esc(c["callee"])}</code> in <code>{esc(c["caller"])}</code> ({a})'
+                return a
 
-            site_txt = links(prod) or "none outside tests"
+            def links(cs):
+                return ", ".join(link(c) for c in cs[:4]) + (f" and {len(cs) - 4} more" if len(cs) > 4 else "")
+
             maybe = s.get("possible_sites", [])
+            reads = s.get("property")
+            if prod:
+                site_txt = links(prod) + (f"; {len(tests)} test lines" if tests else "")
+            elif tests:
+                site_txt = f"tests only, {len(tests)} lines"
+            elif maybe:
+                site_txt = f"no resolved {'reader' if reads else 'caller'}; possible ones below"
+            else:
+                site_txt = f"no {'reader' if reads else 'caller'} found in the repo"
             maybe_txt = ""
             if maybe:
                 mp = [c for c in maybe if not c["test"]]
                 mt = len(maybe) - len(mp)
                 maybe_txt = (f'<p class="calls"><b>Possible (unresolved receiver)</b> {tag("script")} {links(mp)}'
                              + ("; " if mp and mt else "") + (f"{mt} test lines" if mt else "") + "</p>")
-            used = "Read from" if s.get("property") else "Called from"
+            # "Used" when every use hands it over (to a pool, `map`, a callback) rather than calling it
+            used = ("Read from" if reads else "Callers" if not sites
+                    else "Used" if all(c.get("how") == "passed" for c in sites) else "Called from")
             change = ""
             if s["status"] == "changed" and bid in ba:
                 change = (f'<p class="chg"><b>What changes</b> {tag("worker")} {esc(ba[bid]["after"])} '
@@ -1362,8 +1509,7 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
                 f'<pre class="sig">{esc(s["signature"])}</pre>'
                 + (f'<table class="ft"><tr><th>{field_word}</th><th>type</th><th>meaning (docstring) {tag("script")}</th></tr>'
                    f'{"".join(rows)}</table>' if rows else "")
-                + f'<p class="calls"><b>{used}</b> {tag("script")} {site_txt}'
-                + (f"; {len(tests)} test lines" if tests else "") + "</p>" + maybe_txt
+                + f'<p class="calls"><b>{used}</b> {tag("script")} {site_txt}</p>' + maybe_txt
                 + (f'<p class="calls"><b>Callers pass</b> {tag("worker")} {esc(notes["callers_pass"][bid])}</p>'
                    if bid in notes.get("callers_pass", {}) else "")
                 + "</div>")
@@ -1392,14 +1538,15 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
                 outside = [c for c in s.get("call_sites", []) if not c["test"] and c["path"] != f["path"]]
                 if outside:
                     calls_line.append(
-                        f'<li><code>{esc(s["qualname"])}</code>: {"read" if s.get("property") else "called"} from '
-                        + ", ".join(f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}:{c["line"]}</a>'
+                        f'<li><code>{esc(s["qualname"])}</code>: {"read" if s.get("property") else "used" if any(c.get("how") == "passed" for c in outside[:3]) else "called"} from '
+                        + ", ".join((f'passed to <code>{esc(c["callee"])}</code> at ' if c.get("how") == "passed" else "")
+                                    + f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}:{c["line"]}</a>'
                                     for c in outside[:3])
                         + (f" and {len(outside) - 3} more" if len(outside) > 3 else "") + "</li>")
                 else:
                     idle.append(s["qualname"])
         if idle:
-            calls_line.append(f'<li>Called only inside <code>{esc(Path(f["path"]).name)}</code> and the tests: '
+            calls_line.append(f'<li>Used only inside <code>{esc(Path(f["path"]).name)}</code> and the tests: '
                               + ", ".join(f"<code>{esc(q)}</code>" for q in idle) + "</li>")
     terms = "".join(f"<li><b>{esc(k)}</b>: {esc(v)}</li>" for k, v in notes.get("terms", {}).items())
     doc_only = [s["qualname"] for f in fx["files"] for s in f["symbols"] if s["status"] == "doc-only"]

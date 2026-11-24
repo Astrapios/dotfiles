@@ -53,8 +53,14 @@ a function through the file's imports (`from x import f`, `import x; x.f()`, ali
 module); a method or classmethod through `Class.m` or a receiver whose class an annotation, a constructor, a
 return annotation or a field annotation gives; a class or its `__init__` where it is constructed. A property lists
 its reads ("Read from"). A same-name function elsewhere or a receiver of another type is never listed; a receiver
-whose type the code does not say goes under "Possible (unresolved receiver)". Not followed: dynamic dispatch (a
-call on a base-class receiver that a subclass overrides), loop and container element types, `getattr`.
+whose type the code does not say goes under "Possible (unresolved receiver)". A use that hands the symbol over
+is listed as "passed to <callee> in <caller>": the function or bound method given as an argument (`pool.imap(f,
+xs)`, `ex.submit(obj.m)`, `key=f`), or, for a method, an instance of its class given to a repo function that uses
+that method of its parameter, directly or through the functions it passes the parameter on to (a grid processor
+given to `multiprocess_grid`, which reaches `pool.imap(item_processor.process, ...)`). A symbol with no use at
+all says "no caller found in the repo". Not followed: dynamic dispatch (a call on a base-class receiver that a
+subclass overrides) except through such a passed instance, an instance given to a function outside the repo,
+loop and container element types, `getattr`.
 
 ## Commands, in order
 
