@@ -1429,6 +1429,11 @@ def tag(who: str) -> str:
     return '<span class="src w" title="the reviewer\'s words, checked against the code">written</span>'
 
 
+def where(caller: str) -> str:
+    """Where a passed use sits: in a function, or at module level."""
+    return "at module level" if caller == "module level" else f"in <code>{esc(caller)}</code>"
+
+
 def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
     """The five levels as HTML and SVG pieces."""
     head = fx["head"]
@@ -1466,12 +1471,15 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
             prod = [c for c in sites if not c["test"]]
             tests = [c for c in sites if c["test"]]
 
-            def link(c):
+            handed = any(c.get("how") == "passed" for c in sites)
+
+            def link(c, handed=handed):
                 a = (f'<a href="{esc(code_link(c["path"], c["line"]))}">'
                      f'{esc("/".join(c["path"].split("/")[-2:]))}:{c["line"]}</a>')
                 if c.get("how") == "passed":
-                    return f'passed to <code>{esc(c["callee"])}</code> in <code>{esc(c["caller"])}</code> ({a})'
-                return a
+                    return f'passed to <code>{esc(c["callee"])}</code> {where(c["caller"])} ({a})'
+                # beside a passed use, a call or read says its verb too
+                return f'{"read" if c.get("how") == "read" else "called"} at {a}' if handed else a
 
             def links(cs):
                 return ", ".join(link(c) for c in cs[:4]) + (f" and {len(cs) - 4} more" if len(cs) > 4 else "")
@@ -1492,9 +1500,8 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
                 mt = len(maybe) - len(mp)
                 maybe_txt = (f'<p class="calls"><b>Possible (unresolved receiver)</b> {tag("script")} {links(mp)}'
                              + ("; " if mp and mt else "") + (f"{mt} test lines" if mt else "") + "</p>")
-            # "Used" when every use hands it over (to a pool, `map`, a callback) rather than calling it
-            used = ("Read from" if reads else "Callers" if not sites
-                    else "Used" if all(c.get("how") == "passed" for c in sites) else "Called from")
+            # "Used" when a use hands it over (to a pool, `map`, a callback) rather than calling it
+            used = "Callers" if not sites else "Used" if handed else "Read from" if reads else "Called from"
             change = ""
             if s["status"] == "changed" and bid in ba:
                 change = (f'<p class="chg"><b>What changes</b> {tag("worker")} {esc(ba[bid]["after"])} '
@@ -1538,8 +1545,9 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
                 outside = [c for c in s.get("call_sites", []) if not c["test"] and c["path"] != f["path"]]
                 if outside:
                     calls_line.append(
-                        f'<li><code>{esc(s["qualname"])}</code>: {"read" if s.get("property") else "used" if any(c.get("how") == "passed" for c in outside[:3]) else "called"} from '
-                        + ", ".join((f'passed to <code>{esc(c["callee"])}</code> at ' if c.get("how") == "passed" else "")
+                        f'<li><code>{esc(s["qualname"])}</code>: '
+                        + ", ".join({"passed": f'passed to <code>{esc(c.get("callee", ""))}</code> at ',
+                                     "read": "read from "}.get(c.get("how"), "called from ")
                                     + f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}:{c["line"]}</a>'
                                     for c in outside[:3])
                         + (f" and {len(outside) - 3} more" if len(outside) > 3 else "") + "</li>")
