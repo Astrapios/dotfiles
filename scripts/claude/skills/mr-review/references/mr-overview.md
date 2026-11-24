@@ -47,8 +47,14 @@ explanation; boxes clickable). Plan and mock-ups: `site3d_project_root/outputs/m
 | Files, line counts, symbols and their status, signatures, dataclass fields, docstring argument lines, call sites, the repo map, thread anchors | `scripts/mr_overview.py` from git and `ast` (exact) |
 | What this MR does (2 to 3 sentences), one description per box, the data flow, the pipeline note, what callers pass, before vs after, a terms list | the worker, in the notes file; `check` ties every name to the facts and the cold reader tests the words |
 
-Call sites are found by name (`git grep -w`, then `ast` calls to that name at the head): a docstring or comment
-mention is never one, but a common method name lists every reader's call.
+Call sites are resolved, not matched by name: `git grep -w` finds the files that name the symbol, then `ast`
+resolves each use in its scope at the head. "Called from" lists a call whose callee resolves to the changed symbol:
+a function through the file's imports (`from x import f`, `import x; x.f()`, aliases, a bare call in its own
+module); a method or classmethod through `Class.m` or a receiver whose class an annotation, a constructor, a
+return annotation or a field annotation gives; a class or its `__init__` where it is constructed. A property lists
+its reads ("Read from"). A same-name function elsewhere or a receiver of another type is never listed; a receiver
+whose type the code does not say goes under "Possible (unresolved receiver)". Not followed: dynamic dispatch (a
+call on a base-class receiver that a subclass overrides), loop and container element types, `getattr`.
 
 ## Commands, in order
 

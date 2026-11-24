@@ -354,6 +354,16 @@ def test_call_sites(fx):
     assert all(c["in_mr"] for c in sites)
 
 
+def test_before_after_on_a_file_box_counts_the_file(mo, fx, boxes):
+    notes = good_notes()
+    notes["before_after"].append({"box": "pkg/user.py", "before": "one use", "after": "two uses"})
+    ba = mo.fragment_parts(fx, list(boxes.values()), notes, "https://example.com/p/x")["ba"]
+    f = next(f for f in fx["files"] if f["path"] == "pkg/user.py")
+    assert f["plus"] and f["minus"]
+    entry = ba[ba.index('id="ba-pkg-user-py"'):]
+    assert f"+{f['plus']} -{f['minus']} lines" in entry[: entry.index("</p>")]
+
+
 def test_doc_args_and_fields(fx):
     p = sym(fx, "pkg/views.py", "Params")
     assert [f["name"] for f in p["fields"]] == ["limit", "name"]

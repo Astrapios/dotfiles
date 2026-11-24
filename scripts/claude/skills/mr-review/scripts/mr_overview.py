@@ -301,34 +301,525 @@ def _symbols_of_file(new_src, old_src, hk) -> list[dict]:
     return out
 
 
-def call_sites(repo: str, head: str, name: str, skip: tuple[str, int, int] | None, cache: dict) -> list[dict]:
-    """Calls of `name` at the head: `git grep -l -w` finds the files, `ast` finds each `Call` whose callee is
-    `name` (`name(...)` or `x.name(...)`), so a docstring or comment mention is never one. `skip` = (path,
-    from, to), the symbol's own body."""
-    r = subprocess.run(["git", "-C", repo, "grep", "-l", "-w", name, head, "--", "*.py"], capture_output=True, text=True, check=False)
-    out = []
+# --- call sites, resolved through ast ---
+#
+# A reference is a tuple: ("module", path) a repo module; ("pkg", dir) a repo folder imported as a package;
+# ("sym", path, qualname) something a repo module defines (a function, a class, a method, a field, a variable);
+# ("ext", dotted) anything outside the repo (numpy, builtins, typing). None: not knowable from the code.
+# An instance's type is the reference of its class.
+
+PENDING, PENDING_MISS = object(), object()
+DEPTH = 12  # how far a chain of imports, annotations and assignments is followed before giving up
+
+
+class Mod:
+    """One parsed module at the head and its module scope."""
+
+    def __init__(self, path: str, src: str):
+        self.path = path
+        self.dir = str(Path(path).parent) if "/" in path else ""
+        self.lines = src.splitlines()
+        self.tree = parse(src)
+        self.star = False  # a `from x import *`: a bare name may come from anywhere
+        self.scope: Scope | None = None
+
+
+class Scope:
+    """The names a function (or the module) binds, and how: ("ann", annotation), ("value", expression),
+    ("import", module, name or None, level), ("def", qualname) a module-level def or class, ("self", class),
+    ("cls", class), ("unknown",). Flow-insensitive: every binding anywhere in the body counts."""
+
+    def __init__(self, mod: Mod, parent: Scope | None, owner: tuple | None = None):
+        self.mod, self.parent, self.owner = mod, parent, owner
+        self.binds: dict[str, list[tuple]] = {}
+
+    def add(self, name: str, how: tuple) -> None:
+        self.binds.setdefault(name, []).append(how)
+
+
+def is_property(node: ast.AST | None) -> bool:
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    for d in node.decorator_list:
+        nm = d.id if isinstance(d, ast.Name) else d.attr if isinstance(d, ast.Attribute) else ""
+        if nm in ("property", "cached_property"):
+            return True
+    return False
+
+
+def _decorated(node: ast.AST, name: str) -> bool:
+    return any((isinstance(d, ast.Name) and d.id == name) or (isinstance(d, ast.Attribute) and d.attr == name)
+               for d in getattr(node, "decorator_list", []))
+
+
+def _local_nodes(nodes: list[ast.AST]):
+    """The nodes of a body that run in its own scope: nested defs, classes and lambdas are not entered."""
+    stack = list(nodes)
+    while stack:
+        n = stack.pop()
+        yield n
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(n))
+
+
+def _names_in(target: ast.AST) -> list[str]:
+    return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
+
+
+def _collect(scope: Scope, body: list[ast.AST], module_level: bool) -> None:
+    gl: set[str] = set()
+    for n in _local_nodes(body):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scope.add(n.name, ("def", n.name) if module_level else ("unknown",))
+        elif isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name) and len(n.targets) == 1:
+                    scope.add(t.id, ("value", n.value))
+                else:
+                    for nm in _names_in(t) if not isinstance(t, ast.Attribute) else []:
+                        scope.add(nm, ("unknown",))
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            scope.add(n.target.id, ("ann", n.annotation))
+        elif isinstance(n, ast.NamedExpr):
+            scope.add(n.target.id, ("value", n.value))
+        elif isinstance(n, (ast.For, ast.AsyncFor, ast.comprehension)):
+            for nm in _names_in(n.target):
+                scope.add(nm, ("unknown",))
+        elif isinstance(n, ast.withitem) and n.optional_vars is not None:
+            for nm in _names_in(n.optional_vars):
+                scope.add(nm, ("unknown",))
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            scope.add(n.name, ("unknown",))
+        elif isinstance(n, ast.Lambda):
+            for a in n.args.posonlyargs + n.args.args + n.args.kwonlyargs:
+                scope.add(a.arg, ("unknown",))
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.asname:
+                    scope.add(a.asname, ("import", a.name, None, 0))
+                else:
+                    top = a.name.split(".")[0]
+                    scope.add(top, ("import", top, None, 0))
+        elif isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                if a.name == "*":
+                    scope.mod.star = True
+                else:
+                    scope.add(a.asname or a.name, ("import", n.module or "", a.name, n.level))
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            gl.update(n.names)
+    for nm in gl:
+        scope.binds.pop(nm, None)
+
+
+class Code:
+    """The repo at the head, read on demand: which name in which file refers to which definition."""
+
+    def __init__(self, repo: str, head: str):
+        self.repo, self.head = repo, head
+        self.paths = {p for p in git(repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0") if p}
+        self.dirs = {str(d) for p in self.paths for d in Path(p).parents if str(d) != "."}
+        self._mods: dict[str, Mod | None] = {}
+        self._fscopes: dict[int, Scope] = {}
+        self._members: dict[tuple, dict] = {}
+        self._scoped: dict[str, list] = {}
+        self._types: dict[tuple, object] = {}  # memo of name and field types; PENDING while one is worked out
+
+    # modules and scopes
+
+    def mod(self, path: str) -> Mod | None:
+        if path not in self._mods:
+            src = show(self.repo, self.head, path) if path in self.paths else None
+            m = Mod(path, src) if src is not None else None
+            if m is not None and m.tree is not None:
+                m.scope = Scope(m, None)
+                _collect(m.scope, m.tree.body, True)
+            self._mods[path] = m
+        return self._mods[path]
+
+    def func_scope(self, mod: Mod, fn: ast.AST, parent: Scope, owner: tuple | None) -> Scope:
+        """`owner`: the class `fn` is a method of (its first parameter is then self, or cls for a classmethod)."""
+        key = id(fn)
+        if key not in self._fscopes:
+            sc = Scope(mod, parent, owner)
+            a = fn.args
+            pos = a.posonlyargs + a.args
+            for i, x in enumerate(pos + a.kwonlyargs):
+                if i == 0 and owner is not None and x in pos and not _decorated(fn, "staticmethod"):
+                    sc.add(x.arg, ("cls", owner) if _decorated(fn, "classmethod") else ("self", owner))
+                elif x.annotation is not None:
+                    sc.add(x.arg, ("ann", x.annotation))
+                else:
+                    sc.add(x.arg, ("unknown",))
+            for x in (a.vararg, a.kwarg):
+                if x is not None:
+                    sc.add(x.arg, ("unknown",))
+            _collect(sc, fn.body, False)
+            self._fscopes[key] = sc
+        return self._fscopes[key]
+
+    def scoped(self, mod: Mod) -> list[tuple[ast.AST, Scope]]:
+        """Every node of the module with the scope its names are looked up in."""
+        if mod.path in self._scoped:
+            return self._scoped[mod.path]
+        out: list[tuple[ast.AST, Scope]] = []
+
+        def visit(c, scope, cls_q):
+            out.append((c, scope))
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # decorators, defaults and annotations run in the enclosing scope, the body in its own
+                for d in c.decorator_list + [c.args] + ([c.returns] if c.returns else []):
+                    visit(d, scope, None)
+                fs = self.func_scope(mod, c, scope, ("sym", mod.path, cls_q) if cls_q else None)
+                for st in c.body:
+                    visit(st, fs, None)
+            elif isinstance(c, ast.ClassDef):
+                # the class body runs in the enclosing scope here; its methods see the module, not the class body
+                q = (f"{cls_q}.{c.name}" if cls_q else c.name) if scope is mod.scope else None
+                for d in c.decorator_list + c.bases + c.keywords:
+                    visit(d, scope, None)
+                for st in c.body:
+                    visit(st, scope, q)
+            else:
+                for ch in ast.iter_child_nodes(c):
+                    visit(ch, scope, cls_q if isinstance(c, (ast.If, ast.Try)) else None)
+
+        for st in mod.tree.body:
+            visit(st, mod.scope, None)
+        self._scoped[mod.path] = out
+        return out
+
+    def def_node(self, ref: tuple | None) -> ast.AST | None:
+        """The def or class a ("sym", path, qualname) names, else None."""
+        if not ref or ref[0] != "sym":
+            return None
+        m = self.mod(ref[1])
+        if m is None or m.tree is None:
+            return None
+        body, node = m.tree.body, None
+        for part in ref[2].split("."):
+            node = next((n for n in body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                         and n.name == part), None)
+            if node is None:
+                return None
+            body = node.body if isinstance(node, ast.ClassDef) else []
+        return node
+
+    # what a dotted module name and an attribute refer to
+
+    def dotted(self, full: str, near: str | None) -> tuple:
+        """A module path as imported: from the repo root first, then beside the importing file (a script run from
+        its own folder imports its siblings by bare name)."""
+        rel = full.replace(".", "/")
+        for d in [""] + ([near] if near else []):
+            p = f"{d}/{rel}" if d else rel
+            if p + ".py" in self.paths:
+                return ("module", p + ".py")
+            if p in self.dirs:
+                return ("pkg", p)
+        return ("ext", full)
+
+    def import_ref(self, mod: Mod, how: tuple, depth: int) -> tuple | None:
+        _, module, name, level = how
+        if level:
+            base = Path(mod.dir) if mod.dir else Path()
+            for _ in range(level - 1):
+                base = base.parent
+            full = ".".join([p for p in base.parts] + ([module] if module else []))
+            m = self.dotted(full, None) if full else ("pkg", "")
+        else:
+            m = self.dotted(module, mod.dir)
+        return m if name is None else self.attr(m, name, depth + 1)
+
+    def mod_member(self, path: str, name: str, depth: int) -> tuple:
+        m = self.mod(path)
+        hows = m.scope.binds.get(name, []) if m is not None and m.scope is not None else []
+        if depth < DEPTH and hows and all(h[0] == "import" for h in hows):
+            r = self.import_ref(m, hows[0], depth + 1)  # a name the module imports: follow it to its definition
+            if r is not None:
+                return r
+        return ("sym", path, name)
+
+    def attr(self, ref: tuple | None, name: str, depth: int) -> tuple | None:
+        if ref is None or depth > DEPTH:
+            return None
+        if ref[0] == "module":
+            return self.mod_member(ref[1], name, depth)
+        if ref[0] == "pkg":
+            p = f"{ref[1]}/{name}" if ref[1] else name
+            if p + ".py" in self.paths:
+                return ("module", p + ".py")
+            if p in self.dirs:
+                return ("pkg", p)
+            init = f"{ref[1]}/__init__.py" if ref[1] else "__init__.py"
+            if init in self.paths:
+                return self.mod_member(init, name, depth)
+            return ("ext", p.replace("/", "."))
+        if ref[0] == "sym":
+            node = self.def_node(ref)
+            if isinstance(node, ast.ClassDef):
+                return self.member(ref, name, depth)
+            if node is not None:  # an attribute of a function object
+                return ("sym", ref[1], f"{ref[2]}.{name}")
+            # a field or a variable: its attribute belongs to the class of the value it holds
+            t = self.value_type(ref, depth + 1)
+            return self.member(t, name, depth + 1) if t is not None else None
+        return ("ext", f"{ref[1]}.{name}")
+
+    def members(self, cls: tuple) -> dict[str, list[tuple]]:
+        """What class `cls` defines itself: name -> ("def", node) | ("ann", annotation, scope) | ("value", expr,
+        scope), from its body and from `self.x = ...` in its methods."""
+        if cls not in self._members:
+            out: dict[str, list[tuple]] = {}
+            node, m = self.def_node(cls), self.mod(cls[1])
+            if isinstance(node, ast.ClassDef) and m is not None:
+                for st in node.body:
+                    if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        out.setdefault(st.name, []).append(("def", st))
+                    elif isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
+                        out.setdefault(st.target.id, []).append(("ann", st.annotation, m.scope))
+                    elif isinstance(st, ast.Assign):
+                        for t in st.targets:
+                            if isinstance(t, ast.Name):
+                                out.setdefault(t.id, []).append(("value", st.value, m.scope))
+                for st in node.body:
+                    if not isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)) or not st.args.args:
+                        continue
+                    fs = self.func_scope(m, st, m.scope, cls)
+                    me = st.args.args[0].arg
+                    for n in _local_nodes(st.body):
+                        tgt = ([(t, n.value) for t in n.targets] if isinstance(n, ast.Assign)
+                               else [(n.target, None)] if isinstance(n, ast.AnnAssign) else [])
+                        for t, v in tgt:
+                            if (isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == me
+                                    and not any(h[0] == "def" for h in out.get(t.attr, []))):
+                                how = ("ann", n.annotation, fs) if isinstance(n, ast.AnnAssign) else ("value", v, fs)
+                                out.setdefault(t.attr, []).append(how)
+            self._members[cls] = out
+        return self._members[cls]
+
+    def _find(self, cls: tuple, name: str, depth: int) -> tuple | None:
+        if depth > DEPTH:
+            return None
+        if name in self.members(cls):
+            return ("sym", cls[1], f"{cls[2]}.{name}")
+        node, m = self.def_node(cls), self.mod(cls[1])
+        for b in getattr(node, "bases", []):
+            br = self.ref_of(b, m.scope, depth + 1)
+            if br and br[0] == "sym":
+                f = self._find(br, name, depth + 1)
+                if f:
+                    return f
+        return None
+
+    def member(self, cls: tuple, name: str, depth: int) -> tuple | None:
+        """An attribute of class `cls` (or of its instances): where it is defined, following base classes."""
+        if cls[0] == "ext":
+            return ("ext", f"{cls[1]}.{name}")
+        if cls[0] != "sym":
+            return None
+        return self._find(cls, name, depth) or ("sym", cls[1], f"{cls[2]}.{name}")
+
+    # references and types of expressions
+
+    def lookup(self, scope: Scope, name: str) -> tuple[Scope | None, list[tuple] | None]:
+        s = scope
+        while s is not None:
+            if name in s.binds:
+                return s, s.binds[name]
+            s = s.parent
+        return None, None
+
+    def ref_of(self, e: ast.AST, scope: Scope, depth: int = 0) -> tuple | None:
+        """What a name or a dotted expression refers to (a module, class, function, method or field), or None."""
+        if depth > DEPTH:
+            return None
+        if isinstance(e, ast.Name):
+            s, hows = self.lookup(scope, e.id)
+            if hows is None:
+                return None if scope.mod.star else ("ext", f"builtins.{e.id}")
+            refs = []
+            for h in hows:
+                if h[0] == "def":
+                    refs.append(("sym", s.mod.path, h[1]))
+                elif h[0] == "import":
+                    refs.append(self.import_ref(s.mod, h, depth + 1))
+                elif h[0] == "cls":
+                    refs.append(h[1])
+                else:
+                    return None
+            return refs[0] if refs and refs[0] is not None and all(r == refs[0] for r in refs) else None
+        if isinstance(e, ast.Attribute):
+            r = self.ref_of(e.value, scope, depth + 1)
+            if r is not None:
+                return self.attr(r, e.attr, depth + 1)
+            t = self.type_of(e.value, scope, depth + 1)
+            return self.member(t, e.attr, depth + 1) if t is not None else None
+        return None
+
+    def ann_type(self, a: ast.AST | None, scope: Scope, owner: tuple | None, depth: int) -> tuple | None:
+        """The class an annotation names: `X`, `"X"`, `X | None`, `Optional[X]`, `Union[X, None]`, `Self`."""
+        if a is None or depth > DEPTH:
+            return None
+        if isinstance(a, ast.Constant) and isinstance(a.value, str):
+            try:
+                return self.ann_type(ast.parse(a.value, mode="eval").body, scope, owner, depth + 1)
+            except SyntaxError:
+                return None
+        opts = None
+        if isinstance(a, ast.BinOp) and isinstance(a.op, ast.BitOr):
+            opts = [a.left, a.right]
+        elif isinstance(a, ast.Subscript):
+            base = self.ref_of(a.value, scope, depth + 1)
+            if base in (("ext", "typing.Optional"), ("ext", "typing.Union")):
+                opts = list(a.slice.elts) if isinstance(a.slice, ast.Tuple) else [a.slice]
+            else:
+                return None
+        if opts is not None:
+            opts = [o for o in opts if not (isinstance(o, ast.Constant) and o.value is None)]
+            return self.ann_type(opts[0], scope, owner, depth + 1) if len(opts) == 1 else None
+        if isinstance(a, (ast.Name, ast.Attribute)):
+            r = self.ref_of(a, scope, depth + 1)
+            if r in (("ext", "typing.Self"), ("ext", "typing_extensions.Self")):
+                return owner
+            return r if r is not None and r[0] in ("sym", "ext") else None
+        return None
+
+    def _type_of_hows(self, hows: list[tuple], depth: int) -> tuple | None:
+        """One type from a name's bindings; annotations win over assignments; disagreeing types give None."""
+        anns = [h for h in hows if h[0] == "ann"]
+        types = []
+        for h in anns or hows:
+            if h[0] == "ann":
+                types.append(self.ann_type(h[1], h[2], h[2].owner, depth + 1))
+            elif h[0] == "value":
+                types.append(self.type_of(h[1], h[2], depth + 1))
+            elif h[0] == "self":
+                types.append(h[1])
+            else:
+                return None
+        return types[0] if types and types[0] is not None and all(t == types[0] for t in types) else None
+
+    def _memo(self, key: tuple, work):
+        """A name's or a field's type, worked out once; a cycle (`x = x.next()`) gives None, not a loop."""
+        got = self._types.get(key, PENDING_MISS)
+        if got is PENDING:
+            return None
+        if got is not PENDING_MISS:
+            return got
+        self._types[key] = PENDING
+        self._types[key] = work()
+        return self._types[key]
+
+    def value_type(self, ref: tuple, depth: int) -> tuple | None:
+        """The type of the value a ("sym", ...) reference holds: a field, a property, a module-level variable."""
+        if ref[0] != "sym" or depth > DEPTH:
+            return None
+        return self._memo(("value", ref), lambda: self._value_type(ref, depth))
+
+    def _value_type(self, ref: tuple, depth: int) -> tuple | None:
+        path, qual = ref[1], ref[2]
+        if "." in qual:
+            cls, name = qual.rsplit(".", 1)
+            hows = self.members(("sym", path, cls)).get(name, [])
+            m = self.mod(path)
+            if len(hows) == 1 and hows[0][0] == "def":
+                fn = hows[0][1]
+                return self.ann_type(fn.returns, m.scope, ("sym", path, cls), depth + 1) if is_property(fn) else None
+            return self._type_of_hows([(h[0], h[1], h[2]) for h in hows if h[0] != "def"], depth + 1) \
+                if hows and all(h[0] != "def" for h in hows) else None
+        m = self.mod(path)
+        if m is None or m.scope is None:
+            return None
+        hows = m.scope.binds.get(qual, [])
+        if hows and all(h[0] in ("ann", "value") for h in hows):
+            return self._type_of_hows([(h[0], h[1], m.scope) for h in hows], depth + 1)
+        return None
+
+    def type_of(self, e: ast.AST, scope: Scope, depth: int = 0) -> tuple | None:
+        """The class of the value of an expression, when the code says it (annotation, constructor, return
+        annotation, field annotation); else None."""
+        if depth > DEPTH:
+            return None
+        if isinstance(e, ast.Name):
+            s, hows = self.lookup(scope, e.id)
+            if not hows:
+                return None
+            return self._memo(("name", id(s), e.id), lambda: self._type_of_hows(
+                [(h[0], h[1], s) if h[0] in ("ann", "value") else h for h in hows], depth + 1))
+        if isinstance(e, ast.Call):
+            f = self.ref_of(e.func, scope, depth + 1)
+            node = self.def_node(f)
+            if isinstance(node, ast.ClassDef):
+                return f
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
+                owner = ("sym", f[1], f[2].rsplit(".", 1)[0]) if "." in f[2] else None
+                return self.ann_type(node.returns, self.mod(f[1]).scope, owner, depth + 1)
+            return None
+        if isinstance(e, ast.Attribute):
+            r = self.ref_of(e, scope, depth + 1)
+            return self.value_type(r, depth + 1) if r is not None else None
+        return None
+
+
+def call_sites(code: Code, path: str, qual: str, skip: tuple[str, int, int] | None) -> tuple[list[dict], list[dict]]:
+    """Where the head uses symbol `qual` of `path`: (resolved, possible).
+
+    `git grep -l -w` finds the files that name it; `ast` then resolves each use in its scope. Resolved: a call
+    whose callee resolves to this symbol (through the file's imports and aliases, a module-level def, `Class.m`,
+    or a receiver whose class an annotation, a constructor, a return annotation or a field annotation gives), a
+    construction for a class or its `__init__`, or a read (`x.p`) for a property. Possible: the same name on a
+    receiver whose type the code does not say (or a file that does not parse). A same-name function elsewhere, or a
+    receiver of another type, is never listed. `skip` = (path, from, to), the symbol's own body.
+    """
+    target = ("sym", path, qual)
+    node = code.def_node(target)
+    prop = is_property(node)
+    if qual.endswith(".__init__"):
+        target = ("sym", path, qual.rsplit(".", 1)[0])
+    name = target[2].split(".")[-1]
+    member = "." in target[2] and isinstance(code.def_node(("sym", path, target[2].rsplit(".", 1)[0])), ast.ClassDef)
+    how = "read" if prop else "construct" if isinstance(code.def_node(target), ast.ClassDef) else "call"
+    r = subprocess.run(["git", "-C", code.repo, "grep", "-l", "-w", name, code.head, "--", "*.py"],
+                       capture_output=True, text=True, check=False)
+    found, maybe = [], []
     for line in r.stdout.splitlines():
-        path = line[len(head) + 1:] if line.startswith(head + ":") else line.split(":", 1)[-1]
-        if path not in cache:
-            src = show(repo, head, path) or ""
-            cache[path] = (src.splitlines(), parse(src))
-        lines, tree = cache[path]
-        found: set[int] = set()
-        if tree is not None:
-            for n in ast.walk(tree):
-                if isinstance(n, ast.Call):
-                    f = n.func
-                    nm = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
-                    if nm == name:
-                        found.add(f.end_lineno if isinstance(f, ast.Attribute) else n.lineno)
-        else:  # unparsable at the head: the name followed by "(" on a line that is not a comment
-            found = {i for i, t in enumerate(lines, 1)
-                     if re.search(rf"\b{re.escape(name)}\s*\(", t) and not t.strip().startswith("#")}
-        for n in sorted(found):
-            if skip and path == skip[0] and skip[1] <= n <= skip[2]:
+        p = line[len(code.head) + 1:] if line.startswith(code.head + ":") else line.split(":", 1)[-1]
+        m = code.mod(p)
+        if m is None:
+            continue
+        hits: dict[int, bool] = {}  # line -> resolved (a resolved use on a line wins over a possible one)
+        if m.tree is None:  # unparsable at the head: the name followed by "(" on a line that is not a comment
+            for i, t in enumerate(m.lines, 1):
+                if re.search(rf"\b{re.escape(name)}\s*\(", t) and not t.strip().startswith("#"):
+                    hits.setdefault(i, False)
+        else:
+            for n, scope in code.scoped(m):
+                if prop:
+                    if not (isinstance(n, ast.Attribute) and n.attr == name and isinstance(n.ctx, ast.Load)):
+                        continue
+                    e, ln = n, n.end_lineno
+                else:
+                    if not isinstance(n, ast.Call):
+                        continue
+                    e = n.func
+                    nm = e.id if isinstance(e, ast.Name) else e.attr if isinstance(e, ast.Attribute) else None
+                    # a bare name may be an alias (`from m import f as g; g()`), so every bare call is resolved
+                    if nm is None or (nm != name and not isinstance(e, ast.Name)):
+                        continue
+                    ln = e.end_lineno if isinstance(e, ast.Attribute) else n.lineno
+                ref = code.ref_of(e, scope)
+                if ref == target:
+                    hits[ln] = True
+                elif ref is None and ((isinstance(e, ast.Attribute) and member)
+                                      or (isinstance(e, ast.Name) and e.id == name and m.star)):
+                    hits.setdefault(ln, False)
+        for ln in sorted(hits):
+            if skip and p == skip[0] and skip[1] <= ln <= skip[2]:
                 continue
-            out.append({"path": path, "line": n, "test": is_test(path), "text": lines[n - 1].strip()[:110]})
-    return out
+            site = {"path": p, "line": ln, "test": is_test(p), "text": m.lines[ln - 1].strip()[:110], "how": how}
+            (found if hits[ln] else maybe).append(site)
+    return found, maybe
 
 
 def facts(repo: str, base: str, head: str) -> dict:
@@ -350,14 +841,15 @@ def facts(repo: str, base: str, head: str) -> dict:
             f["symbols"] = _symbols_of_file(new_src, old_src, hunks(repo, mb, head, old_path, path))
         files.append(f)
     changed_paths = {f["path"] for f in files}
-    cache: dict = {}
+    code = Code(repo, head)
     for f in files:
         for s in f["symbols"]:
             if s["status"] not in ("added", "changed"):
                 continue
-            s["call_sites"] = call_sites(repo, head, s["qualname"].split(".")[-1], (f["path"], s["line"], s["line_to"]),
-                                         cache)
-            for c in s["call_sites"]:
+            s["property"] = is_property(code.def_node(("sym", f["path"], s["qualname"])))
+            s["call_sites"], s["possible_sites"] = call_sites(code, f["path"], s["qualname"],
+                                                              (f["path"], s["line"], s["line_to"]))
+            for c in s["call_sites"] + s["possible_sites"]:
                 c["in_mr"] = c["path"] in changed_paths
     tops = sorted(x for x in git(repo, "ls-tree", "-d", "--name-only", head).split() if not x.startswith("."))
     siblings = {}
@@ -841,9 +1333,21 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
             sites = s.get("call_sites", [])
             prod = [c for c in sites if not c["test"]]
             tests = [c for c in sites if c["test"]]
-            site_txt = ", ".join(
-                f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc("/".join(c["path"].split("/")[-2:]))}:{c["line"]}</a>'
-                for c in prod[:4]) + (f" and {len(prod) - 4} more" if len(prod) > 4 else "") or "none outside tests"
+
+            def links(cs):
+                return ", ".join(
+                    f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc("/".join(c["path"].split("/")[-2:]))}:{c["line"]}</a>'
+                    for c in cs[:4]) + (f" and {len(cs) - 4} more" if len(cs) > 4 else "")
+
+            site_txt = links(prod) or "none outside tests"
+            maybe = s.get("possible_sites", [])
+            maybe_txt = ""
+            if maybe:
+                mp = [c for c in maybe if not c["test"]]
+                mt = len(maybe) - len(mp)
+                maybe_txt = (f'<p class="calls"><b>Possible (unresolved receiver)</b> {tag("script")} {links(mp)}'
+                             + ("; " if mp and mt else "") + (f"{mt} test lines" if mt else "") + "</p>")
+            used = "Read from" if s.get("property") else "Called from"
             change = ""
             if s["status"] == "changed" and bid in ba:
                 change = (f'<p class="chg"><b>What changes</b> {tag("worker")} {esc(ba[bid]["after"])} '
@@ -858,12 +1362,14 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
                 f'<pre class="sig">{esc(s["signature"])}</pre>'
                 + (f'<table class="ft"><tr><th>{field_word}</th><th>type</th><th>meaning (docstring) {tag("script")}</th></tr>'
                    f'{"".join(rows)}</table>' if rows else "")
-                + f'<p class="calls"><b>Called from (by name)</b> {tag("script")} {site_txt}'
-                + (f"; {len(tests)} test lines" if tests else "") + "</p>"
+                + f'<p class="calls"><b>{used}</b> {tag("script")} {site_txt}'
+                + (f"; {len(tests)} test lines" if tests else "") + "</p>" + maybe_txt
                 + (f'<p class="calls"><b>Callers pass</b> {tag("worker")} {esc(notes["callers_pass"][bid])}</p>'
                    if bid in notes.get("callers_pass", {}) else "")
                 + "</div>")
     syms = {box_id(f["path"], s["qualname"]): s for f in fx["files"] for s in f["symbols"]}
+    # a before vs after on a file box counts the file's own diff lines
+    syms.update({box_id(f["path"]): {"plus": f["plus"], "minus": f["minus"]} for f in fx["files"]})
     bas = []
     for x in notes.get("before_after", []):
         s = syms.get(x["box"], {})
@@ -883,14 +1389,22 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
         for s in f["symbols"]:
             if s["status"] in ("added", "changed") and not s["qualname"].split(".")[-1].startswith("_"):
                 outside = [c for c in s.get("call_sites", []) if not c["test"] and c["path"] != f["path"]]
-                if not outside:
-                    idle.append(s["qualname"])
-                else:
+                maybe = [c for c in s.get("possible_sites", []) if not c["test"] and c["path"] != f["path"]]
+                verb = "read from" if s.get("property") else "called from"
+                if outside:
                     calls_line.append(
-                        f'<li><code>{esc(s["qualname"])}</code>: called from ' + ", ".join(
+                        f'<li><code>{esc(s["qualname"])}</code>: {verb} ' + ", ".join(
                             f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}:{c["line"]}</a>'
                             for c in outside[:3])
-                        + (f" and {len(outside) - 3} more" if len(outside) > 3 else "") + " (by name)</li>")
+                        + (f" and {len(outside) - 3} more" if len(outside) > 3 else "")
+                        + (f"; {len(maybe)} more possible (unresolved receiver)" if maybe else "") + "</li>")
+                elif maybe:
+                    calls_line.append(f'<li><code>{esc(s["qualname"])}</code>: possibly {verb} (unresolved receiver) '
+                                      + ", ".join(f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}'
+                                                  f':{c["line"]}</a>' for c in maybe[:3])
+                                      + (f" and {len(maybe) - 3} more" if len(maybe) > 3 else "") + "</li>")
+                else:
+                    idle.append(s["qualname"])
         if idle:
             calls_line.append(f'<li>Called only inside <code>{esc(Path(f["path"]).name)}</code> and the tests: '
                               + ", ".join(f"<code>{esc(q)}</code>" for q in idle) + "</li>")
