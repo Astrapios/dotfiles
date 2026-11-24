@@ -1,6 +1,6 @@
 ---
 name: mr-review
-description: Review and summarize a merge request (MR/PR) for the site3d repo - coding style (repo conformance), soundness, and logic. Verifies data-flow contracts against the codebase, then fans out domain-expert reviewers (SAR physics, computer vision, etc.) seeded with verified ground truth, and delivers a figure-per-finding HTML briefing. Use when the user says "review this MR", "/mr-review", "what does this branch change", "summarize the MR", asks to critique a branch's changes, or wants review replies drafted on GitLab.
+description: Review and summarize a merge request (MR/PR) for the site3d repo - coding style (repo conformance), soundness, and logic. Verifies data-flow contracts against the codebase, then fans out domain-expert reviewers (SAR physics, computer vision, etc.) seeded with verified ground truth, and delivers a figure-per-finding HTML briefing. Use when the user says "review this MR", "/mr-review", "what does this branch change", "summarize the MR", asks to critique a branch's changes, or wants review replies drafted on GitLab. Also when the user says "submit the MR", "write the MR description", or asks for a `gs branch submit` of a new MR: follow references/mr-submit.md.
 allowed-tools: Read, Bash, Grep, Glob, Agent, Write, Edit
 ---
 
@@ -23,6 +23,11 @@ Files in this skill (one level deep, read when the step says so):
 - `references/thread-explanation.md` - the explanation per thread and per finding: contents, tiers,
   figures, history sources, port maps, cold-read check, `outputs/mr_context/<iid>/` layout and
   `index.json`
+- `references/mr-submit.md` - submitting an MR ("submit the MR", "write the MR description", `gs branch submit`
+  of a new MR or an update after code changes): the drift check, then up to 5 "Design choices and known limits"
+  bullets shown to Jisu as a fenced draft
+- `scripts/description_drift.py` - names and "N tests" counts in a description that the head does not back
+  (`--mr <iid>` or `--description FILE --head REF`; read only)
 - `scripts/mr_discussions.py`, `scripts/draft_note.py` - run them, do not hand-roll glab calls;
   `mr_discussions.py --all --json` keeps each thread as the reviewer saw it (full position, posted
   head, every note, `anchor_status` as-posted or inferred)
