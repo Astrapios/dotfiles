@@ -1429,6 +1429,10 @@ def tag(who: str) -> str:
     return '<span class="src w" title="the reviewer\'s words, checked against the code">written</span>'
 
 
+def n_lines(n: int, kind: str = "") -> str:
+    return f"{n} {kind}line" + ("" if n == 1 else "s")
+
+
 def where(caller: str) -> str:
     """Where a passed use sits: in a function, or at module level."""
     return "at module level" if caller == "module level" else f"in <code>{esc(caller)}</code>"
@@ -1487,9 +1491,9 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
             maybe = s.get("possible_sites", [])
             reads = s.get("property")
             if prod:
-                site_txt = links(prod) + (f"; {len(tests)} test lines" if tests else "")
+                site_txt = links(prod) + (f"; {n_lines(len(tests), 'test ')}" if tests else "")
             elif tests:
-                site_txt = f"tests only, {len(tests)} lines"
+                site_txt = f"tests only, {n_lines(len(tests))}"
             elif maybe:
                 site_txt = f"no resolved {'reader' if reads else 'caller'}; possible ones below"
             else:
@@ -1499,7 +1503,7 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
                 mp = [c for c in maybe if not c["test"]]
                 mt = len(maybe) - len(mp)
                 maybe_txt = (f'<p class="calls"><b>Possible (unresolved receiver)</b> {tag("script")} {links(mp)}'
-                             + ("; " if mp and mt else "") + (f"{mt} test lines" if mt else "") + "</p>")
+                             + ("; " if mp and mt else "") + (n_lines(mt, "test ") if mt else "") + "</p>")
             # "Used" when a use hands it over (to a pool, `map`, a callback) rather than calling it
             used = "Callers" if not sites else "Used" if handed else "Read from" if reads else "Called from"
             change = ""
