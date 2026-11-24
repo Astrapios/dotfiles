@@ -97,6 +97,14 @@ class Platform:
 
     antenna: Antenna
     name: str = "p"
+
+    @property
+    def main_antenna(self) -> Antenna:
+        return self.antenna
+
+
+class Drone(Platform):
+    """A platform subclass: its main_antenna comes from Platform."""
 '''
 
 USERS = '''"""Callers of the antenna and the scripts."""
@@ -106,7 +114,7 @@ from app import krieger_a as ka
 from app.krieger_b import print_run_summary as prs
 from lib.antenna import Antenna as Ant
 from lib.antenna import Other
-from lib.platform import Platform
+from lib.platform import Drone, Platform
 
 
 def aliased():
@@ -135,6 +143,10 @@ def returned():
 
 def through_field(p: Platform):
     return p.antenna.peak_gain_dbi
+
+
+def through_property(d: Drone):
+    return d.main_antenna.peak_gain_dbi
 
 
 def read_property(ant: "Ant"):
@@ -262,7 +274,8 @@ def test_unresolved_receiver_is_possible_not_mixed_in(fx):
 def test_property_read_sites(fx):
     p = sym(fx, "lib/antenna.py", "Antenna.peak_gain_dbi")
     assert p["property"] is True
-    want = lines(USERS, "p.antenna.peak_gain_dbi") + lines(USERS, "return ant.peak_gain_dbi")
+    want = (lines(USERS, "p.antenna.peak_gain_dbi") + lines(USERS, "return ant.peak_gain_dbi")
+            + lines(USERS, "d.main_antenna.peak_gain_dbi"))
     assert sites(p) == sorted(("use/users.py", n) for n in want)
     assert {c["how"] for c in p["call_sites"]} == {"read"}
 
@@ -289,3 +302,8 @@ def test_card_and_pipeline_use_resolved_sites(mo, fx):
     prs = [li for li in items if li.startswith("<code>print_run_summary</code>: called from")]
     assert len(prs) == 1 and "use/users.py" in prs[0] and "krieger_" not in prs[0]
     assert any(li.startswith("<code>Antenna.peak_gain_dbi</code>: read from") and "use/users.py" in li for li in items)
+    # Antenna.gain's unresolved receiver (users.py `x.gain(2)`) is on its card, never in section 3
+    x_line = lines(USERS, "x.gain(2)")[0]
+    assert f"users.py#L{x_line}" not in parts["pipe_note"]
+    card_g = cards[cards.index('id="card-lib-antenna-py-antenna-gain"'):]
+    assert f"users.py#L{x_line}" in card_g[: card_g.index("</div>")]

@@ -559,9 +559,9 @@ class Code:
             node = self.def_node(ref)
             if isinstance(node, ast.ClassDef):
                 return self.member(ref, name, depth)
-            if node is not None:  # an attribute of a function object
+            if node is not None and not is_property(node):  # an attribute of a function object
                 return ("sym", ref[1], f"{ref[2]}.{name}")
-            # a field or a variable: its attribute belongs to the class of the value it holds
+            # a property, a field or a variable: its attribute belongs to the class of the value it holds
             t = self.value_type(ref, depth + 1)
             return self.member(t, name, depth + 1) if t is not None else None
         return ("ext", f"{ref[1]}.{name}")
@@ -1388,21 +1388,14 @@ def fragment_parts(fx: dict, boxes: list[dict], notes: dict, web: str) -> dict:
         idle = []
         for s in f["symbols"]:
             if s["status"] in ("added", "changed") and not s["qualname"].split(".")[-1].startswith("_"):
+                # resolved uses only: a possible one (unresolved receiver) stays on the symbol's card
                 outside = [c for c in s.get("call_sites", []) if not c["test"] and c["path"] != f["path"]]
-                maybe = [c for c in s.get("possible_sites", []) if not c["test"] and c["path"] != f["path"]]
-                verb = "read from" if s.get("property") else "called from"
                 if outside:
                     calls_line.append(
-                        f'<li><code>{esc(s["qualname"])}</code>: {verb} ' + ", ".join(
-                            f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}:{c["line"]}</a>'
-                            for c in outside[:3])
-                        + (f" and {len(outside) - 3} more" if len(outside) > 3 else "")
-                        + (f"; {len(maybe)} more possible (unresolved receiver)" if maybe else "") + "</li>")
-                elif maybe:
-                    calls_line.append(f'<li><code>{esc(s["qualname"])}</code>: possibly {verb} (unresolved receiver) '
-                                      + ", ".join(f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}'
-                                                  f':{c["line"]}</a>' for c in maybe[:3])
-                                      + (f" and {len(maybe) - 3} more" if len(maybe) > 3 else "") + "</li>")
+                        f'<li><code>{esc(s["qualname"])}</code>: {"read" if s.get("property") else "called"} from '
+                        + ", ".join(f'<a href="{esc(code_link(c["path"], c["line"]))}">{esc(c["path"])}:{c["line"]}</a>'
+                                    for c in outside[:3])
+                        + (f" and {len(outside) - 3} more" if len(outside) > 3 else "") + "</li>")
                 else:
                     idle.append(s["qualname"])
         if idle:
