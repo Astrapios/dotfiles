@@ -6,4 +6,4 @@
 
 @shared_rules.md
 
-@RTK.md
+@claude_rtk.md
