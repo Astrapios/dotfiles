@@ -275,3 +275,126 @@ def test_resolve_maps_each_kept_line_to_the_merged_file(mn):
     assert src_b == "x = 0\ny = 2\nz = 3\nw = 4\n" and map_b == [1, 5, 6, 8]
     diff3 = "<<<<<<< a\ny = 1\n||||||| base\ny = 0\n=======\ny = 2\n>>>>>>> b\n"
     assert mn.resolve(diff3, "A")[0] == "y = 1\n" and mn.resolve(diff3, "B")[0] == "y = 2\n"
+
+
+# ---------------------------------------------------------------- shape 3: a local moved into a helper (!812 x !788)
+
+EDGES_BASE = """import numpy as np
+
+
+def visible_edges(edges, normals, look):
+    edge_visible = (normals @ look) > 0
+    amplitudes = np.where(edge_visible, 1.0, 0.0)
+    scale = 2.0
+    offset = 0.5
+    amplitudes = amplitudes * scale + offset
+    return edges, amplitudes
+"""
+# side A (main's !788) keys a phase by the local mask, at the end of the body
+EDGES_A = EDGES_BASE.replace(
+    "    return edges, amplitudes\n",
+    "    phase_keys = np.flatnonzero(edge_visible)\n    return edges, amplitudes, phase_keys\n",
+)
+# side B (!812) moves the mask into a helper; the local edge_visible is gone
+EDGES_B = EDGES_BASE.replace(
+    "def visible_edges(edges, normals, look):\n    edge_visible = (normals @ look) > 0\n"
+    "    amplitudes = np.where(edge_visible, 1.0, 0.0)\n",
+    "def visible_edge_samples(normals, look):\n    return (normals @ look) > 0\n\n\n"
+    "def visible_edges(edges, normals, look):\n    amplitudes = np.where(visible_edge_samples(normals, look), 1.0, 0.0)\n",
+)
+EDGE_USE = "phase_keys = np.flatnonzero(edge_visible)"
+
+
+@pytest.fixture
+def edge_repo(tmp_path):
+    return make_repo(tmp_path, {"raytracer.py": EDGES_BASE}, {"raytracer.py": EDGES_A}, {"raytracer.py": EDGES_B})
+
+
+def new_findings(res):
+    return [(u["path"], u["line"], u["code"], u["message"]) for u in res["undefined"] if not u["pre_existing"]]
+
+
+def test_local_moved_into_a_helper_while_the_other_side_adds_a_use(mn, edge_repo, needs_linter):
+    repo = edge_repo
+    res = mn.check(str(repo), "a", "b", None)
+    assert res["conflicts"] == []
+    assert res["removed_names_still_used"] == []  # a function local is not a public name
+    line = merged_line(repo, res["merged_tree"], "raytracer.py", EDGE_USE)
+    assert new_findings(res) == [("raytracer.py", line, "F821", "Undefined name `edge_visible`")]
+    assert res["findings"] == 1
+
+
+def test_a_head_rebased_onto_the_target_still_shows_the_break(mn, edge_repo, needs_linter):
+    # after a rebase the target is an ancestor of the head: the merged tree is the head itself, so a break the
+    # rebase carried in is in head B alone and must still count (only the target's own findings are pre-existing)
+    repo = edge_repo
+    git(repo, "checkout", "-q", "-b", "b-rebased", "a")
+    merged = mn.check(str(repo), "a", "b", None)["merged_tree"]
+    write(repo, {"raytracer.py": git(repo, "cat-file", "-p", f"{merged}:raytracer.py")})
+    git(repo, "commit", "-q", "--no-verify", "-am", "b rebased onto a")
+    git(repo, "checkout", "-q", "main")
+
+    res = mn.check(str(repo), "a", "b-rebased", None)
+    assert res["base"] == git(repo, "rev-parse", "a").strip()
+    line = merged_line(repo, res["merged_tree"], "raytracer.py", EDGE_USE)
+    assert new_findings(res) == [("raytracer.py", line, "F821", "Undefined name `edge_visible`")]
+    (u,) = res["undefined"]
+    assert u["in_b"] is True  # the head alone has it too: the rebase already carries the break
+    assert res["findings"] == 1
+
+
+def test_merge_that_leaves_an_import_unused_or_a_function_defined_twice(mn, tmp_path, needs_linter):
+    base = (
+        "import math\n\n\ndef f(x):\n    return math.sqrt(x)\n\n\ndef g(x):\n    return math.floor(x)\n\n\n"
+        "def h(x):\n    return x\n"
+    )
+    helper = "\n\ndef clamp(x):\n    return max(0, x)\n"
+    # A stops using math in f and adds clamp below f; B drops g (the other math use) and adds clamp at the end
+    side_a = base.replace("return math.sqrt(x)", "return x ** 0.5").replace(
+        "return x ** 0.5\n", "return x ** 0.5\n" + helper
+    )
+    side_b = base.replace("\n\ndef g(x):\n    return math.floor(x)\n", "") + helper
+    repo = make_repo(tmp_path, {"m.py": base}, {"m.py": side_a}, {"m.py": side_b})
+    res = mn.check(str(repo), "a", "b", None)
+    assert res["conflicts"] == []
+    tree = res["merged_tree"]
+    codes = {(code, msg) for _, _, code, msg in new_findings(res)}
+    assert ("F401", "`math` imported but unused") in codes
+    assert any(code == "F811" and "clamp" in msg for code, msg in codes)
+    assert ("m.py", merged_line(repo, tree, "m.py", "import math"), "F401") in {
+        (p, ln, code) for p, ln, code, _ in new_findings(res)
+    }
+
+
+def test_findings_that_hold_whatever_the_hunk_resolution_are_listed_first(mn, capsys, tmp_path, needs_linter):
+    # f: a conflict on its first line; B's side defines w and B's return uses it, so only hunks from A break.
+    # g: conflict free; A adds a use of the local kept, B deletes it, so every resolution breaks.
+    base = (
+        "def f():\n    y = 0\n    p = 1\n    q = 2\n    r = 3\n    return y + p + q + r\n\n\n"
+        "def g(edges):\n    kept = 1\n    s = 1\n    t = 2\n    u = 3\n    return edges + s + t + u\n"
+    )
+    side_a = base.replace("    y = 0\n", "    y = 1\n").replace("return edges + s", "return edges + kept + s")
+    side_b = (
+        base.replace("    y = 0\n", "    w = 5\n").replace("return y + p", "return w + p").replace("    kept = 1\n", "")
+    )
+    repo = make_repo(tmp_path, {"m.py": base}, {"m.py": side_a}, {"m.py": side_b})
+    assert mn.main([str(repo), "a", "b", "--exit-zero"]) == 0
+    text = capsys.readouterr().out
+    first = text.index("Undefined name `kept`")
+    assert first < text.index("Undefined name `w`")
+    line_of = lambda i: text[text.rindex("\n", 0, i) : text.index("\n", i)]
+    assert "with either hunk resolution" in line_of(first)
+    assert "only with hunks taken from A" in line_of(text.index("Undefined name `w`"))
+
+
+def test_the_repos_own_pixi_ruff_comes_before_a_ruff_on_path(mn, tmp_path, monkeypatch):
+    on_path = tmp_path / "bin" / "ruff"
+    repo_ruff = tmp_path / "repo" / ".pixi" / "envs" / "lint" / "bin" / "ruff"
+    for p in (on_path, repo_ruff):
+        p.parent.mkdir(parents=True)
+        p.write_text("#!/bin/sh\n")
+        p.chmod(0o755)
+    monkeypatch.delenv("MERGE_NAMES_RUFF", raising=False)
+    monkeypatch.setenv("PATH", f"{on_path.parent}:/usr/bin:/bin")
+    assert mn.find_linter(str(tmp_path / "repo")) == [str(repo_ruff)]
+    assert mn.find_linter(str(tmp_path / "elsewhere")) == [str(on_path)]

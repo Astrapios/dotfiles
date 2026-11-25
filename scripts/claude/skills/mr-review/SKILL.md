@@ -40,7 +40,8 @@ Files in this skill (one level deep, read when the step says so):
 - `scripts/line_origin.py` - trace a line to the commit, session and words that chose it: fact log,
   blame, past a split's port commit to the dev line, transcripts by symbol and commit subject
 - `scripts/merge_names.py <repo> <head A> <head B>` - merge-order check between two MRs: conflicts,
-  names one side removed that the merged tree still uses, undefined names (tests in `tests/`)
+  names one side removed that the merged tree still uses, undefined, unused or redefined names
+  (ruff F821, F841, F811, F401) new against head A, the target (tests in `tests/`)
 - `evals/` - regression prompts built from past misses
 
 ## Steps
@@ -193,6 +194,10 @@ significant / bug), bugs distinguished from nits; **no file edits**. Calibrate s
   advice): run `python3 ~/.claude/skills/mr-review/scripts/merge_names.py <repo> <head A> <head B>`
   on the two heads; never rely on `git merge-tree` conflicts alone. It reported one conflict where
   the merge also left `reuse_mesh` undefined and an old keyword in five calls (Nov 20).
+  After a rebase, run it as `<repo> origin/main <rebased head>` too: only head A's own findings are
+  pre-existing, so a break the rebase carried in still shows (the old A-or-B baseline hid
+  `edge_visible` on the rebased !812 head, Nov 25). Read section (c) from the top: findings that
+  hold with either hunk resolution come first.
 - **Dead-parameter sweep**: every parameter of every touched signature is still READ in the
   new body (a culled loop that stops reading `n_targets` leaves a live arg feeding a dead param).
 - **Load-bearing-op sweep**: for each defensive op near the hunks (clip, clamp, guard, re-sort,

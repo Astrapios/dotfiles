@@ -13,15 +13,20 @@ moved; git only adds the merged objects to the object store) and reports:
   (b) every public name (function, class, method, attribute, keyword argument) that one side removed or renamed
       and that the merged tree still references, in or outside the conflicted hunks, on lines the removing side
       does not have itself;
-  (c) undefined names and unused locals (ruff F821, F841) in the merged versions of the .py files either side
-      changed; those already present in head A or head B are listed as pre-existing and do not count.
+  (c) undefined names, unused locals, redefined names and unused imports (ruff F821, F841, F811, F401) in the
+      merged versions of the .py files either side changed. Head A is the target (main): a finding head A already
+      has, on a line with the same text, is pre-existing and does not count. One head B already has still counts,
+      since merging B brings it in; it is tagged "also in B" (after a rebase onto A, A is an ancestor of B, the
+      merged tree is B itself, and this is the only way the check can see a break the rebase carried in).
+      Findings that hold whatever way the conflict hunks are resolved are listed first.
 
 A conflicted file is analyzed twice, once with every hunk resolved to A's text and once to B's, and line numbers
 are mapped back to the merged file with its markers.
 
 Exit status: 0 clean, 1 findings (0 with --exit-zero), 2 usage or git error. --out DIR also writes
 merge_names.txt and merge_names.json there.
-Ruff comes from $MERGE_NAMES_RUFF, PATH, <repo>/.pixi/envs/*/bin/ruff or `uvx ruff`; pyflakes is the fallback.
+Ruff comes from $MERGE_NAMES_RUFF, the repo's pixi ruff (<repo>/.pixi/envs/{lint,dev,default,test}/bin/ruff, else
+`pixi run --manifest-path <repo> -e lint ruff`), PATH or `uvx ruff`; pyflakes is the fallback.
 """
 
 from __future__ import annotations
@@ -409,17 +414,43 @@ def side_lines(repo: str, rev: str, path: str, cache: dict) -> set[str]:
 # ---------------------------------------------------------------- ruff
 
 
+LINT_CODES = "F821,F841,F811,F401"
+PYFLAKES_CODES = {
+    "undefined name": "F821",
+    "assigned to but never used": "F841",
+    "redefinition of unused": "F811",
+    "imported but unused": "F401",
+}
+
+
+def pixi_manifest(repo: str) -> Path | None:
+    root = Path(repo)
+    if (root / "pixi.toml").exists():
+        return root / "pixi.toml"
+    pyproject = root / "pyproject.toml"
+    if pyproject.exists() and "[tool.pixi" in pyproject.read_text(errors="replace"):
+        return pyproject
+    return None
+
+
 def find_linter(repo: str) -> list[str] | None:
+    """The repo's own ruff first (the version its lint runs), then any other ruff, then pyflakes."""
     env = os.environ.get("MERGE_NAMES_RUFF")
     if env:
         return [env]
-    found = shutil.which("ruff")
-    if found:
-        return [found]
     for env_name in ("lint", "dev", "default", "test"):
         p = Path(repo) / ".pixi" / "envs" / env_name / "bin" / "ruff"
         if p.exists():
             return [str(p)]
+    manifest = pixi_manifest(repo)
+    if manifest is not None and shutil.which("pixi"):
+        cmd = ["pixi", "run", "--manifest-path", str(manifest), "-e", "lint", "ruff"]
+        probe = subprocess.run([*cmd, "--version"], check=False, capture_output=True)
+        if probe.returncode == 0:
+            return cmd
+    found = shutil.which("ruff")
+    if found:
+        return [found]
     if shutil.which("uvx"):
         probe = subprocess.run(["uvx", "ruff", "--version"], check=False, capture_output=True)
         if probe.returncode == 0:
@@ -431,7 +462,7 @@ def find_linter(repo: str) -> list[str] | None:
 
 
 def lint(linter: list[str], root: Path) -> list[tuple[str, int, str, str]]:
-    """(relative path, line, code, message) of every F821 / F841 finding under root."""
+    """(relative path, line, code, message) of every LINT_CODES finding under root."""
     if not any(root.rglob("*.py")):
         return []
     out = []
@@ -444,11 +475,12 @@ def lint(linter: list[str], root: Path) -> list[tuple[str, int, str, str]]:
             if not m:
                 continue
             msg = m.group(3)
-            code = "F821" if "undefined name" in msg else "F841" if "assigned to but never used" in msg else None
+            code = next((c for k, c in PYFLAKES_CODES.items() if k in msg), None)
             if code:
                 out.append((str(Path(m.group(1)).relative_to(root)), int(m.group(2)), code, msg))
         return out
-    cmd = [*linter, "check", "--isolated", "--no-cache", "--select", "F821,F841", "--output-format", "json", str(root)]
+    cmd = [*linter, "check", "--isolated", "--no-cache", "--no-fix", "--select", LINT_CODES]
+    cmd += ["--output-format", "json", str(root)]
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     try:
         items = json.loads(proc.stdout or "[]")
@@ -589,7 +621,7 @@ def check(repo: str, head_a: str, head_b: str, base_ref: str | None) -> dict:
     stale = [g for g in groups if g.refs]
     stale.sort(key=lambda g: (g.side, g.name, g.what))
 
-    # (c) undefined names and unused locals in the merged changed files
+    # (c) undefined names, unused locals, redefinitions and unused imports in the merged changed files
     linter = find_linter(repo)
     undefined, lint_note = [], ""
     py_merged = sorted({p for s in changed.values() for p in s[1]})
@@ -599,28 +631,41 @@ def check(repo: str, head_a: str, head_b: str, base_ref: str | None) -> dict:
         with tempfile.TemporaryDirectory(prefix="merge_names_") as tmp:
             roots = {r: Path(tmp) / r for r in ("A", "B", "merged A", "merged B")}
             maps: dict[tuple[str, str], list[int]] = {}
+            sources: dict[tuple[str, str], list[str]] = {}
+
+            def put(root: str, path: str, src: str) -> None:
+                (roots[root] / path).parent.mkdir(parents=True, exist_ok=True)
+                (roots[root] / path).write_text(src)
+                sources[(root, path)] = src.splitlines()
+
             for p in py_merged:
                 for s in ("A", "B"):
                     src = show(repo, sha[s], p)
                     if src is not None:
-                        (roots[s] / p).parent.mkdir(parents=True, exist_ok=True)
-                        (roots[s] / p).write_text(src)
-                vs = merged_variants(p)
-                for label, src, linemap in vs:
+                        put(s, p, src)
+                for label, src, linemap in merged_variants(p):
                     which = "merged B" if label.endswith("B") else "merged A"
-                    (roots[which] / p).parent.mkdir(parents=True, exist_ok=True)
-                    (roots[which] / p).write_text(src)
+                    put(which, p, src)
                     maps[(which, p)] = linemap
-            pre = {(p, code, msg) for s in ("A", "B") for p, _, code, msg in lint(linter, roots[s])}
-            hits: dict[tuple[str, int, str, str], list[str]] = {}
+
+            def keyed(root: str) -> list[tuple[str, int, str, str, str]]:
+                """Findings with the stripped text of their line, which survives line shifts between trees."""
+                out = []
+                for p, row, code, msg in lint(linter, roots[root]):
+                    lines = sources.get((root, p), [])
+                    out.append((p, row, code, msg, lines[row - 1].strip() if 0 < row <= len(lines) else ""))
+                return out
+
+            in_head = {s: {(p, code, msg, text) for p, _, code, msg, text in keyed(s)} for s in ("A", "B")}
+            hits: dict[tuple[str, int, str, str], tuple[list[str], str]] = {}
             for which in ("merged A", "merged B"):
-                for p, row, code, msg in lint(linter, roots[which]):
+                for p, row, code, msg, text in keyed(which):
                     linemap = maps.get((which, p), [])
                     mline = linemap[row - 1] if 0 < row <= len(linemap) else row
-                    sides = hits.setdefault((p, mline, code, msg), [])
+                    sides, _ = hits.setdefault((p, mline, code, msg), ([], text))
                     if which[-1] not in sides:
                         sides.append(which[-1])
-            for (p, mline, code, msg), sides in hits.items():
+            for (p, mline, code, msg), (sides, text) in hits.items():
                 variant = ""
                 if p in conflicted:
                     variant = (
@@ -633,10 +678,12 @@ def check(repo: str, head_a: str, head_b: str, base_ref: str | None) -> dict:
                         "code": code,
                         "message": msg,
                         "variant": variant,
-                        "pre_existing": (p, code, msg) in pre,
+                        "pre_existing": (p, code, msg, text) in in_head["A"],
+                        "in_b": (p, code, msg, text) in in_head["B"],
                     }
                 )
-        undefined.sort(key=lambda u: (u["pre_existing"], u["path"], u["line"]))
+        # a finding that depends on how a conflict is resolved is listed after the ones that hold either way
+        undefined.sort(key=lambda u: (u["pre_existing"], u["variant"].startswith("only"), u["path"], u["line"]))
         lint_note = f"{' '.join(linter)} on {len(py_merged)} files"
 
     new_undefined = [u for u in undefined if not u["pre_existing"]]
@@ -686,10 +733,19 @@ def render(res: dict) -> str:
     und = res["undefined"]
     new = [u for u in und if not u["pre_existing"]]
     n_pre = len(und) - len(new)
-    out += ["", f"(c) undefined names / unused locals in the merged files: {len(new)} new, {n_pre} pre-existing"]
-    out[-1] += f" ({res['lint']})"
+    out += [
+        "",
+        (
+            f"(c) undefined, unused or redefined names in the merged files: {len(new)} new, {n_pre} already in A"
+            f" ({res['lint']})"
+        ),
+    ]
     for u in und:
-        tags = [t for t in (u["variant"], "pre-existing in A or B" if u["pre_existing"] else "") if t]
+        flags = (
+            "also in B" if u.get("in_b") and not u["pre_existing"] else "",
+            "already in A" if u["pre_existing"] else "",
+        )
+        tags = [t for t in (u["variant"], *flags) if t]
         tag = f"  [{'; '.join(tags)}]" if tags else ""
         out.append(f"  {u['path']}:{u['line']}  {u['code']} {u['message']}{tag}")
     verdict = "clean" if res["findings"] == 0 else f"{res['findings']} findings"
