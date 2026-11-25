@@ -22,7 +22,8 @@ keep scripts out: `check --review` refuses a page with a script.
 
 ## Page structure (adapt to what the round did)
 
-- Header: MR number, branch, date (Pacific, 12-hour), reviewed and fix commit SHAs, tier.
+- Header: MR number, branch, date (Pacific, 12-hour), reviewed and fix commit SHAs, tier. The MR number is its
+  GitLab link with "Open in MR app" beside it: `python3 $S/app_link.py mr <iid> --html` prints the pair.
 - "What this MR does": the first block under the title, ahead of the verdict: the MR
   architecture overview (`references/mr-overview.md`), put there by `mr_overview.py embed <dir>
   --head <sha> --into <briefing.html>`. It opens with two or three plain sentences on what the MR
@@ -44,6 +45,17 @@ keep scripts out: `check --review` refuses a page with a script.
 - If fixes were applied: test and lint results, commits, and (if restacked) what was ported
   into which upstack MR, including merge traps caught.
 - "Where things stand": what is pending on the user (submit draft replies), deferred questions.
+
+## Links to the MR review app
+
+Every MR the page names gets "Open in MR app" beside its GitLab link, every thread item "Open thread in MR app"
+(`app_link.py thread <iid> <discussion id> --html`), and every draft in "Drafts posted" its link (`app_link.py draft
+<iid> <id> [--reply-to <discussion id>] --html`: a new thread's own Draft row, a reply's thread). Another project:
+`--project product/mti`. Links open a new tab, so they work in Astra View's document frame and on a phone. After
+writing the page, `python3 $S/app_link.py stamp <page> --iid <iid> --drafts drafts.json --threads threads.json`
+adds whatever is missing (a GitLab MR or issue link's partner, the first "Draft <id>" of each draft as its link,
+a thread's link beside each GitLab note link), and `app_link.py check` with the same options must say `ok`.
+A draft's app link opens it only while it is pending; once published it is a thread like any other.
 
 ## Figures first
 

@@ -25,6 +25,9 @@ mr_context.py (`review add`, `check --review`); see references/thread-explanatio
 
 A finding (the `findings` list) may also carry where it sits: severity, path, line_from, line.
 
+A review page made from APP_LINKS_SINCE on links the MR in the MR review app beside each GitLab MR link, and each
+listed draft at its spot there (app_link.py); `add_review` adds what the page lacks to its copy.
+
 Standard library only.
 """
 
@@ -36,8 +39,12 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import app_link as AL  # noqa: E402
 
 SCHEMA = 2
 KINDS = ("new", "rereview", "received-reply", "self-review")
@@ -54,6 +61,8 @@ DRAFT_KEYS = {"id": int, "kind": str, "finding": (str, NONE), "discussion_id": (
               "line": (int, NONE), "title": str, "posted_sha256": (str, NONE)}
 DRAFT_OPTIONAL = {"line_from": (int, NONE), "posted_text": str}
 FINDING_LOCATION = {"severity": str, "path": (str, NONE), "line_from": (int, NONE), "line": (int, NONE)}
+# (reviews made from here on must carry the MR review app's links; earlier pages predate app_link.py)
+APP_LINKS_SINCE = dt.datetime.fromisoformat("2026-11-25T12:00:00-08:00")
 LINKED = re.compile(r"""\b(?:src|href)\s*=\s*["']([^"'#?]+)""", re.IGNORECASE)
 
 
@@ -98,7 +107,16 @@ def _types(tag: str, e: dict, keys: dict, out: list[str], required: bool = True)
     return ok
 
 
-def _page_problems(tag: str, d: Path, r: dict, out: list[str]) -> None:
+def links_due(made_at: str) -> bool:
+    """Whether a page made at `made_at` must carry the app links (made from APP_LINKS_SINCE on)."""
+    try:
+        return dt.datetime.fromisoformat(made_at) >= APP_LINKS_SINCE
+    except (TypeError, ValueError):
+        return True
+
+
+def _page_problems(tag: str, d: Path, r: dict, out: list[str], project: str | None = None,
+                   iid: int | None = None) -> None:
     page = r["page"]
     if not page.startswith("reviews/") or ".." in Path(page).parts or Path(page).is_absolute():
         out.append(f"{tag}: page must be under reviews/ ({page})")
@@ -107,12 +125,17 @@ def _page_problems(tag: str, d: Path, r: dict, out: list[str]) -> None:
     if not f.is_file():
         out.append(f"{tag}: page {page} missing")
         return
-    if "<script" in f.read_text(errors="replace").lower():
+    text = f.read_text(errors="replace")
+    if "<script" in text.lower():
         out.append(f"{tag}: page has a script ({page})")
+    if isinstance(iid, int) and links_due(r["made_at"]):
+        drafts = [x for x in r["drafts"] if isinstance(x, dict) and isinstance(x.get("id"), int)]
+        out += [f"{tag}: {x}" for x in AL.problems(text, drafts=drafts, iid=iid, project=project or AL.PROJECT)]
 
 
-def review_problems(d: Path, r: dict, i: int) -> list[str]:
-    """Every way review `r` (the i-th) breaks the schema; its page must exist with no script."""
+def review_problems(d: Path, r: dict, i: int, project: str | None = None, iid: int | None = None) -> list[str]:
+    """Every way review `r` (the i-th) breaks the schema; its page must exist with no script, and (with the MR's
+    `iid`, for a review made from APP_LINKS_SINCE on) carry its app links."""
     out: list[str] = []
     tag = f"review {i} ({r.get('task', '?')})"
     if not _types(tag, r, REVIEW_KEYS, out):
@@ -137,7 +160,7 @@ def review_problems(d: Path, r: dict, i: int) -> list[str]:
     for p, s in r["file_sigs"].items():
         if not (isinstance(s, str) and re.match(r"^[0-9a-f]{16}$", s)):
             out.append(f"{tag}: file_sigs[{p}] is not 16 hex")
-    _page_problems(tag, d, r, out)
+    _page_problems(tag, d, r, out, project, iid)
     seen = set()
     for j, x in enumerate(r["drafts"]):
         dtag = f"{tag} draft {x.get('id', j) if isinstance(x, dict) else j}"
@@ -180,7 +203,8 @@ def problems(d: Path, idx: dict, task: str | None = None) -> list[str]:
     if reviews and idx.get("schema") != SCHEMA:
         out.append(f"reviews need schema {SCHEMA}, index says {idx.get('schema')!r}")
     for i, r in enumerate(reviews):
-        out += review_problems(d, r, i) if isinstance(r, dict) else [f"review {i}: not an object"]
+        out += (review_problems(d, r, i, idx.get("project"), idx.get("mr_iid")) if isinstance(r, dict)
+                else [f"review {i}: not an object"])
     if task and not any(isinstance(r, dict) and r.get("task") == task for r in reviews):
         out.append(f"no review by {task} in index.json")
     for i, f in enumerate(idx.get("findings", []) if isinstance(idx.get("findings"), list) else []):
@@ -236,6 +260,9 @@ def add_review(
 ) -> dict:
     """Copy the page into reviews/<head12>-<task>/ and put the review into `idx` (saved by the caller).
 
+    The copy gets the MR review app links the page lacks (app_link.stamp: beside each GitLab MR link, on the first
+    "draft <id>" of each draft, and an "Open in MR app" line under the title when it has none).
+
     A review by the same task at the same head is replaced; the list stays in time order.
 
     Returns:
@@ -243,6 +270,13 @@ def add_review(
     """
     folder = f"reviews/{head[:12]}-{task.replace('/', '_')}"
     size = copy_page(Path(page), d / folder)
+    if isinstance(idx.get("mr_iid"), int):   # (the copy gets the app links the page lacks)
+        f = d / folder / "index.html"
+        text = f.read_text()
+        new = AL.stamp(text, drafts=drafts, iid=idx["mr_iid"], project=idx.get("project") or AL.PROJECT)
+        if new != text:
+            f.write_text(new)
+            size = f.stat().st_size
     made = made_at or dt.datetime.now().astimezone().isoformat(timespec="seconds")
     entry = {"task": task, "kind": kind, "tier": tier, "head_sha": head, "made_at": made, "state": state,
              "verdict": verdict, "page": f"{folder}/index.html", "page_bytes": size, "record": record,

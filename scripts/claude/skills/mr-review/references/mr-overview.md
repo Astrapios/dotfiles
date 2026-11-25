@@ -80,6 +80,10 @@ All standard library: plain `python3` runs them. `S=~/.claude/skills/mr-review/s
 6. A review page: `python3 $S/mr_overview.py embed $DIR --head <sha> --into <briefing.html>` puts the overview
    under the page's `<h1>` (rerun replaces it).
 
+The overview's header links the MR on GitLab and in the MR review app ("Open in MR app", `scripts/app_link.py`)
+when the MR's number is known: `--iid`, else the output folder's name (`outputs/mr_context/<iid>`), else its
+`index.json`. A scratch folder named otherwise takes `--iid <n>`.
+
 `facts` / `build` / `check` are the three steps of `make` on their own, for a rebuild from saved facts.
 
 ## The notes file

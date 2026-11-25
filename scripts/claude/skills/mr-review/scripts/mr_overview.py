@@ -41,6 +41,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import app_link as AL  # noqa: E402
+
 HOST = "gitlab.gc.arraylabs.net"
 esc = html.escape
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -1591,7 +1594,8 @@ CSS = """
 .mro{background:#fff;color:#16202b;border:1px solid #dde2e8;border-radius:12px;padding:12px 14px;margin:0 0 14px;
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:left}
 .mro *{box-sizing:border-box}.mro h2{font-size:1.05rem;margin:0 0 6px;color:#16202b}
-.mro a{color:#4338ca}.mro p,.mro li,.mro td,.mro th,.mro summary,.mro b{color:#16202b}
+.mro a{color:#4338ca}.mro .mro-links{margin:0 0 8px;font-size:.9rem}.mro .mro-links a{margin-right:10px}
+.mro p,.mro li,.mro td,.mro th,.mro summary,.mro b{color:#16202b}
 .mro p,.mro li{overflow-wrap:anywhere}
 .mro code{font-family:ui-monospace,"SF Mono","IBM Plex Mono",Menlo,Consolas,monospace;font-size:.88em;background:#eef1f5;
 color:#16202b;padding:0 4px;border-radius:4px;overflow-wrap:anywhere}
@@ -1641,7 +1645,8 @@ def tags_legend() -> str:
 def fragment(fx: dict, parts: dict) -> str:
     """The overview section, styles inside, between the embed markers."""
     return (f'{START}<section class="mro" id="mr-overview"><style>{CSS}</style>'
-            f'<h2>What this MR does <span class="pill neut">at {fx["head"][:9]}</span></h2>{tags_legend()}{parts["what"]}'
+            f'<h2>What this MR does <span class="pill neut">at {fx["head"][:9]}</span></h2>{parts.get("links", "")}'
+            f'{tags_legend()}{parts["what"]}'
             f'<details class="lvl" open><summary><span class="n">1</span>Repo map</summary>{LEGEND}'
             f'<div class="ov-grid"><div>{parts["map"]}</div>'
             f'<div><details class="lvl" open><summary><span class="n">2</span>Data flow</summary>{parts["flow"]}</details>'
@@ -1716,15 +1721,35 @@ def mini_name(head: str, disc: str) -> str:
     return f"overview-{head[:12]}-mini-{disc[:8]}.svg"
 
 
+def mr_iid_of(out: Path, iid: int | None = None) -> int | None:
+    """The MR's number: `iid`, else the output folder's name (outputs/mr_context/<iid>), else its index.json's."""
+    if iid is not None:
+        return iid
+    if out.name.isdigit():
+        return int(out.name)
+    try:
+        n = json.loads((out / "index.json").read_text()).get("mr_iid")
+    except (OSError, ValueError):
+        return None
+    return n if isinstance(n, int) else None
+
+
 def build(out: Path, fx: dict, notes: dict, threads: list[dict] | None, repo: str | None = None,
-          project: str = "product/site3d") -> dict:
-    """Write the overview files for `fx` and `notes` into `out`; return the record written as the JSON."""
+          project: str = "product/site3d", iid: int | None = None) -> dict:
+    """Write the overview files for `fx` and `notes` into `out`; return the record written as the JSON.
+
+    The page's header links the MR on GitLab and in the MR review app (app_link.py) when its number is known
+    (`iid`, or the folder's, see `mr_iid_of`).
+    """
     out.mkdir(parents=True, exist_ok=True)
     repo = repo or fx["repo"]
     boxes = boxes_of(fx)
     probs, warn = check_notes(notes, boxes, fx)
     anchors = {t["id"]: anchor(repo, t, boxes) for t in threads or []}
     parts = fragment_parts(fx, boxes, notes, f"https://{HOST}/{project}")
+    iid = mr_iid_of(out, iid)
+    if iid is not None:
+        parts["links"] = f'<p class="mro-links">{AL.mr_html(iid, project)}</p>'
     n = names(fx["head"])
     (out / n["page"]).write_text(page(fx, parts, f"What this MR does, at {fx['head'][:9]}"))
     (out / n["map"]).write_text(parts["map"])
@@ -1825,6 +1850,7 @@ def main() -> int:
     p.add_argument("--threads", default=None, help="mr_discussions.py --all --json output")
     p.add_argument("--repo", default=None, help="the checkout the facts came from (default: the one they name)")
     p.add_argument("--project", default="product/site3d")
+    p.add_argument("--iid", type=int, default=None, help="the MR's number (default: the folder's name)")
     p = sub.add_parser("check", help="the note checks and the drawing safety checks; exit 1 on any problem")
     p.add_argument("dir")
     p.add_argument("--head", required=True)
@@ -1835,6 +1861,7 @@ def main() -> int:
     p.add_argument("--notes", required=True)
     p.add_argument("--threads", default=None)
     p.add_argument("--project", default="product/site3d")
+    p.add_argument("--iid", type=int, default=None, help="the MR's number (default: the --out folder's name)")
     p.add_argument("--out", required=True, help="output folder (the MR's mr_context folder, or a scratch one)")
     p = sub.add_parser("embed", help="put the overview under the first <h1> of a page")
     p.add_argument("dir")
@@ -1848,7 +1875,7 @@ def main() -> int:
         return 0
     if a.cmd == "build":
         fx = _load_json(a.facts)
-        rec = build(Path(a.dir), fx, _load_json(a.notes), _load_json(a.threads), a.repo, a.project)
+        rec = build(Path(a.dir), fx, _load_json(a.notes), _load_json(a.threads), a.repo, a.project, a.iid)
         print(f"{a.dir}: {len(rec['boxes'])} boxes, {len(rec['anchors'])} threads")
         return 0
     if a.cmd == "check":
@@ -1856,7 +1883,7 @@ def main() -> int:
         return report(probs, warn, f"ok: overview at {a.head[:9]}")
     if a.cmd == "make":
         fx = facts(a.repo, a.base, a.head)
-        rec = build(Path(a.out), fx, _load_json(a.notes), _load_json(a.threads), a.repo, a.project)
+        rec = build(Path(a.out), fx, _load_json(a.notes), _load_json(a.threads), a.repo, a.project, a.iid)
         print(f"{len(fx['files'])} files, {len(rec['boxes'])} boxes")
         for disc, x in rec["anchors"].items():
             print(f"thread {disc[:8]}: {x['box']} ({x['how']})")

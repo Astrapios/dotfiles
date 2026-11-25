@@ -37,6 +37,10 @@ Files in this skill (one level deep, read when the step says so):
 - `scripts/mr_overview.py` - `make` / `check` / `embed` for the overview (facts from git and `ast`,
   drawings as SVG, a page with no script); `mr_context.py overview add` lists it, `check --overview`
   verifies it
+- `scripts/app_link.py` - the MR review app's address (https://array.hornbill-gray.ts.net/apps/mr-review/) of an
+  MR, a thread, a draft or an issue (`mr|thread|draft|issue <iid> ... [--html|--md]`, product/site3d by default,
+  `--project product/mti`); `stamp PAGE` puts "Open in MR app" beside every GitLab MR or issue link and links each
+  "Draft <id>" (`--drafts`) and each GitLab note link of a thread (`--threads`); `check PAGE` lists what is missing
 - `scripts/line_origin.py` - trace a line to the commit, session and words that chose it: fact log,
   blame, past a split's port commit to the dev line, transcripts by symbol and commit subject
 - `scripts/merge_names.py <repo> <head A> <head B>` - merge-order check between two MRs: conflicts,
@@ -256,6 +260,12 @@ both open with "What this MR does"; after it, the chat summary is one line per f
   quoted in full, then that thread's explanation (`references/thread-explanation.md`), then the
   draft reply quoted in full (or "no reply drafted" and why). Each finding also carries its
   explanation under its card. Full text on the page, not only in the review file.
+- **Links to the MR review app** on every page the review writes (Jisu, Nov 25: "mr review reports and etc should
+  have links to mr app"): each MR's GitLab link has "Open in MR app" beside it, each thread item "Open thread in MR
+  app" and each draft its own app link, all from `scripts/app_link.py` (`--html` prints them). Before sending, run
+  `app_link.py stamp <briefing.html> --iid <iid> --drafts drafts.json --threads threads.json`, which adds what is
+  missing, and `app_link.py check` with the same options must say `ok`. The overview's header carries the MR's
+  pair on its own, and `mr_context.py add` puts the thread's or the draft's link on each explanation block.
 
 ### 8. Persist the review state (ALWAYS, before finishing)
 
@@ -278,7 +288,9 @@ Review tab (`references/thread-explanation.md`, "The review itself"): post every
 --head <sha> --state <request-changes|ready|comments-only> --verdict "<one line>" --page
 <briefing.html> --record docs/branches/<branch>-review.md --drafts drafts.json`, and verify with
 `mr_context.py check <dir> --review <T-x> --overview <head>` (the review listed, the overview at the
-reviewed head with its files). Never edit `index.json` by hand.
+reviewed head with its files, the page's app links to the MR and to each listed draft). `review add` stamps the copy
+it makes with the app links the page lacks; a draft the page never names ("Draft <id>") is refused by the check, so
+list each draft on the page. Never edit `index.json` by hand.
 
 ### 9. Record review misses (whenever one surfaces)
 

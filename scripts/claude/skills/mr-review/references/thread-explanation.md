@@ -23,6 +23,11 @@ write the same files.
 
 ## What an explanation holds (in order)
 
+0. **In the app**: `mr_context.py add` puts the thread's "Open thread in MR app" link (a finding's
+   "Open draft <id> in MR app", with `--draft-note`) under the block's first heading, and "Open in MR app"
+   beside each GitLab MR link in it (`scripts/app_link.py`); a block made from Nov 25, 2026, 12 PM PST on
+   without them fails `check`. Write them in yourself with `app_link.py thread <iid> <discussion id> --html`
+   when you want them elsewhere in the block.
 1. **Where**: opens with the thread's **mini map** and a link back to the overview
    (`references/mr-overview.md`): inline `overview-<head12>-mini-<disc8>.svg` from the MR's
    `outputs/mr_context/<iid>/` folder (the repo map cut to the thread's file, its box outlined; the

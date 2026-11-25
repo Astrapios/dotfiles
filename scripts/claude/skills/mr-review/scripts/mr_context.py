@@ -30,6 +30,10 @@ Usage:
     mr_context.py promises DIR [--md]   the queued fixes the drafts promise ("I'll ...")
     mr_context.py text DIR/<discussion_id>.html   the block's words, figures listed by caption (cold read)
 
+`add` puts the MR review app link on the block (app_link.py): a thread's "Open thread in MR app", a finding's
+"Open draft <id> in MR app" (with --draft-note), and "Open in MR app" beside each GitLab MR link; `check` refuses a
+block made from mr_review_index.APP_LINKS_SINCE on that lacks them.
+
 Schema 2 adds last_note_id, anchor_status, evidence and promises to an entry, and the review half
 (mr_review_index.py): `reviews` (one per review round: its page, verdict and drafts) and each finding's
 severity, path and lines. Schema 1 entries (written before Nov 20 2026) still pass; their missing keys
@@ -50,6 +54,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import app_link as AL  # noqa: E402
 import mr_overview as MO  # noqa: E402
 import mr_review_index as RI  # noqa: E402
 
@@ -273,12 +278,50 @@ def _check_evidence(tag: str, e: dict, mr_heads: dict[int, str], out: list[str])
             out.append(f"{tag}: evidence from !{ev['mr']} at {ev['sha'][:9]}, its head is now {now[:9]}")
 
 
-def _check_block(tag: str, e: dict, d: Path, out: list[str], warn: list[str]) -> None:
+def block_links(e: dict, project: str, iid: int) -> list[str]:
+    """The app links block entry `e` must carry: its thread's, or its finding's draft's (when it has one)."""
+    if e.get("discussion_id"):
+        return [AL.thread(iid, e["discussion_id"], project)]
+    if isinstance(e.get("draft_note_id"), int):
+        return [AL.draft(iid, e["draft_note_id"], None, project)]
+    return []
+
+
+def link_block(blk: Path, e: dict, project: str, iid: int) -> int:
+    """Put the app links block entry `e` lacks into its file (idempotent); how many were added."""
+    txt = blk.read_text()
+    new = AL.stamp(txt, project=project)
+    have = {x["href"] for x in AL.anchors(new) if x["app"]}
+    for href in block_links(e, project, iid):
+        if href not in have:
+            text = "Open thread in MR app" if e.get("discussion_id") else f"Open draft {e['draft_note_id']} in MR app"
+            new = AL.put_under_heading(new, f'<p class="{AL.CLASS}-links">{AL.a(href, text)}</p>')
+    if new != txt:
+        blk.write_text(new)
+    return len(AL.anchors(new)) - len(AL.anchors(txt))
+
+
+def _link_problems(tag: str, e: dict, txt: str, links: tuple[str, int] | None, out: list[str],
+                   warn: list[str]) -> None:
+    if not links or not isinstance(links[1], int):
+        return
+    project, iid = links
+    have = {x["href"] for x in AL.anchors(txt) if x["app"]}
+    miss = [f"no app link {h}" for h in block_links(e, project, iid) if h not in have]
+    miss += AL.problems(txt, project=project)
+    due = RI.links_due(e.get("made_at", ""))
+    for m in miss:
+        (out if due else warn).append(f"{tag}: {m}" + ("" if due else " (made before app links; rerun add)"))
+
+
+def _check_block(tag: str, e: dict, d: Path, out: list[str], warn: list[str],
+                 links: tuple[str, int] | None = None) -> None:
     blk = d / e["block"]
     if not blk.exists():
         out.append(f"{tag}: block file {e['block']} missing")
         return
     txt = blk.read_text()
+    _link_problems(tag, e, txt, links, out, warn)
     if "<script" in txt.lower():
         out.append(f"{tag}: block has a script")
     if re.search(r'<img[^>]+src="(?!data:)', txt):
@@ -403,7 +446,7 @@ def audit(
                     ids = ", ".join(str(n) for n in newer)
                     out.append(f"{tag}: stale: {len(newer)} newer {word} ({ids}) since {e['last_note_id']}")
         if e["block"].endswith(".html"):
-            _check_block(tag, e, d, out, warn)
+            _check_block(tag, e, d, out, warn, (idx.get("project"), idx.get("mr_iid")))
     for i, f in enumerate(findings):
         tag = f"finding {i} ({f.get('finding', '?')})"
         if not _check_types(tag, f, FINDING_KEYS, out):
@@ -421,7 +464,7 @@ def audit(
         _check_common(tag, f, d, head, out)
         if isinstance(f.get("evidence"), list):
             _check_evidence(tag, f, mr_heads, out)
-        _check_block(tag, f, d, out, warn)
+        _check_block(tag, f, d, out, warn, (idx.get("project"), idx.get("mr_iid")))
     return out, warn
 
 
@@ -539,11 +582,14 @@ def cmd_add(a: argparse.Namespace) -> int:
         entry = {"finding": a.finding, **entry, "draft_note_id": a.draft_note}
     idx[lst] = [e for e in idx[lst] if e.get("discussion_id", e.get("finding")) != key]
     idx[lst].append(entry)
+    added = link_block(blk, entry, idx["project"], idx["mr_iid"]) if blk.exists() and isinstance(
+        idx.get("mr_iid"), int) else 0
     if lst == "findings":
         idx["findings"].sort(key=lambda e: e["made_at"])
     _save(d, idx)
     q = sum(p["status"] == "queued" for p in entry["promises"])
-    print(f"index.json: {len(idx['entries'])} entries ({key[:8]} {a.tier}), {q} promise(s) queued")
+    print(f"index.json: {len(idx['entries'])} entries ({key[:8]} {a.tier}), {q} promise(s) queued"
+          + (f", {added} app link(s) added to {blk.name}" if added else ""))
     return 0
 
 
